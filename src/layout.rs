@@ -47,11 +47,19 @@ pub fn section_for_char(job: &LayoutJob, char_index: u32) -> Option<u32> {
 
 /// Apply inline code background and text color to a [`TextFormat`].
 #[inline]
-#[allow(clippy::useless_conversion)]
 pub fn apply_inline_code_bg(format: &mut TextFormat, dark_mode: bool, inline_style: &InlineCodeStyle) {
   format.color = inline_style.color(dark_mode);
   format.background = inline_style.background(dark_mode);
-  format.expand_bg = inline_style.expand_bg.into();
+  #[cfg(feature = "membrane")]
+  {
+    format.expand_bg = epaint::Vec2::new(inline_style.expand_bg, inline_style.expand_bg_y);
+    format.bg_corner_radius = inline_style.bg_corner_radius;
+  }
+  #[cfg(not(feature = "membrane"))]
+  {
+    #[allow(clippy::useless_conversion)]
+    { format.expand_bg = inline_style.expand_bg.into(); }
+  }
 }
 
 #[inline]
@@ -186,19 +194,24 @@ pub fn build_layout(
           code_block_info.push((text.to_string(), lang.to_string()));
         }
       }
-      // TODO: Wrapped list item text returns to column 0 instead of aligning with the text
-      // after the bullet. Fixing this requires a hanging indent feature in egui's text layout
-      // engine (e.g. a `LeadingSpace::Indent` variant on `LayoutSection`). Upstream egui 0.33
-      // only supports first-row leading space.
       Token::ListMarker { marker, indent_level } => {
         let indent_width = ui.ctx().fonts_mut(|f| f.glyph_width(&font_id, ' ')) * 2.0;
         let total_indent =
           (*indent_level as f32 + 1.0) * indent_width + blockquote_depth as f32 * style_ref.blockquote.indent_per_depth;
 
-        // Use leading_space parameter for indentation.
-        let indent_str = "  ".repeat(*indent_level);
-        job.append(&indent_str, total_indent, base_format.clone());
-        section_to_token.push(token_index);
+        #[cfg(feature = "membrane")]
+        {
+          // Use LeadingSpace::Indent so wrapped lines stay indented past the bullet.
+          job.push_with_leading_space("", epaint::text::LeadingSpace::Indent(total_indent), base_format.clone());
+          section_to_token.push(token_index);
+        }
+        #[cfg(not(feature = "membrane"))]
+        {
+          // Upstream egui only supports first-row leading space; wrapped lines return to column 0.
+          let indent_str = "  ".repeat(*indent_level);
+          job.append(&indent_str, total_indent, base_format.clone());
+          section_to_token.push(token_index);
+        }
 
         job.append(marker.as_ref(), 0.0, base_format.clone());
         section_to_token.push(token_index);

@@ -30,6 +30,7 @@ default = ["syntax_highlighting"]
 syntax_highlighting = ["egui_extras/syntect", "dep:syntect"]
 images = ["egui_extras/image", "egui_extras/http"]
 svg = ["egui_extras/svg"]
+membrane = []
 
 [[example]]
 name = "simple"

@@ -124,10 +124,6 @@ impl MarkdownStyle {
 }
 
 /// Styling for inline code spans (backtick-delimited).
-///
-/// Note: corner radius is not supported because upstream egui's `TextFormat` paints
-/// backgrounds as flat rectangles with no rounding. Supporting this would require
-/// painting the backgrounds ourselves (similar to code block backgrounds).
 #[derive(Clone, Debug, PartialEq)]
 pub struct InlineCodeStyle {
   /// Text color in dark mode.
@@ -138,8 +134,15 @@ pub struct InlineCodeStyle {
   pub background_dark: Color32,
   /// Background color in light mode.
   pub background_light: Color32,
-  /// How much to expand the background rectangle beyond the text bounds (in pixels).
+  /// How much to expand the background rectangle horizontally beyond the text bounds (in pixels).
   pub expand_bg: f32,
+  /// How much to expand the background rectangle vertically (requires `membrane` feature).
+  /// When not set or without `membrane`, falls back to `expand_bg` for both axes.
+  #[cfg(feature = "membrane")]
+  pub expand_bg_y: f32,
+  /// Corner radius for inline code backgrounds (requires `membrane` feature).
+  #[cfg(feature = "membrane")]
+  pub bg_corner_radius: u8,
 }
 
 impl Default for InlineCodeStyle {
@@ -150,6 +153,10 @@ impl Default for InlineCodeStyle {
       background_dark: Color32::from_gray(50),
       background_light: Color32::from_gray(225),
       expand_bg: 3.0,
+      #[cfg(feature = "membrane")]
+      expand_bg_y: 1.0,
+      #[cfg(feature = "membrane")]
+      bg_corner_radius: 3,
     }
   }
 }
