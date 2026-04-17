@@ -414,6 +414,12 @@ impl<'a> MarkdownLabel<'a> {
     let mut i = start;
 
     let block_spacing = style.block_spacing;
+    // Before rendering a block element, add spacing if there was preceding content.
+    let before_block = |had_content: bool, ui: &mut Ui| {
+      if had_content {
+        ui.add_space(block_spacing);
+      }
+    };
     // After rendering a block element, skip trailing newlines and add uniform spacing.
     let after_block = |i: &mut usize, text_start: &mut usize, end: usize, ui: &mut Ui| {
       ui.add_space(block_spacing);
@@ -426,7 +432,9 @@ impl<'a> MarkdownLabel<'a> {
     while i < end {
       match &md.tokens[i] {
         Token::Table(data) => {
+          let had_content = text_start < i;
           self.flush_text_range(ui, md, font, color, text_start, i, style);
+          before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(block_sz_id)) {
             if cached_hash == text_hash {
@@ -450,7 +458,9 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::CodeBlock { text, language } if self.scroll_code_blocks => {
+          let had_content = text_start < i;
           self.flush_text_range(ui, md, font, color, text_start, i, style);
+          before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(block_sz_id)) {
             if cached_hash == text_hash {
@@ -483,7 +493,9 @@ impl<'a> MarkdownLabel<'a> {
         }
         #[cfg(feature = "images")]
         Token::Image { url, .. } => {
+          let had_content = text_start < i;
           self.flush_text_range(ui, md, font, color, text_start, i, style);
+          before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(block_sz_id)) {
             if cached_hash == text_hash {
