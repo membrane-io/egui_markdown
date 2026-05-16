@@ -1,10 +1,18 @@
 //! Layout job construction from parsed markdown token streams.
 
-use egui::{text::LayoutJob, Align, Color32, FontFamily, FontId, Stroke, TextFormat, TextWrapMode, Ui};
+use egui::{
+  text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat,
+  TextWrapMode, Ui,
+};
 
 use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, MarkdownStyle};
 use crate::types::Token;
+
+/// Override for markdown body/table cell row height (`TextFormat::line_height`).
+///
+/// `None` uses egui’s default (font metrics).
+pub(crate) const MARKDOWN_LINE_HEIGHT_POINTS: Option<f32> = Some(17.0);
 
 /// The result of building an egui [`LayoutJob`] from parsed markdown tokens.
 #[derive(Clone)]
@@ -58,13 +66,154 @@ pub fn apply_inline_code_bg(format: &mut TextFormat, dark_mode: bool, inline_sty
   #[cfg(not(feature = "membrane"))]
   {
     #[allow(clippy::useless_conversion)]
-    { format.expand_bg = inline_style.expand_bg.into(); }
+    {
+      format.expand_bg = inline_style.expand_bg.into();
+    }
   }
 }
 
 #[inline]
 fn text_format(font_id: FontId, color: Color32) -> TextFormat {
-  TextFormat { font_id, color, valign: Align::BOTTOM, ..Default::default() }
+  TextFormat { font_id, color, valign: Align::BOTTOM, line_height: MARKDOWN_LINE_HEIGHT_POINTS, ..Default::default() }
+}
+
+/// Outcome of appending a Link token to a [`LayoutJob`].
+#[derive(Default)]
+pub struct LinkAppend {
+  /// True when the [`LinkHandler`] indicated this link is a block widget.
+  /// The caller should render the link separately via [`LinkHandler::block_widget`];
+  /// no sections are appended in this case.
+  pub is_block_widget: bool,
+  /// Inline-widget placeholder span `(start_char, end_char)` in the job's text.
+  /// `None` for non-inline-widget links.
+  pub inline_widget_span: Option<(usize, usize)>,
+  /// Number of sections appended to the [`LayoutJob`] for this link.
+  pub sections_added: usize,
+}
+
+/// Append a `Link` token to a [`LayoutJob`], dispatching through an optional [`LinkHandler`].
+///
+/// Encapsulates the priority order: `is_block_widget` → `inline_widget_size` (with optional
+/// `layout_link` placeholder) → `layout_link` → `link_style` → default hyperlink color.
+///
+/// The caller is responsible for mapping the appended sections to their token index
+/// (see [`LinkAppend::sections_added`]).
+pub fn append_link_to_job(
+  job: &mut LayoutJob,
+  text: &str,
+  href: &str,
+  font_id: &FontId,
+  base_format: &TextFormat,
+  link_color: Color32,
+  link_handler: Option<&dyn LinkHandler>,
+) -> LinkAppend {
+  if let Some(handler) = link_handler {
+    if handler.is_block_widget(href) {
+      return LinkAppend { is_block_widget: true, ..LinkAppend::default() };
+    }
+    if let Some(widget_size) = handler.inline_widget_size(href, font_id) {
+      let start_char = job.text.chars().count();
+      let before = job.sections.len();
+      let added = if handler.layout_link(text, href, job, font_id, Color32::TRANSPARENT) {
+        let added = job.sections.len() - before;
+        for section in &mut job.sections[before..] {
+          section.format.color = Color32::TRANSPARENT;
+          section.format.line_height = Some(widget_size.y);
+        }
+        added
+      } else {
+        let format = TextFormat {
+          font_id: FontId::monospace(font_id.size),
+          color: Color32::TRANSPARENT,
+          line_height: Some(widget_size.y),
+          ..base_format.clone()
+        };
+        job.append(text, 0.0, format);
+        1
+      };
+      let end_char = job.text.chars().count();
+      return LinkAppend {
+        is_block_widget: false,
+        inline_widget_span: Some((start_char, end_char)),
+        sections_added: added,
+      };
+    }
+    let before = job.sections.len();
+    if handler.layout_link(text, href, job, font_id, link_color) {
+      return LinkAppend {
+        is_block_widget: false,
+        inline_widget_span: None,
+        sections_added: job.sections.len() - before,
+      };
+    }
+    let color = handler.link_style(href).and_then(|s| s.color).unwrap_or(link_color);
+    let format = TextFormat { font_id: font_id.clone(), color, ..base_format.clone() };
+    job.append(text, 0.0, format);
+    return LinkAppend { is_block_widget: false, inline_widget_span: None, sections_added: 1 };
+  }
+  let format = TextFormat { font_id: font_id.clone(), color: link_color, ..base_format.clone() };
+  job.append(text, 0.0, format);
+  LinkAppend { is_block_widget: false, inline_widget_span: None, sections_added: 1 }
+}
+
+/// Render a single link inline in a [`Ui`], dispatching through an optional [`LinkHandler`].
+///
+/// Used by table cells where each link is rendered as its own widget. Handles
+/// block widgets, inline widgets (placeholder + `paint_inline_widget`), custom
+/// `layout_link` sections, `link_style`, and click delegation. Returns the
+/// allocated [`Response`].
+pub fn render_link_in_ui(
+  ui: &mut Ui,
+  text: &str,
+  href: &str,
+  font_id: &FontId,
+  base_format: &TextFormat,
+  link_color: Color32,
+  link_handler: Option<&dyn LinkHandler>,
+) -> Response {
+  if let Some(handler) = link_handler {
+    if handler.is_block_widget(href) {
+      if let Some(resp) = handler.block_widget(ui, text, href) {
+        return resp;
+      }
+    }
+  }
+
+  let mut job = LayoutJob::default();
+  let info = append_link_to_job(&mut job, text, href, font_id, base_format, link_color, link_handler);
+
+  let galley = ui.fonts_mut(|f| f.layout_job(job));
+  let size = galley.size();
+  let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+  ui.painter().galley(rect.min, galley, link_color);
+
+  let is_inline_widget = info.inline_widget_span.is_some();
+  if is_inline_widget {
+    if let Some(handler) = link_handler {
+      ui.push_id(("link_widget", href), |ui| {
+        handler.paint_inline_widget(ui, text, href, rect);
+      });
+    }
+  }
+
+  if response.hovered() {
+    ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
+    if !is_inline_widget {
+      let underline_color = link_handler
+        .and_then(|h| h.link_style(href).and_then(|s| s.color))
+        .unwrap_or(link_color);
+      ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0_f32, underline_color));
+    }
+  }
+
+  if response.clicked() {
+    let handled = link_handler.is_some_and(|h| h.click(text, href, ui));
+    if !handled {
+      ui.ctx().open_url(OpenUrl::new_tab(href.to_string()));
+    }
+  }
+
+  response
 }
 
 /// Check if a "bold" font family is registered with egui.
@@ -202,7 +351,9 @@ pub fn build_layout(
         #[cfg(feature = "membrane")]
         {
           // Use LeadingSpace::Indent so wrapped lines stay indented past the bullet.
-          job.push_with_leading_space("", epaint::text::LeadingSpace::Indent(total_indent), base_format.clone());
+          let mut format = base_format.clone();
+          format.line_height = MARKDOWN_LINE_HEIGHT_POINTS.map(|h| h * 4.0);
+          job.push_with_leading_space("", epaint::text::LeadingSpace::Indent(total_indent), format);
           section_to_token.push(token_index);
         }
         #[cfg(not(feature = "membrane"))]
@@ -217,58 +368,17 @@ pub fn build_layout(
         section_to_token.push(token_index);
       }
       Token::Link { text, href, .. } => {
-        if link_handler.is_some_and(|h| h.is_block_widget(href)) {
+        let link_base = text_format(font_id.clone(), color);
+        let info = append_link_to_job(&mut job, text, href, &font_id, &link_base, hyperlink_color, link_handler);
+        if info.is_block_widget {
           segment_breaks.push(token_index);
-        } else if let Some(widget_size) = link_handler.and_then(|h| h.inline_widget_size(href, &font_id)) {
-          // Inline widget: reserve transparent placeholder space.
-          let start_char = job.text.chars().count();
-
-          // Try layout_link first for custom placeholder width.
-          let handler = link_handler.unwrap();
-          let before = job.sections.len();
-          let handled = handler.layout_link(text, href, &mut job, &font_id, Color32::TRANSPARENT);
-          if handled {
-            // Stamp line_height and force transparent on all added sections.
-            let added = job.sections.len() - before;
-            for i in (job.sections.len() - added)..job.sections.len() {
-              job.sections[i].format.color = Color32::TRANSPARENT;
-              job.sections[i].format.line_height = Some(widget_size.y);
-            }
-            for _ in 0..added {
-              section_to_token.push(token_index);
-            }
-          } else {
-            // Fallback: emit link text as transparent placeholder.
-            let mut format =
-              TextFormat { color: Color32::TRANSPARENT, line_height: Some(widget_size.y), ..base_format.clone() };
-            // Use monospace font to get predictable width matching the widget.
-            format.font_id = FontId::monospace(font_id.size);
-            job.append(text.as_ref(), 0.0, format);
+        } else {
+          for _ in 0..info.sections_added {
             section_to_token.push(token_index);
           }
-
-          let end_char = job.text.chars().count();
-          inline_widget_spans.push((start_char, end_char, token_index));
-        } else if link_handler.is_some_and(|h| {
-          let before = job.sections.len();
-          let handled = h.layout_link(text, href, &mut job, &font_id, hyperlink_color);
-          if handled {
-            let added = job.sections.len() - before;
-            for _ in 0..added {
-              section_to_token.push(token_index);
-            }
+          if let Some((start_char, end_char)) = info.inline_widget_span {
+            inline_widget_spans.push((start_char, end_char, token_index));
           }
-          handled
-        }) {
-          // Already handled inside the closure.
-        } else {
-          let link_color = if let Some(handler) = link_handler {
-            handler.link_style(href).and_then(|s| s.color).unwrap_or(hyperlink_color)
-          } else {
-            hyperlink_color
-          };
-          job.append(text.as_ref(), 0.0, text_format(font_id.clone(), link_color));
-          section_to_token.push(token_index);
         }
       }
       Token::Image { .. } | Token::Table(_) => {

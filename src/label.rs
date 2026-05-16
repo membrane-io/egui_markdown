@@ -449,7 +449,7 @@ impl<'a> MarkdownLabel<'a> {
             }
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          table::render_table(ui, self.id.with(("table", i)), data, font, color, &style.inline_code);
+          table::render_table(ui, self.id.with(("table", i)), data, font, color, &style.inline_code, self.link_handler);
           let after_y = ui.min_rect().bottom();
           let block_size = Vec2::new(ui.available_width(), after_y - before_y);
           ui.data_mut(|d| d.insert_temp(block_sz_id, (text_hash, block_size)));
@@ -950,7 +950,9 @@ fn paint_inline_widgets(
       if let (Some(sg), Some(eg)) = (row_sg, row_eg) {
         let row_rect = Rect::from_min_max(pos2(sg.pos.x, row.min_y()), pos2(eg.pos.x + eg.advance_width, row.max_y()))
           .translate(origin.to_vec2());
-        handler.paint_inline_widget(ui, text, href, row_rect);
+        ui.push_id(token_index, |ui| {
+          handler.paint_inline_widget(ui, text, href, row_rect);
+        });
       }
     }
   }
