@@ -120,6 +120,7 @@ fn render_cell(
   let has_links = tokens.iter().any(|t| matches!(t, Token::Link { .. }));
   if !has_links {
     let job = tokens_to_layout_job(
+      ui,
       tokens,
       font_id,
       color,
@@ -195,6 +196,7 @@ fn measure_column_widths(
 
   let measure = |tokens: &[Token<'_>], is_header: bool| -> f32 {
     let job = tokens_to_layout_job(
+      ui,
       tokens,
       font_id,
       color,
@@ -233,6 +235,7 @@ fn col_alignment(align: Alignment) -> Align {
 
 #[allow(clippy::too_many_arguments)]
 fn tokens_to_layout_job(
+  ui: &Ui,
   tokens: &[Token<'_>],
   font_id: &FontId,
   color: Color32,
@@ -255,7 +258,16 @@ fn tokens_to_layout_job(
       Token::Link { text, href, .. } => {
         let (link_font, link_color) = link_font_and_color(font_id, hyperlink_color, strong_color, has_bold, is_header);
         let base_format = TextFormat::default();
-        append_link_to_job(&mut job, text.as_ref(), href.as_ref(), &link_font, &base_format, link_color, link_handler);
+        append_link_to_job(
+          ui,
+          &mut job,
+          text.as_ref(),
+          href.as_ref(),
+          &link_font,
+          &base_format,
+          link_color,
+          link_handler,
+        );
       }
       Token::Newline => {
         job.append(" ", 0.0, TextFormat { font_id: font_id.clone(), color, ..Default::default() });

@@ -99,6 +99,7 @@ pub struct LinkAppend {
 /// The caller is responsible for mapping the appended sections to their token index
 /// (see [`LinkAppend::sections_added`]).
 pub fn append_link_to_job(
+  ui: &Ui,
   job: &mut LayoutJob,
   text: &str,
   href: &str,
@@ -114,10 +115,10 @@ pub fn append_link_to_job(
     if let Some(widget_size) = handler.inline_widget_size(href, font_id) {
       let start_char = job.text.chars().count();
       let before = job.sections.len();
-      let added = if handler.layout_link(text, href, job, font_id, Color32::TRANSPARENT) {
+      let added = if handler.layout_link(ui, text, href, job, font_id, Color32::TRANSPARENT) {
         let added = job.sections.len() - before;
         for section in &mut job.sections[before..] {
-          section.format.color = Color32::TRANSPARENT;
+          // section.format.color = Color32::TRANSPARENT;
           section.format.line_height = Some(widget_size.y);
         }
         added
@@ -139,7 +140,7 @@ pub fn append_link_to_job(
       };
     }
     let before = job.sections.len();
-    if handler.layout_link(text, href, job, font_id, link_color) {
+    if handler.layout_link(ui, text, href, job, font_id, link_color) {
       return LinkAppend {
         is_block_widget: false,
         inline_widget_span: None,
@@ -180,7 +181,7 @@ pub fn render_link_in_ui(
   }
 
   let mut job = LayoutJob::default();
-  let info = append_link_to_job(&mut job, text, href, font_id, base_format, link_color, link_handler);
+  let info = append_link_to_job(ui, &mut job, text, href, font_id, base_format, link_color, link_handler);
 
   let galley = ui.fonts_mut(|f| f.layout_job(job));
   let size = galley.size();
@@ -199,9 +200,7 @@ pub fn render_link_in_ui(
   if response.hovered() {
     ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
     if !is_inline_widget {
-      let underline_color = link_handler
-        .and_then(|h| h.link_style(href).and_then(|s| s.color))
-        .unwrap_or(link_color);
+      let underline_color = link_handler.and_then(|h| h.link_style(href).and_then(|s| s.color)).unwrap_or(link_color);
       ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0_f32, underline_color));
     }
   }
@@ -369,7 +368,7 @@ pub fn build_layout(
       }
       Token::Link { text, href, .. } => {
         let link_base = text_format(font_id.clone(), color);
-        let info = append_link_to_job(&mut job, text, href, &font_id, &link_base, hyperlink_color, link_handler);
+        let info = append_link_to_job(ui, &mut job, text, href, &font_id, &link_base, hyperlink_color, link_handler);
         if info.is_block_widget {
           segment_breaks.push(token_index);
         } else {

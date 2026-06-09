@@ -29,7 +29,15 @@ pub trait LinkHandler {
   /// The handler can append multiple sections with different fonts, colors,
   /// backgrounds (icons, colored path segments, etc). All sections will be
   /// mapped to this link token for hover/click.
-  fn layout_link(&self, _text: &str, _href: &str, _job: &mut LayoutJob, _font: &FontId, _color: Color32) -> bool {
+  fn layout_link(
+    &self,
+    _ui: &Ui,
+    _text: &str,
+    _href: &str,
+    _job: &mut LayoutJob,
+    _font: &FontId,
+    _color: Color32,
+  ) -> bool {
     false
   }
 

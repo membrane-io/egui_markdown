@@ -95,7 +95,7 @@ impl LinkHandler for DemoLinkHandler {
     }
   }
 
-  fn layout_link(&self, text: &str, href: &str, job: &mut LayoutJob, font: &FontId, _color: Color32) -> bool {
+  fn layout_link(&self, _ui: &Ui, text: &str, href: &str, job: &mut LayoutJob, font: &FontId, _color: Color32) -> bool {
     if href.starts_with("styled://") {
       job.append("\u{26A1} ", 0.0, TextFormat { font_id: font.clone(), color: Color32::YELLOW, ..Default::default() });
       job.append(
