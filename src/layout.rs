@@ -469,7 +469,7 @@ pub fn highlight_code(
   static THEME_SET: LazyLock<syntect::highlighting::ThemeSet> =
     LazyLock::new(syntect::highlighting::ThemeSet::load_defaults);
 
-  let style = &*ui.ctx().style();
+  let style = &*ui.style();
   let ss = &*SYNTAX_SET;
   let syn_theme = code_theme.unwrap_or_else(|| {
     if style.visuals.dark_mode {

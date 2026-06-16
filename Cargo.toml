@@ -13,16 +13,16 @@ keywords = ["egui", "markdown", "gui", "commonmark"]
 include = ["**/*.rs", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
 
 [dependencies]
-egui = { version = "0.33", default-features = false }
-epaint = { version = "0.33", default-features = false }
-egui_extras = { version = "0.33", default-features = false }
+egui = { version = "0.34", default-features = false }
+epaint = { version = "0.34", default-features = false }
+egui_extras = { version = "0.34", default-features = false }
 pulldown-cmark = "0.13.0"
 syntect = { version = "5", optional = true, default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-eframe = { version = "0.33", default-features = true, features = ["default_fonts", "glow"] }
-egui_extras = { version = "0.33", features = ["syntect"] }
+eframe = { version = "0.34", default-features = true, features = ["default_fonts", "glow"] }
+egui_extras = { version = "0.34", features = ["syntect"] }
 env_logger = "0.11"
 
 [features]
