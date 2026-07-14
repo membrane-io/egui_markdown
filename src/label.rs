@@ -148,6 +148,8 @@ pub struct MarkdownLabel<'a> {
   #[allow(clippy::type_complexity)]
   code_block_buttons: Option<&'a dyn Fn(&mut Ui, &str, &str)>,
   scroll_code_blocks: bool,
+  shrink_code_blocks: bool,
+  code_block_min_width: Option<f32>,
   style: Option<&'a MarkdownStyle>,
   heal: bool,
   #[cfg(feature = "syntax_highlighting")]
@@ -167,6 +169,8 @@ impl<'a> MarkdownLabel<'a> {
       link_handler: None,
       code_block_buttons: None,
       scroll_code_blocks: false,
+      shrink_code_blocks: false,
+      code_block_min_width: None,
       style: None,
       heal: false,
       #[cfg(feature = "syntax_highlighting")]
@@ -210,6 +214,22 @@ impl<'a> MarkdownLabel<'a> {
   /// inline galley text. Long lines scroll horizontally rather than wrapping.
   pub fn scroll_code_blocks(self, scroll: bool) -> Self {
     Self { scroll_code_blocks: scroll, ..self }
+  }
+
+  /// Size code blocks to their content instead of filling the available width.
+  /// Default: `false` (fill). Only applies with [`Self::scroll_code_blocks`].
+  ///
+  /// Useful for tooltips and popovers that should hug their content.
+  pub fn shrink_code_blocks(self, shrink: bool) -> Self {
+    Self { shrink_code_blocks: shrink, ..self }
+  }
+
+  /// Minimum width for shrunk code blocks (capped at the available width).
+  ///
+  /// Lets a container that sizes to content stretch blocks to match its widest
+  /// sibling, typically using a width measured on the previous frame.
+  pub fn code_block_min_width(self, width: Option<f32>) -> Self {
+    Self { code_block_min_width: width, ..self }
   }
 
   /// Auto-close unclosed code fences before parsing.
@@ -420,12 +440,16 @@ impl<'a> MarkdownLabel<'a> {
         ui.add_space(block_spacing);
       }
     };
-    // After rendering a block element, skip trailing newlines and add uniform spacing.
+    // After rendering a block element, skip trailing newlines and add uniform spacing —
+    // but only when more content follows, mirroring `before_block`, so a trailing block
+    // doesn't leave a spacing gap at the bottom.
     let after_block = |i: &mut usize, text_start: &mut usize, end: usize, ui: &mut Ui| {
-      ui.add_space(block_spacing);
       while *text_start < end && matches!(md.tokens[*text_start], Token::Newline) {
         *text_start += 1;
         *i += 1;
+      }
+      if *text_start < end {
+        ui.add_space(block_spacing);
       }
     };
 
@@ -481,6 +505,8 @@ impl<'a> MarkdownLabel<'a> {
             text,
             language.as_deref(),
             self.code_block_buttons,
+            self.shrink_code_blocks,
+            self.code_block_min_width,
             style,
             self.code_theme_arg(),
           );
@@ -965,6 +991,8 @@ fn render_code_block(
   text: &pulldown_cmark::CowStr<'_>,
   language: Option<&str>,
   code_block_buttons: Option<&dyn Fn(&mut Ui, &str, &str)>,
+  shrink_to_content: bool,
+  min_width: Option<f32>,
   style: &MarkdownStyle,
   code_theme: CodeThemeArg<'_>,
 ) {
@@ -994,7 +1022,12 @@ fn render_code_block(
     .inner_margin(egui::Margin { left: p[0] as i8, top: p[1] as i8, right: p[2] as i8, bottom: p[3] as i8 });
 
   let frame_response = frame.show(ui, |ui| {
-    ui.set_min_width(ui.available_width());
+    if !shrink_to_content {
+      ui.set_min_width(ui.available_width());
+    } else if let Some(width) = min_width {
+      // `width` is the desired outer width; we're inside the frame's margins.
+      ui.set_min_width((width - p[0] - p[2]).min(ui.available_width()));
+    }
     egui::ScrollArea::horizontal().id_salt(id).show(ui, |ui| {
       let (rect, _) = ui.allocate_exact_size(epaint::vec2(galley_width, galley_height), Sense::hover());
       ui.painter().galley(rect.min, galley, ui.visuals().text_color());
