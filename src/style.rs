@@ -310,17 +310,23 @@ impl HeadingStyle {
 pub struct HorizontalRuleStyle {
   /// Stroke width for horizontal rule lines.
   pub stroke_width: f32,
+  /// Vertical space reserved for the rule row (points).
+  pub height: f32,
 }
 
 impl Default for HorizontalRuleStyle {
   fn default() -> Self {
-    Self { stroke_width: 1.0 }
+    Self {
+      stroke_width: 1.0,
+      height: 8.0,
+    }
   }
 }
 
 impl Hash for HorizontalRuleStyle {
   fn hash<H: Hasher>(&self, state: &mut H) {
     self.stroke_width.to_bits().hash(state);
+    self.height.to_bits().hash(state);
   }
 }
 
@@ -329,6 +335,9 @@ impl HorizontalRuleStyle {
     Grid::new("hr_style").num_columns(2).striped(true).show(ui, |ui| {
       ui.label("Stroke width:");
       ui.add(DragValue::new(&mut self.stroke_width).range(0.0..=5.0).speed(0.1));
+      ui.end_row();
+      ui.label("Height:");
+      ui.add(DragValue::new(&mut self.height).range(1.0..=40.0).speed(0.5));
       ui.end_row();
     });
   }

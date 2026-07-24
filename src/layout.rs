@@ -392,11 +392,13 @@ pub fn build_layout(
         blockquote_depth = blockquote_depth.saturating_sub(1);
       }
       Token::HorizontalRule => {
-        // Insert newline, a transparent space (to hold a row we paint the line on), then newline.
+        // Newline, short transparent spacer row for the painted rule, then newline.
         job.append("\n", 0.0, base_format.clone());
         section_to_token.push(token_index);
         let hr_char_pos = job.text.chars().count();
-        job.append(" ", 0.0, transparent_format.clone());
+        let mut hr_format = transparent_format.clone();
+        hr_format.line_height = Some(style_ref.horizontal_rule.height);
+        job.append(" ", 0.0, hr_format);
         section_to_token.push(token_index);
         hr_positions.push(hr_char_pos);
         job.append("\n", 0.0, base_format.clone());

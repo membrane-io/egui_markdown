@@ -46,41 +46,19 @@ pub fn render_table(
     padding,
   );
 
-  ScrollArea::horizontal().content_margin(Margin { top: 0, right: 0, bottom: 4, left: 0 }).show(ui, |ui| {
-    let mut builder = TableBuilder::new(ui).id_salt(id).striped(false).vscroll(false);
-    for &w in &col_widths {
-      builder = builder.column(Column::exact(w));
-    }
-    builder
-      .header(20.0, |mut header| {
-        for (col_idx, cell_tokens) in data.headers.iter().enumerate() {
-          let align = col_alignment(data.alignments.get(col_idx).copied().unwrap_or(Alignment::None));
-          header.col(|ui| {
-            ui.with_layout(egui::Layout::left_to_right(align), |ui| {
-              render_cell(
-                ui,
-                cell_tokens,
-                font_id,
-                color,
-                hyperlink_color,
-                strong_color,
-                has_bold,
-                true,
-                dark_mode,
-                inline_code_style,
-                link_handler,
-              );
-            });
-          });
-        }
-      })
-      .body(|body| {
-        body.rows(18.0, data.rows.len(), |mut row| {
-          let row_idx = row.index();
-          let row_data = &data.rows[row_idx];
-          for (col_idx, cell_tokens) in row_data.iter().enumerate() {
+  ScrollArea::horizontal()
+    .id_salt(id.with("scroll"))
+    .content_margin(Margin { top: 0, right: 0, bottom: 4, left: 0 })
+    .show(ui, |ui| {
+      let mut builder = TableBuilder::new(ui).id_salt(id).striped(false).vscroll(false);
+      for &w in &col_widths {
+        builder = builder.column(Column::exact(w));
+      }
+      builder
+        .header(20.0, |mut header| {
+          for (col_idx, cell_tokens) in data.headers.iter().enumerate() {
             let align = col_alignment(data.alignments.get(col_idx).copied().unwrap_or(Alignment::None));
-            row.col(|ui| {
+            header.col(|ui| {
               ui.with_layout(egui::Layout::left_to_right(align), |ui| {
                 render_cell(
                   ui,
@@ -90,7 +68,7 @@ pub fn render_table(
                   hyperlink_color,
                   strong_color,
                   has_bold,
-                  false,
+                  true,
                   dark_mode,
                   inline_code_style,
                   link_handler,
@@ -98,9 +76,34 @@ pub fn render_table(
               });
             });
           }
+        })
+        .body(|body| {
+          body.rows(18.0, data.rows.len(), |mut row| {
+            let row_idx = row.index();
+            let row_data = &data.rows[row_idx];
+            for (col_idx, cell_tokens) in row_data.iter().enumerate() {
+              let align = col_alignment(data.alignments.get(col_idx).copied().unwrap_or(Alignment::None));
+              row.col(|ui| {
+                ui.with_layout(egui::Layout::left_to_right(align), |ui| {
+                  render_cell(
+                    ui,
+                    cell_tokens,
+                    font_id,
+                    color,
+                    hyperlink_color,
+                    strong_color,
+                    has_bold,
+                    false,
+                    dark_mode,
+                    inline_code_style,
+                    link_handler,
+                  );
+                });
+              });
+            }
+          });
         });
-      });
-  });
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
