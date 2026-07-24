@@ -78,6 +78,29 @@ fn hash_flush_context(
   hasher.finish()
 }
 
+/// Reserve space for an off-screen block using cached height and current available width.
+/// Width is not cached so a panel shrink cannot leave a stale wider min-size.
+fn try_cull_block(ui: &mut Ui, block_sz_id: Id, text_hash: u64) -> bool {
+  let Some((cached_hash, cached_height)) = ui.data(|d| d.get_temp::<(u64, f32)>(block_sz_id)) else {
+    return false;
+  };
+  if cached_hash != text_hash {
+    return false;
+  }
+  let size = Vec2::new(ui.available_width(), cached_height);
+  let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, size);
+  if ui.is_rect_visible(est_rect) {
+    return false;
+  }
+  ui.allocate_space(size);
+  true
+}
+
+fn cache_block_height(ui: &mut Ui, block_sz_id: Id, text_hash: u64, before_y: f32) {
+  let height = ui.min_rect().bottom() - before_y;
+  ui.data_mut(|d| d.insert_temp(block_sz_id, (text_hash, height)));
+}
+
 /// Convert borrowed tokens to owned ('static) by converting CowStr::Borrowed to Boxed.
 fn tokens_to_owned(tokens: &[Token<'_>]) -> Vec<Token<'static>> {
   tokens.iter().map(|t| token_to_owned(t)).collect()
@@ -460,23 +483,15 @@ impl<'a> MarkdownLabel<'a> {
           self.flush_text_range(ui, md, font, color, text_start, i, style);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(block_sz_id)) {
-            if cached_hash == text_hash {
-              let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, cached_size);
-              if !ui.is_rect_visible(est_rect) {
-                ui.allocate_space(cached_size);
-                i += 1;
-                text_start = i;
-                after_block(&mut i, &mut text_start, end, ui);
-                continue;
-              }
-            }
+          if try_cull_block(ui, block_sz_id, text_hash) {
+            i += 1;
+            text_start = i;
+            after_block(&mut i, &mut text_start, end, ui);
+            continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
           table::render_table(ui, self.id.with(("table", i)), data, font, color, &style.inline_code, self.link_handler);
-          let after_y = ui.min_rect().bottom();
-          let block_size = Vec2::new(ui.available_width(), after_y - before_y);
-          ui.data_mut(|d| d.insert_temp(block_sz_id, (text_hash, block_size)));
+          cache_block_height(ui, block_sz_id, text_hash, before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
@@ -486,17 +501,11 @@ impl<'a> MarkdownLabel<'a> {
           self.flush_text_range(ui, md, font, color, text_start, i, style);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(block_sz_id)) {
-            if cached_hash == text_hash {
-              let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, cached_size);
-              if !ui.is_rect_visible(est_rect) {
-                ui.allocate_space(cached_size);
-                i += 1;
-                text_start = i;
-                after_block(&mut i, &mut text_start, end, ui);
-                continue;
-              }
-            }
+          if try_cull_block(ui, block_sz_id, text_hash) {
+            i += 1;
+            text_start = i;
+            after_block(&mut i, &mut text_start, end, ui);
+            continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
           render_code_block(
@@ -510,9 +519,7 @@ impl<'a> MarkdownLabel<'a> {
             style,
             self.code_theme_arg(),
           );
-          let after_y = ui.min_rect().bottom();
-          let block_size = Vec2::new(ui.available_width(), after_y - before_y);
-          ui.data_mut(|d| d.insert_temp(block_sz_id, (text_hash, block_size)));
+          cache_block_height(ui, block_sz_id, text_hash, before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
@@ -523,24 +530,16 @@ impl<'a> MarkdownLabel<'a> {
           self.flush_text_range(ui, md, font, color, text_start, i, style);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(block_sz_id)) {
-            if cached_hash == text_hash {
-              let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, cached_size);
-              if !ui.is_rect_visible(est_rect) {
-                ui.allocate_space(cached_size);
-                i += 1;
-                text_start = i;
-                after_block(&mut i, &mut text_start, end, ui);
-                continue;
-              }
-            }
+          if try_cull_block(ui, block_sz_id, text_hash) {
+            i += 1;
+            text_start = i;
+            after_block(&mut i, &mut text_start, end, ui);
+            continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
           let image = egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true);
           ui.add(image);
-          let after_y = ui.min_rect().bottom();
-          let block_size = Vec2::new(ui.available_width(), after_y - before_y);
-          ui.data_mut(|d| d.insert_temp(block_sz_id, (text_hash, block_size)));
+          cache_block_height(ui, block_sz_id, text_hash, before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
@@ -549,26 +548,18 @@ impl<'a> MarkdownLabel<'a> {
         Token::Image { alt, url, .. } => {
           self.flush_text_range(ui, md, font, color, text_start, i, style);
           let block_sz_id = self.id.with(("block_sz", i));
-          if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(block_sz_id)) {
-            if cached_hash == text_hash {
-              let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, cached_size);
-              if !ui.is_rect_visible(est_rect) {
-                ui.allocate_space(cached_size);
-                i += 1;
-                text_start = i;
-                after_block(&mut i, &mut text_start, end, ui);
-                continue;
-              }
-            }
+          if try_cull_block(ui, block_sz_id, text_hash) {
+            i += 1;
+            text_start = i;
+            after_block(&mut i, &mut text_start, end, ui);
+            continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
           let text = if alt.is_empty() { url.as_ref() } else { alt.as_ref() };
           if ui.link(text).clicked() {
             ui.ctx().open_url(OpenUrl::new_tab(url.to_string()));
           }
-          let after_y = ui.min_rect().bottom();
-          let block_size = Vec2::new(ui.available_width(), after_y - before_y);
-          ui.data_mut(|d| d.insert_temp(block_sz_id, (text_hash, block_size)));
+          cache_block_height(ui, block_sz_id, text_hash, before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
