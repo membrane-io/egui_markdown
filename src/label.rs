@@ -264,15 +264,19 @@ impl<'a> MarkdownLabel<'a> {
     Self { heal, ..self }
   }
 
-  /// Set custom visual styling. Without this, sensible defaults are used.
+  /// Override visual styling for this widget.
+  ///
+  /// Without this, the context-wide style from [`egui_markdown_style::global_style`]
+  /// is used (falling back to [`MarkdownStyle::default`] if none is installed).
   pub fn style(self, style: &'a MarkdownStyle) -> Self {
     Self { style: Some(style), ..self }
   }
 
   /// Use a custom syntect theme for code block syntax highlighting.
   ///
-  /// When set, this theme is used instead of the built-in default.
-  /// When `None` (the default), a built-in theme is chosen based on dark/light mode.
+  /// When set, this theme is used instead of the context-wide themes from
+  /// [`crate::set_code_themes`]. When neither is set, a built-in theme is
+  /// chosen based on dark/light mode.
   #[cfg(feature = "syntax_highlighting")]
   pub fn code_theme(self, theme: &'a syntect::highlighting::Theme) -> Self {
     Self { code_theme: Some(theme), ..self }
@@ -297,8 +301,8 @@ impl<'a> MarkdownLabel<'a> {
 
   /// Calculate the rendered size without painting.
   pub fn calculate_size(&self, ui: &mut Ui) -> Vec2 {
-    let default_style = MarkdownStyle::default();
-    let style = self.style.unwrap_or(&default_style);
+    let context_style = egui_markdown_style::global_style(ui.ctx());
+    let style = self.style.unwrap_or(context_style.as_ref());
     let color = ui.visuals().text_color();
     let md = parser::parse(self.text);
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
@@ -310,8 +314,8 @@ impl<'a> MarkdownLabel<'a> {
 
   /// Layout the markdown and return the galley position, galley, and response.
   pub fn layout_in_ui(self, ui: &mut Ui) -> (Pos2, Arc<Galley>, Response) {
-    let default_style = MarkdownStyle::default();
-    let style = self.style.unwrap_or(&default_style);
+    let context_style = egui_markdown_style::global_style(ui.ctx());
+    let style = self.style.unwrap_or(context_style.as_ref());
     let color = ui.visuals().text_color();
     let md = parser::parse(self.text);
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
@@ -338,8 +342,8 @@ impl<'a> MarkdownLabel<'a> {
   }
 
   fn render(self, ui: &mut Ui) {
-    let default_style = MarkdownStyle::default();
-    let style = self.style.unwrap_or(&default_style);
+    let context_style = egui_markdown_style::global_style(ui.ctx());
+    let style = self.style.unwrap_or(context_style.as_ref());
     let color = ui.visuals().text_color();
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
 

@@ -473,8 +473,11 @@ pub fn highlight_code(
 
   let style = &*ui.style();
   let ss = &*SYNTAX_SET;
+  let installed = crate::theme::code_theme(ui.ctx(), style.visuals.dark_mode);
   let syn_theme = code_theme.unwrap_or_else(|| {
-    if style.visuals.dark_mode {
+    if let Some(ref theme) = installed {
+      theme.as_ref()
+    } else if style.visuals.dark_mode {
       &THEME_SET.themes["base16-ocean.dark"]
     } else {
       &THEME_SET.themes["base16-ocean.light"]
