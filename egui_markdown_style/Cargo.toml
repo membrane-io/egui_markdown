@@ -1,0 +1,24 @@
+[package]
+name = "egui_markdown_style"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT OR Apache-2.0"
+description = "Visual style types and context-scoped defaults for egui_markdown"
+repository = "https://github.com/iamseeley/egui_markdown"
+homepage = "https://github.com/iamseeley/egui_markdown"
+documentation = "https://docs.rs/egui_markdown_style"
+categories = ["gui", "graphics"]
+keywords = ["egui", "markdown", "style"]
+include = ["**/*.rs", "Cargo.toml"]
+
+[dependencies]
+egui = { version = "0.34", default-features = false }
+serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
+
+[features]
+default = []
+## Membrane-specific inline code fields (`expand_bg_y`, `bg_corner_radius`).
+membrane = []
+## Enable `Serialize` / `Deserialize` on style types.
+serde = ["dep:serde", "egui/serde"]
