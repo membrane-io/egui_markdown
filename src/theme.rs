@@ -26,24 +26,13 @@ pub fn set_code_themes(
   dark: impl Into<Arc<syntect::highlighting::Theme>>,
   light: impl Into<Arc<syntect::highlighting::Theme>>,
 ) {
-  ctx.data_mut(|d| {
-    d.insert_temp(
-      Id::NULL,
-      CodeThemesSlot { dark: dark.into(), light: light.into() },
-    )
-  });
+  ctx.data_mut(|d| d.insert_temp(Id::NULL, CodeThemesSlot { dark: dark.into(), light: light.into() }));
 }
 
 /// Return the installed syntect theme for the given mode, if any.
 #[cfg(feature = "syntax_highlighting")]
 pub fn code_theme(ctx: &Context, dark_mode: bool) -> Option<Arc<syntect::highlighting::Theme>> {
   ctx.data(|d| {
-    d.get_temp::<CodeThemesSlot>(Id::NULL).map(|s| {
-      if dark_mode {
-        Arc::clone(&s.dark)
-      } else {
-        Arc::clone(&s.light)
-      }
-    })
+    d.get_temp::<CodeThemesSlot>(Id::NULL).map(|s| if dark_mode { Arc::clone(&s.dark) } else { Arc::clone(&s.light) })
   })
 }

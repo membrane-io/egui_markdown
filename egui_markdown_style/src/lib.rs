@@ -7,9 +7,7 @@
 
 mod style;
 
-pub use style::{
-  BlockquoteStyle, CodeBlockStyle, HeadingStyle, HorizontalRuleStyle, InlineCodeStyle, MarkdownStyle,
-};
+pub use style::{BlockquoteStyle, CodeBlockStyle, HeadingStyle, HorizontalRuleStyle, InlineCodeStyle, MarkdownStyle};
 
 use std::sync::Arc;
 
