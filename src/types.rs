@@ -32,9 +32,9 @@ pub enum Token<'s> {
     /// Optional hover title.
     title: Option<CowStr<'s>>,
   },
-  /// List item bullet or number (e.g. `"- "` or `"1. "`).
+  /// List item bullet or number (e.g. `"• "` or `"1. "`).
   ListMarker {
-    /// The marker string (e.g. `"- "`, `"1. "`).
+    /// The marker string (e.g. `"• "`, `"1. "`).
     marker: CowStr<'s>,
     /// Nesting depth (1 = top-level).
     indent_level: usize,

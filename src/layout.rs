@@ -14,6 +14,10 @@ use crate::types::Token;
 /// `None` uses egui’s default (font metrics).
 pub(crate) const MARKDOWN_LINE_HEIGHT_POINTS: Option<f32> = Some(17.0);
 
+/// List markers are right-aligned in a slot as wide as this string, measured in the body font,
+/// so bullets and numbers of the same nesting level all start their text at the same x.
+const MARKER_SLOT_REFERENCE: &str = "99. ";
+
 /// The result of building an egui [`LayoutJob`] from parsed markdown tokens.
 #[derive(Clone)]
 pub struct LayoutResult {
@@ -231,6 +235,18 @@ fn apply_bold(format: &mut TextFormat, ui: &Ui, has_bold: bool) {
   }
 }
 
+/// Width of each line's leading whitespace, in points, using the code font.
+#[cfg(feature = "membrane")]
+fn code_line_indents(ui: &Ui, text: &str, code_font_size: f32) -> Vec<f32> {
+  let font_id = FontId::monospace(code_font_size);
+  ui.ctx().fonts_mut(|f| {
+    text
+      .split('\n')
+      .map(|line| line.chars().take_while(|c| c.is_whitespace()).map(|c| f.glyph_width(&font_id, c)).sum())
+      .collect()
+  })
+}
+
 /// Build an egui [`LayoutJob`] from a slice of markdown tokens.
 ///
 /// Converts tokens into styled text sections suitable for galley layout.
@@ -332,6 +348,34 @@ pub fn build_layout(
           let highlighted_job = highlight_code(ui, &padded_text, lang, code_font_size, code_theme);
 
           let start_char = job.text.chars().count();
+
+          #[cfg(feature = "membrane")]
+          {
+            // Each source line is its own paragraph, so a soft wrap inside a long line would
+            // restart at column 0. Indent every line's wrapped rows by its own leading whitespace.
+            let line_indents = code_line_indents(ui, &padded_text, code_font_size);
+            let mut line_index = 0usize;
+            let mut at_line_start = true;
+            for section in highlighted_job.sections {
+              let section_text = &highlighted_job.text[section.byte_range.clone()];
+              for part in section_text.split_inclusive('\n') {
+                if at_line_start {
+                  let indent = line_indents.get(line_index).copied().unwrap_or(0.0);
+                  if indent > 0.0 {
+                    job.push_with_leading_space("", epaint::text::LeadingSpace::Indent(indent), section.format.clone());
+                    section_to_token.push(token_index);
+                  }
+                }
+                at_line_start = part.ends_with('\n');
+                if at_line_start {
+                  line_index += 1;
+                }
+                job.append(part, 0.0, section.format.clone());
+                section_to_token.push(token_index);
+              }
+            }
+          }
+          #[cfg(not(feature = "membrane"))]
           for section in highlighted_job.sections {
             let section_text = &highlighted_job.text[section.byte_range.clone()];
             job.append(section_text, 0.0, section.format);
@@ -343,28 +387,57 @@ pub fn build_layout(
         }
       }
       Token::ListMarker { marker, indent_level } => {
+        let list = &style_ref.list;
+        let is_ordered = marker.trim_start().starts_with(|c: char| c.is_ascii_digit());
+        let nudge = if is_ordered { list.number_nudge } else { list.bullet_nudge };
+        let mut marker_format = base_format.clone();
+        if !is_ordered {
+          marker_format.font_id.size *= list.bullet_scale;
+        }
+
         let indent_width = ui.ctx().fonts_mut(|f| f.glyph_width(&font_id, ' ')) * 2.0;
-        let total_indent =
-          (*indent_level as f32 + 1.0) * indent_width + blockquote_depth as f32 * style_ref.blockquote.indent_per_depth;
+        let (marker_width, slot_width) = ui.ctx().fonts_mut(|f| {
+          let marker_width: f32 = marker.chars().map(|c| f.glyph_width(&marker_format.font_id, c)).sum();
+          let slot_width: f32 = MARKER_SLOT_REFERENCE.chars().map(|c| f.glyph_width(&font_id, c)).sum();
+          (marker_width, slot_width)
+        });
+        // `indent_level` is 1-based, so a top-level item gets no nesting indent.
+        let nesting = (*indent_level as f32 - 1.0).max(0.0) * indent_width
+          + blockquote_depth as f32 * style_ref.blockquote.indent_per_depth;
+        // Right-align the marker inside a fixed slot so every item at this level starts its text
+        // at the same x, whatever its marker. A marker wider than the slot keeps its own width
+        // rather than reaching left of the item, which would paint outside the widget.
+        let leading = (nesting + slot_width - nudge - marker_width).max(0.0);
+        // The nudge and the gap are made up after the marker, so moving a marker never moves text.
+        let trailing = nesting + slot_width + list.gap - leading - marker_width;
+        let text_start = leading + marker_width + trailing.max(0.0);
 
         #[cfg(feature = "membrane")]
         {
-          // Use LeadingSpace::Indent so wrapped lines stay indented past the bullet.
           let mut format = base_format.clone();
           format.line_height = MARKDOWN_LINE_HEIGHT_POINTS.map(|h| h * 4.0);
-          job.push_with_leading_space("", epaint::text::LeadingSpace::Indent(total_indent), format);
+          if leading > 0.0 {
+            job.push_with_leading_space("", epaint::text::LeadingSpace::FirstRow(leading), format.clone());
+            section_to_token.push(token_index);
+          }
+          // Wrapped rows resume where the item's text starts.
+          job.push_with_leading_space("", epaint::text::LeadingSpace::Indent(text_start), format);
           section_to_token.push(token_index);
         }
         #[cfg(not(feature = "membrane"))]
         {
-          // Upstream egui only supports first-row leading space; wrapped lines return to column 0.
-          let indent_str = "  ".repeat(*indent_level);
-          job.append(&indent_str, total_indent, base_format.clone());
+          // Upstream egui only supports first-row leading space; wrapped rows return to column 0.
+          job.append("", leading, base_format.clone());
           section_to_token.push(token_index);
         }
 
-        job.append(marker.as_ref(), 0.0, base_format.clone());
+        job.append(marker.as_ref(), 0.0, marker_format);
         section_to_token.push(token_index);
+
+        if trailing > 0.0 {
+          job.append("", trailing, base_format.clone());
+          section_to_token.push(token_index);
+        }
       }
       Token::Link { text, href, .. } => {
         let link_base = text_format(font_id.clone(), color);

@@ -741,13 +741,18 @@ impl<'a> MarkdownLabel<'a> {
     color: Color32,
     style: &MarkdownStyle,
   ) -> Vec2 {
+    let extend = ui.wrap_mode() == egui::TextWrapMode::Extend;
     let mut job = job;
-    job.wrap.max_width =
-      if ui.wrap_mode() == egui::TextWrapMode::Extend { f32::INFINITY } else { ui.available_width() };
+    job.wrap.max_width = if extend { f32::INFINITY } else { ui.available_width() };
     let galley = ui.fonts_mut(|f| f.layout_job(job));
-    let size = galley.size();
     let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
     let available_width = ui.available_width();
+    // Decorations (code block backgrounds, horizontal rules) span the full available width, so the
+    // widget must claim it too — otherwise they paint outside the allocated rect.
+    let mut size = galley.size();
+    if !extend {
+      size.x = size.x.max(available_width);
+    }
 
     if !self.interactable {
       let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
