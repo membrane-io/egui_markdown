@@ -231,6 +231,24 @@ fn apply_bold(format: &mut TextFormat, ui: &Ui, has_bold: bool) {
   }
 }
 
+/// Whether a token stream contains anything that [`build_layout`] would report as a segment
+/// break, i.e. whether it must go through the segmented render path.
+///
+/// Must stay in sync with every `segment_breaks.push` in [`build_layout`]. It exists so a
+/// caller can make that decision without paying for a full layout it would then discard.
+pub fn needs_segmentation(
+  tokens: &[Token<'_>],
+  scroll_code_blocks: bool,
+  link_handler: Option<&dyn LinkHandler>,
+) -> bool {
+  tokens.iter().any(|token| match token {
+    Token::CodeBlock { .. } => scroll_code_blocks,
+    Token::Link { href, .. } => link_handler.is_some_and(|h| h.is_block_widget(href)),
+    Token::Image { .. } | Token::Table(_) | Token::BlockquoteStart | Token::BlockquoteEnd => true,
+    _ => false,
+  })
+}
+
 /// Build an egui [`LayoutJob`] from a slice of markdown tokens.
 ///
 /// Converts tokens into styled text sections suitable for galley layout.

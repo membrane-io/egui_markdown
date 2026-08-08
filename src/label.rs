@@ -12,7 +12,7 @@ use epaint::{
   text::{Galley, Glyph, Row},
 };
 
-use crate::layout::{build_layout, highlight_code, section_for_char, CodeThemeArg, LayoutResult};
+use crate::layout::{build_layout, highlight_code, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult};
 use crate::link::LinkHandler;
 use crate::paint;
 use crate::parser;
@@ -27,7 +27,9 @@ pub use crate::theme::default_code_theme;
 #[derive(Clone)]
 struct CachedMarkdownLayout {
   text_hash: u64,
-  layout: Arc<LayoutResult>,
+  /// `None` when the document takes the segmented render path, which lays out each flush
+  /// range separately and so has no use for a whole-document layout.
+  layout: Option<Arc<LayoutResult>>,
   /// Owned copy of the tokens for rendering (needed for hover/click after cache hit).
   tokens: Arc<Vec<Token<'static>>>,
 }
@@ -63,10 +65,9 @@ fn hash_flush_context(
   handler: Option<&dyn LinkHandler>,
 ) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
-  // Token content identity is already validated by the outer text_hash.
-  // Only hash the slice length here to distinguish different flush ranges;
-  // the remaining fields capture render-parameter changes (font, color, width, etc.).
-  tokens.len().hash(&mut hasher);
+  // Token content must be hashed: a flush range is keyed by its start index, and an edit
+  // can change a range's content while leaving its start index and length untouched.
+  tokens.hash(&mut hasher);
   style.hash(&mut hasher);
   font.hash(&mut hasher);
   color.hash(&mut hasher);
@@ -363,14 +364,13 @@ impl<'a> MarkdownLabel<'a> {
 
     if let Some(ref cached) = cached {
       if cached.text_hash == text_hash {
-        let layout = Arc::clone(&cached.layout);
         let tokens = Arc::clone(&cached.tokens);
 
-        if !layout.segment_breaks.is_empty() {
+        let Some(layout) = cached.layout.clone() else {
           let md = Markdown { s: text, tokens: (*tokens).clone() };
           self.render_segmented(ui, &md, &font, color, style, text_hash);
           return;
-        }
+        };
 
         self.render_galley(
           ui,
@@ -390,6 +390,18 @@ impl<'a> MarkdownLabel<'a> {
 
     // Cache miss - parse and build layout.
     let md = parser::parse(text);
+    let owned_tokens = Arc::new(tokens_to_owned(&md.tokens));
+
+    // Decide the render path before laying anything out: a whole-document layout is useless
+    // to the segmented path, and building one per keystroke doubles the cost of every edit.
+    if needs_segmentation(&md.tokens, self.scroll_code_blocks, self.link_handler) {
+      ui.data_mut(|d| {
+        d.insert_temp(cache_id, CachedMarkdownLayout { text_hash, layout: None, tokens: owned_tokens });
+      });
+      self.render_segmented(ui, &md, &font, color, style, text_hash);
+      return;
+    }
+
     let code_theme = self.code_theme_arg();
     let layout = build_layout(
       ui,
@@ -402,21 +414,15 @@ impl<'a> MarkdownLabel<'a> {
       style,
       code_theme,
     );
-    let owned_tokens = Arc::new(tokens_to_owned(&md.tokens));
+    debug_assert!(layout.segment_breaks.is_empty(), "needs_segmentation disagrees with build_layout");
     let layout = Arc::new(layout);
 
-    // Store in cache.
     ui.data_mut(|d| {
       d.insert_temp(
         cache_id,
-        CachedMarkdownLayout { text_hash, layout: Arc::clone(&layout), tokens: Arc::clone(&owned_tokens) },
+        CachedMarkdownLayout { text_hash, layout: Some(Arc::clone(&layout)), tokens: owned_tokens },
       );
     });
-
-    if !layout.segment_breaks.is_empty() {
-      self.render_segmented(ui, &md, &font, color, style, text_hash);
-      return;
-    }
 
     self.render_galley(
       ui,
