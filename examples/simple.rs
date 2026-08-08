@@ -24,8 +24,8 @@ impl DemoApp {
 }
 
 impl eframe::App for DemoApp {
-  fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-    egui::TopBottomPanel::top("top").show(ctx, |ui| {
+  fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    egui::Panel::top("top").show(ui, |ui| {
       ui.horizontal(|ui| {
         ui.heading("egui_markdown");
         ui.separator();
@@ -37,7 +37,7 @@ impl eframe::App for DemoApp {
     });
 
     if self.show_editor {
-      egui::SidePanel::left("editor").default_width(400.0).show(ctx, |ui| {
+      egui::Panel::left("editor").default_size(400.0).show(ui, |ui| {
         ui.heading("Markdown Source");
         egui::ScrollArea::vertical().show(ui, |ui| {
           ui.add(egui::TextEdit::multiline(&mut self.markdown_input).desired_width(f32::INFINITY).code_editor());
@@ -45,7 +45,7 @@ impl eframe::App for DemoApp {
       });
     }
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    egui::CentralPanel::default().show_inside(ui, |ui| {
       ui.heading("Rendered Output");
       ui.separator();
       egui::ScrollArea::vertical().show(ui, |ui| {

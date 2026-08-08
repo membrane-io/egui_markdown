@@ -165,10 +165,10 @@ fn code_block_header(ui: &mut Ui, code: &str, lang: &str) {
 }
 
 impl eframe::App for AdvancedApp {
-  fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+  fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
     let link_handler = DemoLinkHandler;
 
-    egui::TopBottomPanel::top("top").show(ctx, |ui| {
+    egui::Panel::top("top").show(ui, |ui| {
       ui.horizontal(|ui| {
         ui.heading("egui_markdown advanced");
         ui.separator();
@@ -203,7 +203,7 @@ impl eframe::App for AdvancedApp {
     });
 
     if self.show_editor {
-      egui::SidePanel::left("editor").default_width(400.0).show(ctx, |ui| {
+      egui::Panel::left("editor").default_size(400.0).show(ui, |ui| {
         ui.heading("Markdown Source");
         egui::ScrollArea::vertical().show(ui, |ui| {
           ui.add(egui::TextEdit::multiline(&mut self.markdown_input).desired_width(f32::INFINITY).code_editor());
@@ -212,7 +212,7 @@ impl eframe::App for AdvancedApp {
     }
 
     if self.show_style_editor {
-      egui::SidePanel::right("style_editor").default_width(280.0).show(ctx, |ui| {
+      egui::Panel::right("style_editor").default_size(280.0).show(ui, |ui| {
         ui.heading("Style");
         ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -243,25 +243,30 @@ impl eframe::App for AdvancedApp {
         self.markdown_input = self.stream_source[..self.stream_pos].to_string();
         self.last_stream_tick = now;
       }
-      ctx.request_repaint();
+      ui.request_repaint();
     }
 
-    egui::CentralPanel::default().show(ctx, |ui| {
+    egui::CentralPanel::default().show_inside(ui, |ui| {
       ui.heading("Rendered Output");
       ui.separator();
       ui.style_mut().url_in_tooltip = true;
       egui::ScrollArea::vertical().show(ui, |ui| {
         let render_start = Instant::now();
-        MarkdownLabel::new(ui.id().with("md"), &self.markdown_input)
-          .font(FontId::proportional(14.0))
-          .selectable(self.selectable)
-          .interactable(self.interactable)
-          .link_handler(&link_handler)
-          .code_block_buttons(&code_block_header)
-          .scroll_code_blocks(true)
-          .style(&self.markdown_style)
-          .heal(self.simulate_stream)
-          .show(ui);
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 8)).fill(ui.visuals().faint_bg_color).show(
+          ui,
+          |ui| {
+            MarkdownLabel::new(ui.id().with("md"), &self.markdown_input)
+              .font(FontId::proportional(14.0))
+              .selectable(self.selectable)
+              .interactable(self.interactable)
+              .link_handler(&link_handler)
+              .code_block_buttons(&code_block_header)
+              .scroll_code_blocks(true)
+              .style(&self.markdown_style)
+              .heal(self.simulate_stream)
+              .show(ui);
+          },
+        );
         let render_elapsed = render_start.elapsed();
 
         if self.render_times.len() >= 120 {
@@ -320,6 +325,17 @@ Regular, **bold**, *italic*, ***bold italic***, ~~strikethrough~~, and `inline c
 1. First
 2. Second
 3. Third
+
+## Long Lists
+ - Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+ - Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+ - Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+ - Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+
+ 1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+ 2. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+ 3. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+ 4. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
 
 ## Task Lists
 
