@@ -53,14 +53,17 @@ fn hash_text(text: &str, style: &MarkdownStyle, handler: Option<&dyn LinkHandler
   hasher.finish()
 }
 
+/// Identity of everything a [`LayoutResult`] depends on.
+///
+/// Deliberately excludes the wrap width: `build_layout` only uses it to seed
+/// `job.wrap.max_width`, which `render_galley` overwrites with the current available width
+/// before shaping. Hashing it here would rebuild every job on every frame of a resize.
 #[inline]
-#[allow(clippy::too_many_arguments)]
 fn hash_flush_context(
   tokens: &[Token<'_>],
   style: &MarkdownStyle,
   font: &FontId,
   color: Color32,
-  max_width: f32,
   dark_mode: bool,
   handler: Option<&dyn LinkHandler>,
 ) -> u64 {
@@ -71,7 +74,6 @@ fn hash_flush_context(
   style.hash(&mut hasher);
   font.hash(&mut hasher);
   color.hash(&mut hasher);
-  max_width.to_bits().hash(&mut hasher);
   dark_mode.hash(&mut hasher);
   if let Some(h) = handler {
     h.id().hash(&mut hasher);
@@ -676,13 +678,14 @@ impl<'a> MarkdownLabel<'a> {
     let token_slice = &md.tokens[start..trimmed_end];
     let max_width = if ui.wrap_mode() == egui::TextWrapMode::Extend { f32::INFINITY } else { ui.available_width() };
     let dark_mode = ui.visuals().dark_mode;
-    let ctx_hash = hash_flush_context(token_slice, style, font, color, max_width, dark_mode, self.link_handler);
+    let ctx_hash = hash_flush_context(token_slice, style, font, color, dark_mode, self.link_handler);
     let cache_id = self.id.with(("flush", start));
     let size_cache_id = self.id.with(("flush_sz", start));
 
-    // Viewport culling: skip layout+paint for off-screen segments.
-    if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(size_cache_id)) {
-      if cached_hash == ctx_hash {
+    // Viewport culling: skip layout+paint for off-screen segments. Unlike the layout, a
+    // measured size is only valid at the width it was measured at.
+    if let Some((cached_hash, cached_width, cached_size)) = ui.data(|d| d.get_temp::<(u64, f32, Vec2)>(size_cache_id)) {
+      if cached_hash == ctx_hash && cached_width == max_width {
         let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, cached_size);
         if !ui.is_rect_visible(est_rect) {
           ui.allocate_space(cached_size);
@@ -705,7 +708,7 @@ impl<'a> MarkdownLabel<'a> {
           color,
           style,
         );
-        ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, size)));
+        ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
         return;
       }
     }
@@ -730,7 +733,7 @@ impl<'a> MarkdownLabel<'a> {
       color,
       style,
     );
-    ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, size)));
+    ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
   }
 
   #[allow(clippy::too_many_arguments)]

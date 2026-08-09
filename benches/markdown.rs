@@ -105,5 +105,37 @@ fn bench_arc_clone(c: &mut Criterion) {
   });
 }
 
-criterion_group!(benches, bench_parse, bench_hash_text, bench_hash_token_slice, bench_arc_clone);
+/// End-to-end frame cost of the widget: at a constant width every cache hits, while a
+/// resize changes the wrap width each frame and forces re-shaping.
+fn bench_render(c: &mut Criterion) {
+  use egui::{vec2, Context, Id, RawInput, Rect, UiBuilder};
+  use egui_markdown::MarkdownLabel;
+
+  let doc = generate_document(20);
+
+  let frame = |ctx: &Context, width: f32| {
+    let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(width, 700.0));
+    let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      MarkdownLabel::new(Id::new("md"), black_box(&doc)).show(&mut child);
+    });
+  };
+
+  let ctx = Context::default();
+  for _ in 0..10 {
+    frame(&ctx, 700.0);
+  }
+  c.bench_function("render_steady_state", |b| b.iter(|| frame(&ctx, 700.0)));
+
+  let ctx = Context::default();
+  let mut width = 600.0f32;
+  c.bench_function("render_resizing", |b| {
+    b.iter(|| {
+      width = if width >= 800.0 { 600.0 } else { width + 1.0 };
+      frame(&ctx, width);
+    });
+  });
+}
+
+criterion_group!(benches, bench_parse, bench_hash_text, bench_hash_token_slice, bench_arc_clone, bench_render);
 criterion_main!(benches);
