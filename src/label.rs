@@ -12,7 +12,7 @@ use epaint::{
   text::{Galley, Glyph, Row},
 };
 
-use crate::layout::{build_layout, highlight_code, section_for_char, CodeThemeArg, LayoutResult};
+use crate::layout::{build_layout, highlight_code, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult};
 use crate::link::LinkHandler;
 use crate::paint;
 use crate::parser;
@@ -27,7 +27,9 @@ pub use crate::theme::default_code_theme;
 #[derive(Clone)]
 struct CachedMarkdownLayout {
   text_hash: u64,
-  layout: Arc<LayoutResult>,
+  /// `None` when the document takes the segmented render path, which lays out each flush
+  /// range separately and so has no use for a whole-document layout.
+  layout: Option<Arc<LayoutResult>>,
   /// Owned copy of the tokens for rendering (needed for hover/click after cache hit).
   tokens: Arc<Vec<Token<'static>>>,
 }
@@ -51,26 +53,27 @@ fn hash_text(text: &str, style: &MarkdownStyle, handler: Option<&dyn LinkHandler
   hasher.finish()
 }
 
+/// Identity of everything a [`LayoutResult`] depends on.
+///
+/// Deliberately excludes the wrap width: `build_layout` only uses it to seed
+/// `job.wrap.max_width`, which `render_galley` overwrites with the current available width
+/// before shaping. Hashing it here would rebuild every job on every frame of a resize.
 #[inline]
-#[allow(clippy::too_many_arguments)]
 fn hash_flush_context(
   tokens: &[Token<'_>],
   style: &MarkdownStyle,
   font: &FontId,
   color: Color32,
-  max_width: f32,
   dark_mode: bool,
   handler: Option<&dyn LinkHandler>,
 ) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
-  // Token content identity is already validated by the outer text_hash.
-  // Only hash the slice length here to distinguish different flush ranges;
-  // the remaining fields capture render-parameter changes (font, color, width, etc.).
-  tokens.len().hash(&mut hasher);
+  // Token content must be hashed: a flush range is keyed by its start index, and an edit
+  // can change a range's content while leaving its start index and length untouched.
+  tokens.hash(&mut hasher);
   style.hash(&mut hasher);
   font.hash(&mut hasher);
   color.hash(&mut hasher);
-  max_width.to_bits().hash(&mut hasher);
   dark_mode.hash(&mut hasher);
   if let Some(h) = handler {
     h.id().hash(&mut hasher);
@@ -363,14 +366,13 @@ impl<'a> MarkdownLabel<'a> {
 
     if let Some(ref cached) = cached {
       if cached.text_hash == text_hash {
-        let layout = Arc::clone(&cached.layout);
         let tokens = Arc::clone(&cached.tokens);
 
-        if !layout.segment_breaks.is_empty() {
+        let Some(layout) = cached.layout.clone() else {
           let md = Markdown { s: text, tokens: (*tokens).clone() };
           self.render_segmented(ui, &md, &font, color, style, text_hash);
           return;
-        }
+        };
 
         self.render_galley(
           ui,
@@ -390,6 +392,18 @@ impl<'a> MarkdownLabel<'a> {
 
     // Cache miss - parse and build layout.
     let md = parser::parse(text);
+    let owned_tokens = Arc::new(tokens_to_owned(&md.tokens));
+
+    // Decide the render path before laying anything out: a whole-document layout is useless
+    // to the segmented path, and building one per keystroke doubles the cost of every edit.
+    if needs_segmentation(&md.tokens, self.scroll_code_blocks, self.link_handler) {
+      ui.data_mut(|d| {
+        d.insert_temp(cache_id, CachedMarkdownLayout { text_hash, layout: None, tokens: owned_tokens });
+      });
+      self.render_segmented(ui, &md, &font, color, style, text_hash);
+      return;
+    }
+
     let code_theme = self.code_theme_arg();
     let layout = build_layout(
       ui,
@@ -402,21 +416,15 @@ impl<'a> MarkdownLabel<'a> {
       style,
       code_theme,
     );
-    let owned_tokens = Arc::new(tokens_to_owned(&md.tokens));
+    debug_assert!(layout.segment_breaks.is_empty(), "needs_segmentation disagrees with build_layout");
     let layout = Arc::new(layout);
 
-    // Store in cache.
     ui.data_mut(|d| {
       d.insert_temp(
         cache_id,
-        CachedMarkdownLayout { text_hash, layout: Arc::clone(&layout), tokens: Arc::clone(&owned_tokens) },
+        CachedMarkdownLayout { text_hash, layout: Some(Arc::clone(&layout)), tokens: owned_tokens },
       );
     });
-
-    if !layout.segment_breaks.is_empty() {
-      self.render_segmented(ui, &md, &font, color, style, text_hash);
-      return;
-    }
 
     self.render_galley(
       ui,
@@ -670,13 +678,14 @@ impl<'a> MarkdownLabel<'a> {
     let token_slice = &md.tokens[start..trimmed_end];
     let max_width = if ui.wrap_mode() == egui::TextWrapMode::Extend { f32::INFINITY } else { ui.available_width() };
     let dark_mode = ui.visuals().dark_mode;
-    let ctx_hash = hash_flush_context(token_slice, style, font, color, max_width, dark_mode, self.link_handler);
+    let ctx_hash = hash_flush_context(token_slice, style, font, color, dark_mode, self.link_handler);
     let cache_id = self.id.with(("flush", start));
     let size_cache_id = self.id.with(("flush_sz", start));
 
-    // Viewport culling: skip layout+paint for off-screen segments.
-    if let Some((cached_hash, cached_size)) = ui.data(|d| d.get_temp::<(u64, Vec2)>(size_cache_id)) {
-      if cached_hash == ctx_hash {
+    // Viewport culling: skip layout+paint for off-screen segments. Unlike the layout, a
+    // measured size is only valid at the width it was measured at.
+    if let Some((cached_hash, cached_width, cached_size)) = ui.data(|d| d.get_temp::<(u64, f32, Vec2)>(size_cache_id)) {
+      if cached_hash == ctx_hash && cached_width == max_width {
         let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, cached_size);
         if !ui.is_rect_visible(est_rect) {
           ui.allocate_space(cached_size);
@@ -699,7 +708,7 @@ impl<'a> MarkdownLabel<'a> {
           color,
           style,
         );
-        ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, size)));
+        ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
         return;
       }
     }
@@ -724,7 +733,7 @@ impl<'a> MarkdownLabel<'a> {
       color,
       style,
     );
-    ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, size)));
+    ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
   }
 
   #[allow(clippy::too_many_arguments)]
@@ -741,13 +750,18 @@ impl<'a> MarkdownLabel<'a> {
     color: Color32,
     style: &MarkdownStyle,
   ) -> Vec2 {
+    let extend = ui.wrap_mode() == egui::TextWrapMode::Extend;
     let mut job = job;
-    job.wrap.max_width =
-      if ui.wrap_mode() == egui::TextWrapMode::Extend { f32::INFINITY } else { ui.available_width() };
+    job.wrap.max_width = if extend { f32::INFINITY } else { ui.available_width() };
     let galley = ui.fonts_mut(|f| f.layout_job(job));
-    let size = galley.size();
     let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
     let available_width = ui.available_width();
+    // Decorations (code block backgrounds, horizontal rules) span the full available width, so the
+    // widget must claim it too — otherwise they paint outside the allocated rect.
+    let mut size = galley.size();
+    if !extend {
+      size.x = size.x.max(available_width);
+    }
 
     if !self.interactable {
       let (rect, _) = ui.allocate_exact_size(size, Sense::hover());

@@ -628,10 +628,10 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
               list_info.number += 1;
               CowStr::Boxed(marker.into())
             } else {
-              CowStr::Borrowed("- ")
+              CowStr::Borrowed("• ")
             }
           } else {
-            CowStr::Borrowed("  - ")
+            CowStr::Borrowed("  • ")
           };
           tokens.push(Token::ListMarker { marker, indent_level });
         }
@@ -773,7 +773,7 @@ mod tests {
     let first_marker = it.next().unwrap();
     assert!(first_marker.is_list_marker());
     if let Token::ListMarker { marker, indent_level } = first_marker {
-      assert_eq!(marker.as_ref(), "- ");
+      assert_eq!(marker.as_ref(), "• ");
       assert_eq!(*indent_level, 1);
     }
   }

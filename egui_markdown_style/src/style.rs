@@ -34,6 +34,8 @@ pub struct MarkdownStyle {
   pub horizontal_rule: HorizontalRuleStyle,
   /// Styling for blockquotes.
   pub blockquote: BlockquoteStyle,
+  /// Styling for list markers (bullets and numbers).
+  pub list: ListStyle,
   /// Vertical spacing between block elements in pixels.
   pub block_spacing: f32,
   /// Font size for code blocks. Default: `10.0`.
@@ -50,6 +52,7 @@ impl Default for MarkdownStyle {
       heading: HeadingStyle::default(),
       horizontal_rule: HorizontalRuleStyle::default(),
       blockquote: BlockquoteStyle::default(),
+      list: ListStyle::default(),
       block_spacing: 8.0,
       code_font_size: 10.0,
       default_code_language: String::new(),
@@ -64,6 +67,7 @@ impl Hash for MarkdownStyle {
     self.heading.hash(state);
     self.horizontal_rule.hash(state);
     self.blockquote.hash(state);
+    self.list.hash(state);
     self.block_spacing.to_bits().hash(state);
     self.code_font_size.to_bits().hash(state);
     self.default_code_language.hash(state);
@@ -117,6 +121,10 @@ impl MarkdownStyle {
 
     egui::CollapsingHeader::new("Blockquotes").default_open(false).show(ui, |ui| {
       self.blockquote.ui(ui);
+    });
+
+    egui::CollapsingHeader::new("Lists").default_open(false).show(ui, |ui| {
+      self.list.ui(ui);
     });
   }
 }
@@ -379,6 +387,62 @@ impl BlockquoteStyle {
 
       ui.label("Stroke width:");
       ui.add(DragValue::new(&mut self.stroke_width).range(0.0..=5.0).speed(0.1));
+      ui.end_row();
+    });
+  }
+}
+
+/// Styling for list markers.
+///
+/// Markers are right-aligned in a slot whose width is measured from the body font, so every item
+/// of a nesting level starts its text at the same x. These fields adjust that arrangement: `gap`
+/// moves the text away from the marker column (wrapped rows follow it), while the two `nudge`
+/// fields move a marker left of the column without moving any text.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ListStyle {
+  /// Space between the marker column and the item text, in points.
+  pub gap: f32,
+  /// How far left of the marker column to draw a bullet, in points.
+  pub bullet_nudge: f32,
+  /// How far left of the marker column to draw a number, in points.
+  pub number_nudge: f32,
+  /// Font size multiplier for the bullet glyph. The row height is unaffected.
+  pub bullet_scale: f32,
+}
+
+impl Default for ListStyle {
+  fn default() -> Self {
+    Self { gap: 0.0, bullet_nudge: 0.0, number_nudge: 0.0, bullet_scale: 1.0 }
+  }
+}
+
+impl Hash for ListStyle {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.gap.to_bits().hash(state);
+    self.bullet_nudge.to_bits().hash(state);
+    self.number_nudge.to_bits().hash(state);
+    self.bullet_scale.to_bits().hash(state);
+  }
+}
+
+impl ListStyle {
+  fn ui(&mut self, ui: &mut Ui) {
+    Grid::new("list_style").num_columns(2).striped(true).show(ui, |ui| {
+      ui.label("Marker gap:");
+      ui.add(DragValue::new(&mut self.gap).range(0.0..=40.0).speed(0.25));
+      ui.end_row();
+
+      ui.label("Bullet nudge:");
+      ui.add(DragValue::new(&mut self.bullet_nudge).range(0.0..=40.0).speed(0.25));
+      ui.end_row();
+
+      ui.label("Number nudge:");
+      ui.add(DragValue::new(&mut self.number_nudge).range(0.0..=40.0).speed(0.25));
+      ui.end_row();
+
+      ui.label("Bullet scale:");
+      ui.add(DragValue::new(&mut self.bullet_scale).range(0.5..=4.0).speed(0.05));
       ui.end_row();
     });
   }
