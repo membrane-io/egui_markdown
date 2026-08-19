@@ -75,7 +75,7 @@ impl Hash for MarkdownStyle {
 }
 
 impl MarkdownStyle {
-  /// Show an interactive editor for all style fields.
+  /// Show an interactive editor for all style fields, plus a dark/light switch.
   pub fn ui(&mut self, ui: &mut Ui) {
     ui.horizontal(|ui| {
       let dark_mode = ui.visuals().dark_mode;
@@ -92,7 +92,11 @@ impl MarkdownStyle {
     });
 
     ui.separator();
+    self.render_style(ui);
+  }
 
+  /// Edit the markdown style fields.
+  pub fn render_style(&mut self, ui: &mut Ui) {
     ui.label("Block spacing:");
     ui.add(DragValue::new(&mut self.block_spacing).range(0.0..=40.0).speed(0.5));
 
@@ -108,6 +112,10 @@ impl MarkdownStyle {
       ui.horizontal(|ui| {
         ui.label("Font size:");
         ui.add(DragValue::new(&mut self.code_font_size).range(6.0..=30.0).speed(0.5));
+      });
+      ui.horizontal(|ui| {
+        ui.label("Default language:");
+        ui.add(egui::TextEdit::singleline(&mut self.default_code_language).desired_width(80.0));
       });
     });
 
@@ -223,6 +231,17 @@ impl InlineCodeStyle {
       ui.label("Expand bg:");
       ui.add(DragValue::new(&mut self.expand_bg).range(0.0..=10.0).speed(0.1));
       ui.end_row();
+
+      #[cfg(feature = "membrane")]
+      {
+        ui.label("Expand bg Y:");
+        ui.add(DragValue::new(&mut self.expand_bg_y).range(0.0..=10.0).speed(0.1));
+        ui.end_row();
+
+        ui.label("Bg corner radius:");
+        ui.add(DragValue::new(&mut self.bg_corner_radius).range(0..=16));
+        ui.end_row();
+      }
     });
   }
 }
