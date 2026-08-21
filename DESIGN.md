@@ -42,27 +42,52 @@ At interaction time:
 A naive approach (re-parse, re-layout, re-paint every frame) doesn't scale. Below are
 the optimizations, what problem each solves, and how it works.
 
-## Two-level layout caching
+## Layout caching
 
 **Problem:** Parsing markdown and building a LayoutJob (font metrics, text wrapping,
 section styling) is expensive. Doing it every frame wastes CPU on unchanged content.
+Scrolling code blocks add syntect highlighting on top of that.
 
-**Solution:** Two cache layers stored in egui temp data:
+**Solution:** Three cache layers stored in egui temp data:
 
 1. **Full-document cache** (`CachedMarkdownLayout`): Caches the parse + layout result
    for the entire markdown string. Keyed by a hash of the text content, style, and
-   link handler cache key. On cache hit, skips parsing and layout entirely.
+   link handler cache key. On cache hit, skips parsing and layout entirely. When the
+   document needs the segmented path (tables, scrolling fences, blockquotes, …),
+   `layout` is stored as `None` and only the tokens are kept.
 
-2. **Per-segment cache** (`CachedFlushRange`): When the document has block elements
-   (tables, code blocks, blockquotes), text between blocks is laid out independently.
-   Each segment has its own cache keyed by a context hash (tokens, style, font, color,
-   available width, dark mode). Changed segments are re-laid out without affecting others.
+2. **Per-segment cache** (`CachedFlushRange`): When the document has block elements,
+   text between blocks is laid out independently. Each segment has its own cache keyed
+   by a context hash (tokens, style, font, color, dark mode). Changed segments are
+   re-laid out without affecting others. This covers prose around blocks, and also
+   non-scrolling code fences that stay inside a document galley.
+
+3. **Scrolling code-block cache** (`StreamingCodeCache`): Fences rendered with
+   `scroll_code_blocks(true)` are standalone widgets, so they are not covered by
+   `CachedFlushRange`. Each stores `Arc`s for source, frozen `LayoutJob`, and galley,
+   plus syntect parse/highlight state frozen after every complete line (ending in `\n`).
+   Identity is language, code font size, dark mode, pixels-per-point, and the theme
+   actually used (per-call override pointer, else installed theme pointer via
+   `set_code_themes`, else builtin selected by dark mode). The source is compared
+   separately. Arcing the heavy fields keeps settled-hit `get_temp` clones cheap.
+
+   - Exact source match: reuse the galley (no syntect).
+   - Source still starts with the frozen complete-line prefix: commit any newly completed
+     lines, tentatively highlight the incomplete tail, and reshape. Cost stays near the
+     size of the tail, not the whole fence.
+   - Otherwise: full rebuild.
+
+   Callers that stream markdown into the same widget must keep a **stable widget id**
+   across length changes. Putting `content.len()` in the id empties temp caches every
+   token and defeats append-only highlighting.
 
 Cache invalidation happens automatically: if the hash doesn't match, the cache is
 rebuilt. Tokens are converted from borrowed to owned (`Token<'static>`) for cache
 storage since the input string may not live across frames.
 
-**Files:** `label.rs` (CachedMarkdownLayout, CachedFlushRange, hash_text, hash_flush_context)
+**Files:** `label.rs` (CachedMarkdownLayout, CachedFlushRange, hash_text,
+hash_flush_context, hash_code_block_identity), `layout.rs` (StreamingCodeCache,
+scrolling_code_galley)
 
 ## Viewport culling
 
