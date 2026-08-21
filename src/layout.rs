@@ -541,82 +541,433 @@ pub type CodeThemeArg<'a> = Option<&'a syntect::highlighting::Theme>;
 #[cfg(not(feature = "syntax_highlighting"))]
 pub type CodeThemeArg<'a> = Option<&'a ()>;
 
-/// Produce a syntax-highlighted [`LayoutJob`] for a code block body.
-///
-/// When `code_theme` is `Some`, that theme is used for highlighting.
-/// When `None`, a built-in syntect theme is chosen based on dark/light mode.
-#[cfg(feature = "syntax_highlighting")]
-pub fn highlight_code(
-  ui: &Ui,
-  body: &str,
-  language: &str,
-  code_font_size: f32,
-  code_theme: CodeThemeArg<'_>,
-) -> LayoutJob {
-  use egui::text::{LayoutSection, TextFormat as TF};
-  use egui_extras::syntax_highlighting;
-  use std::sync::LazyLock;
-
-  static SYNTAX_SET: LazyLock<syntect::parsing::SyntaxSet> =
-    LazyLock::new(syntect::parsing::SyntaxSet::load_defaults_newlines);
-  static THEME_SET: LazyLock<syntect::highlighting::ThemeSet> =
-    LazyLock::new(syntect::highlighting::ThemeSet::load_defaults);
-
-  let style = &*ui.style();
-  let ss = &*SYNTAX_SET;
-  let installed = crate::theme::code_theme(ui.ctx(), style.visuals.dark_mode);
-  let syn_theme = code_theme.unwrap_or_else(|| {
-    if let Some(ref theme) = installed {
-      theme.as_ref()
-    } else if style.visuals.dark_mode {
-      &THEME_SET.themes["base16-ocean.dark"]
-    } else {
-      &THEME_SET.themes["base16-ocean.light"]
+/// Pad each source line with a leading space (matches scrolling code-block rendering).
+pub(crate) fn pad_code_body(text: &str) -> String {
+  let mut padded = String::with_capacity(text.len() + text.lines().count());
+  for (i, line) in text.lines().enumerate() {
+    if i > 0 {
+      padded.push('\n');
     }
-  });
+    padded.push(' ');
+    padded.push_str(line);
+  }
+  padded
+}
 
-  let effective_language = match language {
-    "typescript" | "ts" | "tsx" => "javascript",
-    "jsx" => "javascript",
-    other => other,
-  };
-  let syntax = ss.find_syntax_by_token(effective_language);
+#[cfg(feature = "syntax_highlighting")]
+mod syntect_code {
+  use std::sync::{Arc, LazyLock};
 
-  if let Some(syntax) = syntax {
-    let mut h = syntect::easy::HighlightLines::new(syntax, syn_theme);
-    let mut job = LayoutJob { text: body.into(), ..Default::default() };
-    let mut byte_offset = 0;
-    for line in syntect::util::LinesWithEndings::from(body) {
-      if let Ok(ranges) = h.highlight_line(line, ss) {
-        for (syn_style, range) in ranges {
-          let byte_start = byte_offset;
-          let byte_end = byte_offset + range.len();
-          let fg = syn_style.foreground;
-          #[allow(clippy::useless_conversion)]
-          job.sections.push(LayoutSection {
-            leading_space: 0.0.into(),
-            byte_range: byte_start..byte_end,
-            format: TF {
-              font_id: FontId::monospace(code_font_size),
-              color: Color32::from_rgb(fg.r, fg.g, fg.b),
-              ..Default::default()
-            },
-          });
-          byte_offset = byte_end;
-        }
+  use egui::{text::LayoutJob, Color32, FontId, Ui};
+  use epaint::text::Galley;
+  use syntect::easy::HighlightLines;
+  use syntect::highlighting::{HighlightState, Highlighter, Style};
+  use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
+
+  use super::CodeThemeArg;
+
+  fn effective_code_language(language: &str) -> &str {
+    match language {
+      "typescript" | "ts" | "tsx" => "javascript",
+      "jsx" => "javascript",
+      other => other,
+    }
+  }
+
+  fn syntax_set() -> &'static SyntaxSet {
+    static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+    &SYNTAX_SET
+  }
+
+  fn theme_set() -> &'static syntect::highlighting::ThemeSet {
+    static THEME_SET: LazyLock<syntect::highlighting::ThemeSet> =
+      LazyLock::new(syntect::highlighting::ThemeSet::load_defaults);
+    &THEME_SET
+  }
+
+  fn resolve_syntect_theme<'a>(
+    dark_mode: bool,
+    code_theme: CodeThemeArg<'a>,
+    installed: &'a Option<Arc<syntect::highlighting::Theme>>,
+  ) -> &'a syntect::highlighting::Theme {
+    if let Some(theme) = code_theme {
+      return theme;
+    }
+    if let Some(theme) = installed.as_ref() {
+      return theme.as_ref();
+    }
+    if dark_mode {
+      &theme_set().themes["base16-ocean.dark"]
+    } else {
+      &theme_set().themes["base16-ocean.light"]
+    }
+  }
+
+  pub(crate) fn theme_identity_ptr(ui: &Ui, code_theme: CodeThemeArg<'_>) -> usize {
+    if let Some(theme) = code_theme {
+      return theme as *const _ as usize;
+    }
+    if let Some(installed) = crate::theme::code_theme(ui.ctx(), ui.visuals().dark_mode) {
+      return Arc::as_ptr(&installed) as usize;
+    }
+    0
+  }
+
+  fn append_highlight_ranges_at(
+    job: &mut LayoutJob,
+    ranges: &[(Style, &str)],
+    mut byte_offset: usize,
+    code_font_size: f32,
+  ) {
+    use egui::text::{LayoutSection, TextFormat as TF};
+
+    for (syn_style, range) in ranges {
+      let byte_start = byte_offset;
+      let byte_end = byte_offset + range.len();
+      let fg = syn_style.foreground;
+      #[allow(clippy::useless_conversion)]
+      job.sections.push(LayoutSection {
+        leading_space: 0.0.into(),
+        byte_range: byte_start..byte_end,
+        format: TF {
+          font_id: FontId::monospace(code_font_size),
+          color: Color32::from_rgb(fg.r, fg.g, fg.b),
+          ..Default::default()
+        },
+      });
+      byte_offset = byte_end;
+    }
+  }
+
+  fn append_plain_padded_line(job: &mut LayoutJob, padded_line: &str, code_font_size: f32) {
+    use egui::text::{LayoutSection, TextFormat as TF};
+
+    let byte_start = job.text.len();
+    job.text.push_str(padded_line);
+    #[allow(clippy::useless_conversion)]
+    job.sections.push(LayoutSection {
+      leading_space: 0.0.into(),
+      byte_range: byte_start..job.text.len(),
+      format: TF { font_id: FontId::monospace(code_font_size), ..Default::default() },
+    });
+  }
+
+  fn highlight_padded_line_into(
+    theme: &syntect::highlighting::Theme,
+    parse_state: &ParseState,
+    highlight_state: &HighlightState,
+    ss: &SyntaxSet,
+    job: &mut LayoutJob,
+    padded_line: &str,
+    code_font_size: f32,
+  ) -> (ParseState, HighlightState) {
+    let mut h = HighlightLines::from_state(theme, highlight_state.clone(), parse_state.clone());
+    match h.highlight_line(padded_line, ss) {
+      Ok(ranges) => {
+        let byte_offset = job.text.len();
+        job.text.push_str(padded_line);
+        append_highlight_ranges_at(job, &ranges, byte_offset, code_font_size);
+        let (hs, ps) = h.state();
+        (ps, hs)
+      }
+      Err(_) => {
+        append_plain_padded_line(job, padded_line, code_font_size);
+        (parse_state.clone(), highlight_state.clone())
       }
     }
-    return job;
   }
 
-  // Fallback: use egui_extras highlight (which may also fall back to plain text).
-  let theme = syntax_highlighting::CodeTheme::from_style(style);
-  let mut layout_job = syntax_highlighting::highlight(ui.ctx(), style, &theme, body, language);
-  for section in &mut layout_job.sections {
-    section.format.font_id = FontId::monospace(code_font_size);
+  fn pad_unpadded_line_with_ending(unpadded_line_with_opt_nl: &str) -> String {
+    if let Some(content) = unpadded_line_with_opt_nl.strip_suffix('\n') {
+      let mut s = String::with_capacity(content.len() + 2);
+      s.push(' ');
+      s.push_str(content);
+      s.push('\n');
+      s
+    } else {
+      let mut s = String::with_capacity(unpadded_line_with_opt_nl.len() + 1);
+      s.push(' ');
+      s.push_str(unpadded_line_with_opt_nl);
+      s
+    }
   }
-  layout_job
+
+  /// Streaming cache for a scrolling fence: syntect state is frozen after complete lines.
+  #[derive(Clone)]
+  pub(crate) struct StreamingCodeCache {
+    pub identity_hash: u64,
+    pub source: Arc<str>,
+    /// Byte length of the complete-line prefix of `source` covered by state / `frozen_job`.
+    pub frozen_len: usize,
+    pub parse_state: ParseState,
+    pub highlight_state: HighlightState,
+    pub frozen_job: Arc<LayoutJob>,
+    pub galley: Arc<Galley>,
+  }
+
+  /// Produce a syntax-highlighted [`LayoutJob`] for a code block body.
+  pub fn highlight_code(
+    ui: &Ui,
+    body: &str,
+    language: &str,
+    code_font_size: f32,
+    code_theme: CodeThemeArg<'_>,
+  ) -> LayoutJob {
+    use egui_extras::syntax_highlighting;
+
+    let ss = syntax_set();
+    let style = &*ui.style();
+    let installed = crate::theme::code_theme(ui.ctx(), style.visuals.dark_mode);
+    let syn_theme = resolve_syntect_theme(style.visuals.dark_mode, code_theme, &installed);
+
+    if let Some(syntax) = ss.find_syntax_by_token(effective_code_language(language)) {
+      let highlighter = Highlighter::new(syn_theme);
+      let mut parse_state = ParseState::new(syntax);
+      let mut highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
+      let mut job = LayoutJob { text: String::new(), ..Default::default() };
+      for line in syntect::util::LinesWithEndings::from(body) {
+        let (ps, hs) =
+          highlight_padded_line_into(syn_theme, &parse_state, &highlight_state, ss, &mut job, line, code_font_size);
+        parse_state = ps;
+        highlight_state = hs;
+      }
+      return job;
+    }
+
+    let theme = syntax_highlighting::CodeTheme::from_style(style);
+    let mut layout_job = syntax_highlighting::highlight(ui.ctx(), style, &theme, body, language);
+    for section in &mut layout_job.sections {
+      section.format.font_id = FontId::monospace(code_font_size);
+    }
+    layout_job
+  }
+
+  /// Build or update a scrolling code-block galley.
+  pub(crate) fn scrolling_code_galley(
+    ui: &mut Ui,
+    text: &str,
+    language: &str,
+    code_font_size: f32,
+    identity_hash: u64,
+    code_theme: CodeThemeArg<'_>,
+    cached: Option<StreamingCodeCache>,
+  ) -> StreamingCodeCache {
+    if let Some(cached) = &cached {
+      if cached.identity_hash == identity_hash && cached.source.as_ref() == text {
+        return cached.clone();
+      }
+    }
+
+    let ss = syntax_set();
+    let dark_mode = ui.visuals().dark_mode;
+    let installed = crate::theme::code_theme(ui.ctx(), dark_mode);
+    let syn_theme = resolve_syntect_theme(dark_mode, code_theme, &installed);
+
+    let Some(syntax) = ss.find_syntax_by_token(effective_code_language(language)) else {
+      return rebuild_unknown_language(ui, text, language, code_font_size, identity_hash, code_theme, syn_theme);
+    };
+
+    if let Some(mut cached) = cached.filter(|c| {
+      c.identity_hash == identity_hash
+        && text.len() >= c.frozen_len
+        && text.as_bytes()[..c.frozen_len] == c.source.as_bytes()[..c.frozen_len]
+    }) {
+      let rest = &text[cached.frozen_len..];
+      let mut consumed = 0usize;
+      let mut frozen_job = Arc::unwrap_or_clone(cached.frozen_job);
+      while let Some(rel_nl) = rest[consumed..].find('\n') {
+        let end = consumed + rel_nl + 1;
+        let padded_line = pad_unpadded_line_with_ending(&rest[consumed..end]);
+        let (ps, hs) = highlight_padded_line_into(
+          syn_theme,
+          &cached.parse_state,
+          &cached.highlight_state,
+          ss,
+          &mut frozen_job,
+          &padded_line,
+          code_font_size,
+        );
+        cached.parse_state = ps;
+        cached.highlight_state = hs;
+        consumed = end;
+      }
+      cached.frozen_len += consumed;
+      cached.frozen_job = Arc::new(frozen_job);
+
+      let mut paint_job = (*cached.frozen_job).clone();
+      let incomplete = &text[cached.frozen_len..];
+      if !incomplete.is_empty() {
+        let padded_tail = pad_unpadded_line_with_ending(incomplete);
+        let _ = highlight_padded_line_into(
+          syn_theme,
+          &cached.parse_state,
+          &cached.highlight_state,
+          ss,
+          &mut paint_job,
+          &padded_tail,
+          code_font_size,
+        );
+      }
+      paint_job.wrap.max_width = f32::INFINITY;
+      cached.galley = ui.fonts_mut(|f| f.layout_job(paint_job));
+      cached.source = Arc::from(text);
+      return cached;
+    }
+
+    rebuild_streaming(ui, text, code_font_size, identity_hash, syn_theme, syntax, ss)
+  }
+
+  fn rebuild_unknown_language(
+    ui: &mut Ui,
+    text: &str,
+    language: &str,
+    code_font_size: f32,
+    identity_hash: u64,
+    code_theme: CodeThemeArg<'_>,
+    syn_theme: &syntect::highlighting::Theme,
+  ) -> StreamingCodeCache {
+    let padded = super::pad_code_body(text);
+    let mut job = highlight_code(ui, &padded, language, code_font_size, code_theme);
+    job.wrap.max_width = f32::INFINITY;
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    let highlighter = Highlighter::new(syn_theme);
+    StreamingCodeCache {
+      identity_hash,
+      source: Arc::from(text),
+      frozen_len: text.len(),
+      parse_state: ParseState::new(syntax_set().find_syntax_plain_text()),
+      highlight_state: HighlightState::new(&highlighter, ScopeStack::new()),
+      frozen_job: Arc::new(LayoutJob::default()),
+      galley,
+    }
+  }
+
+  fn rebuild_streaming(
+    ui: &mut Ui,
+    text: &str,
+    code_font_size: f32,
+    identity_hash: u64,
+    syn_theme: &syntect::highlighting::Theme,
+    syntax: &syntect::parsing::SyntaxReference,
+    ss: &SyntaxSet,
+  ) -> StreamingCodeCache {
+    let highlighter = Highlighter::new(syn_theme);
+    let mut parse_state = ParseState::new(syntax);
+    let mut highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
+    let mut frozen_job = LayoutJob { text: String::new(), ..Default::default() };
+    let mut frozen_len = 0usize;
+    let mut incomplete = "";
+
+    for line in syntect::util::LinesWithEndings::from(text) {
+      if line.ends_with('\n') {
+        let padded_line = pad_unpadded_line_with_ending(line);
+        let (ps, hs) = highlight_padded_line_into(
+          syn_theme,
+          &parse_state,
+          &highlight_state,
+          ss,
+          &mut frozen_job,
+          &padded_line,
+          code_font_size,
+        );
+        parse_state = ps;
+        highlight_state = hs;
+        frozen_len += line.len();
+      } else {
+        incomplete = line;
+      }
+    }
+
+    let mut paint_job = frozen_job.clone();
+    if !incomplete.is_empty() {
+      let padded_tail = pad_unpadded_line_with_ending(incomplete);
+      let _ = highlight_padded_line_into(
+        syn_theme,
+        &parse_state,
+        &highlight_state,
+        ss,
+        &mut paint_job,
+        &padded_tail,
+        code_font_size,
+      );
+    }
+    paint_job.wrap.max_width = f32::INFINITY;
+    let galley = ui.fonts_mut(|f| f.layout_job(paint_job));
+
+    StreamingCodeCache {
+      identity_hash,
+      source: Arc::from(text),
+      frozen_len,
+      parse_state,
+      highlight_state,
+      frozen_job: Arc::new(frozen_job),
+      galley,
+    }
+  }
+
+  #[cfg(test)]
+  mod tests {
+    use super::*;
+    use egui::{vec2, Context, RawInput, Rect, UiBuilder};
+    use std::fmt::Write as _;
+
+    fn growing_body(n: usize) -> String {
+      let mut body = String::from("fn claim(log: &Log, seq: u64) -> Result<(), ClaimError> {\n");
+      for idx in 0..n {
+        let _ = writeln!(body, "    let step_{idx} = log.tail()?;");
+      }
+      body
+    }
+
+    #[test]
+    fn frozen_len_advances_on_complete_lines() {
+      let ctx = Context::default();
+      let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 400.0));
+      let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+        let c1 = scrolling_code_galley(&mut child, "fn main() {\n    let x", "rust", 12.0, 1, None, None);
+        assert_eq!(c1.frozen_len, "fn main() {\n".len());
+        assert!(c1.source.as_ref().ends_with("let x"));
+
+        let c2 = scrolling_code_galley(
+          &mut child,
+          "fn main() {\n    let x = 1;\n    let y",
+          "rust",
+          12.0,
+          1,
+          None,
+          Some(c1),
+        );
+        assert_eq!(c2.frozen_len, "fn main() {\n    let x = 1;\n".len());
+        assert_eq!(c2.source.as_ref(), "fn main() {\n    let x = 1;\n    let y");
+      });
+    }
+
+    #[test]
+    fn append_reuses_frozen_prefix_bytes() {
+      let ctx = Context::default();
+      let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 400.0));
+      let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+        let a = growing_body(20);
+        let c1 = scrolling_code_galley(&mut child, &a, "rust", 12.0, 1, None, None);
+        assert_eq!(c1.frozen_len, a.len());
+
+        let b = growing_body(21);
+        assert!(b.starts_with(&a));
+        let frozen_before = c1.frozen_len;
+        let c2 = scrolling_code_galley(&mut child, &b, "rust", 12.0, 1, None, Some(c1));
+        assert!(c2.frozen_len > frozen_before);
+        assert_eq!(c2.frozen_len, b.len());
+        assert_eq!(c2.source.as_ref(), b);
+      });
+    }
+  }
 }
+#[cfg(feature = "syntax_highlighting")]
+pub use syntect_code::highlight_code;
+#[cfg(feature = "syntax_highlighting")]
+pub(crate) use syntect_code::{scrolling_code_galley, theme_identity_ptr, StreamingCodeCache};
 
 /// Produce a plain (unhighlighted) [`LayoutJob`] for a code block body.
 #[cfg(not(feature = "syntax_highlighting"))]

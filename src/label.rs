@@ -12,7 +12,11 @@ use epaint::{
   text::{Galley, Glyph, Row},
 };
 
-use crate::layout::{build_layout, highlight_code, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult};
+use crate::layout::{build_layout, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult};
+#[cfg(feature = "syntax_highlighting")]
+use crate::layout::{scrolling_code_galley, StreamingCodeCache};
+#[cfg(not(feature = "syntax_highlighting"))]
+use crate::layout::highlight_code;
 use crate::link::LinkHandler;
 use crate::paint;
 use crate::parser;
@@ -40,6 +44,13 @@ struct CachedFlushRange {
   ctx_hash: u64,
   layout: Arc<LayoutResult>,
   tokens: Arc<Vec<Token<'static>>>,
+}
+
+#[cfg(not(feature = "syntax_highlighting"))]
+#[derive(Clone)]
+struct CachedCodeBlock {
+  ctx_hash: u64,
+  galley: Arc<Galley>,
 }
 
 #[inline]
@@ -78,6 +89,46 @@ fn hash_flush_context(
   if let Some(h) = handler {
     h.id().hash(&mut hasher);
   }
+  hasher.finish()
+}
+
+/// Identity of everything a scrolling code-block galley depends on except the source text.
+#[cfg(feature = "syntax_highlighting")]
+#[inline]
+fn hash_code_block_identity(
+  ui: &Ui,
+  language: &str,
+  code_font_size: f32,
+  dark_mode: bool,
+  pixels_per_point: f32,
+  code_theme: CodeThemeArg<'_>,
+) -> u64 {
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  language.hash(&mut hasher);
+  code_font_size.to_bits().hash(&mut hasher);
+  dark_mode.hash(&mut hasher);
+  pixels_per_point.to_bits().hash(&mut hasher);
+  crate::layout::theme_identity_ptr(ui, code_theme).hash(&mut hasher);
+  hasher.finish()
+}
+
+#[cfg(not(feature = "syntax_highlighting"))]
+#[inline]
+fn hash_code_block_context(
+  text: &str,
+  language: &str,
+  code_font_size: f32,
+  dark_mode: bool,
+  pixels_per_point: f32,
+  code_theme: CodeThemeArg<'_>,
+) -> u64 {
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  text.hash(&mut hasher);
+  language.hash(&mut hasher);
+  code_font_size.to_bits().hash(&mut hasher);
+  dark_mode.hash(&mut hasher);
+  pixels_per_point.to_bits().hash(&mut hasher);
+  let _ = code_theme;
   hasher.finish()
 }
 
@@ -1006,19 +1057,55 @@ fn render_code_block(
   code_theme: CodeThemeArg<'_>,
 ) {
   let lang = language.unwrap_or(style.default_code_language.as_str());
-  let mut padded_text = String::with_capacity(text.len() + text.lines().count());
-  for (i, line) in text.lines().enumerate() {
-    if i > 0 {
-      padded_text.push('\n');
+  let cache_id = id.with("code_galley");
+
+  #[cfg(feature = "syntax_highlighting")]
+  let galley = {
+    let identity_hash = hash_code_block_identity(
+      ui,
+      lang,
+      style.code_font_size,
+      ui.visuals().dark_mode,
+      ui.ctx().pixels_per_point(),
+      code_theme,
+    );
+    let cached = ui.data(|d| d.get_temp::<StreamingCodeCache>(cache_id));
+    let updated = scrolling_code_galley(
+      ui,
+      text.as_ref(),
+      lang,
+      style.code_font_size,
+      identity_hash,
+      code_theme,
+      cached,
+    );
+    let galley = Arc::clone(&updated.galley);
+    ui.data_mut(|d| d.insert_temp(cache_id, updated));
+    galley
+  };
+
+  #[cfg(not(feature = "syntax_highlighting"))]
+  let galley = {
+    let ctx_hash = hash_code_block_context(
+      text.as_ref(),
+      lang,
+      style.code_font_size,
+      ui.visuals().dark_mode,
+      ui.ctx().pixels_per_point(),
+      code_theme,
+    );
+    match ui.data(|d| d.get_temp::<CachedCodeBlock>(cache_id)) {
+      Some(cached) if cached.ctx_hash == ctx_hash => cached.galley,
+      _ => {
+        let galley = build_code_block_galley(ui, text.as_ref(), lang, style.code_font_size, code_theme);
+        ui.data_mut(|d| {
+          d.insert_temp(cache_id, CachedCodeBlock { ctx_hash, galley: Arc::clone(&galley) });
+        });
+        galley
+      }
     }
-    padded_text.push(' ');
-    padded_text.push_str(line);
-  }
+  };
 
-  let mut job = highlight_code(ui, &padded_text, lang, style.code_font_size, code_theme);
-  job.wrap.max_width = f32::INFINITY;
-
-  let galley = ui.fonts_mut(|f| f.layout_job(job));
   let galley_width = galley.size().x;
   let galley_height = galley.size().y;
   let stroke = Stroke::new(style.code_block.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
@@ -1052,6 +1139,20 @@ fn render_code_block(
     child_ui.add_space(4.0);
     button_fn(&mut child_ui, text, lang);
   }
+}
+
+#[cfg(not(feature = "syntax_highlighting"))]
+fn build_code_block_galley(
+  ui: &mut Ui,
+  text: &str,
+  lang: &str,
+  code_font_size: f32,
+  code_theme: CodeThemeArg<'_>,
+) -> Arc<Galley> {
+  let padded_text = crate::layout::pad_code_body(text);
+  let mut job = highlight_code(ui, &padded_text, lang, code_font_size, code_theme);
+  job.wrap.max_width = f32::INFINITY;
+  ui.fonts_mut(|f| f.layout_job(job))
 }
 
 /// Custom cursor-from-position that avoids egui's Galley::cursor_from_pos bug (#5796).

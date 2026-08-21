@@ -137,5 +137,75 @@ fn bench_render(c: &mut Criterion) {
   });
 }
 
-criterion_group!(benches, bench_parse, bench_hash_text, bench_hash_token_slice, bench_arc_clone, bench_render);
+/// Steady-state cost of a large scrolling fence after the galley cache is warm.
+fn bench_render_scroll_code(c: &mut Criterion) {
+  use egui::{vec2, Context, Id, RawInput, Rect, UiBuilder};
+  use egui_markdown::MarkdownLabel;
+  use std::fmt::Write as _;
+
+  let mut fence = String::from("```rust\nfn claim(log: &Log, seq: u64) -> Result<(), ClaimError> {\n");
+  for idx in 0..200 {
+    let _ = writeln!(fence, "    let step_{idx} = log.tail()?;");
+  }
+  fence.push_str("    log.insert(seq)\n}\n```\n");
+
+  let frame = |ctx: &Context| {
+    let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 900.0));
+    let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      MarkdownLabel::new(Id::new("md"), black_box(&fence)).scroll_code_blocks(true).show(&mut child);
+    });
+  };
+
+  let ctx = Context::default();
+  for _ in 0..10 {
+    frame(&ctx);
+  }
+  c.bench_function("render_scroll_code_steady_state", |b| b.iter(|| frame(&ctx)));
+}
+
+/// Cost of appending one complete line to a warm scrolling fence (should stay near O(line)).
+fn bench_render_scroll_code_streaming(c: &mut Criterion) {
+  use egui::{vec2, Context, Id, RawInput, Rect, UiBuilder};
+  use egui_markdown::MarkdownLabel;
+  use std::fmt::Write as _;
+
+  let mut body = String::from("fn claim(log: &Log, seq: u64) -> Result<(), ClaimError> {\n");
+  for idx in 0..100 {
+    let _ = writeln!(body, "    let step_{idx} = log.tail()?;");
+  }
+
+  let ctx = Context::default();
+  let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 900.0));
+  // Warm with the initial fence.
+  let warm = format!("```rust\n{body}```\n");
+  let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+    let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+    MarkdownLabel::new(Id::new("md"), &warm).scroll_code_blocks(true).show(&mut child);
+  });
+
+  let mut line_idx = 100usize;
+  c.bench_function("render_scroll_code_streaming_append", |b| {
+    b.iter(|| {
+      let _ = writeln!(body, "    let step_{line_idx} = log.tail()?;");
+      line_idx += 1;
+      let fence = format!("```rust\n{body}```\n");
+      let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+        MarkdownLabel::new(Id::new("md"), black_box(&fence)).scroll_code_blocks(true).show(&mut child);
+      });
+    });
+  });
+}
+
+criterion_group!(
+  benches,
+  bench_parse,
+  bench_hash_text,
+  bench_hash_token_slice,
+  bench_arc_clone,
+  bench_render,
+  bench_render_scroll_code,
+  bench_render_scroll_code_streaming
+);
 criterion_main!(benches);
