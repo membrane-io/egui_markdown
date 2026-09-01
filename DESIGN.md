@@ -1,37 +1,39 @@
 # Design
 
-egui_markdown is designed for rendering large markdown documents (LLM chat threads,
-documentation) in immediate-mode egui at 60fps.
+egui_markdown renders large markdown documents, such as LLM chat threads and
+documentation, in immediate-mode egui at 60 frames per second.
 
 ## Custom link handling
 
-**Problem:** Applications need links to do more than open URLs. A chat app might render
-domain-specific links as interactive widgets. A documentation viewer might navigate
-internally. The markdown renderer shouldn't hardcode these behaviors.
+**Problem:** Applications need links to do more than open URLs. A chat app can render
+domain-specific links as interactive widgets. A documentation viewer can navigate
+internally. The markdown renderer must not hardcode these behaviors.
 
-**Solution:** The `LinkHandler` trait lets consumers customize links at three levels,
-checked in order during layout:
+**Solution:** The `LinkHandler` trait lets consumers customize links at three levels.
+Layout applies them in this order:
 
 1. **`is_widget_link(href)` -> `render_link(ui, text, href)`** - Promote a link to a
-   standalone widget. The link becomes a segment break: text before it is flushed as a
-   galley, the handler renders any egui widget it wants (buttons, custom views, embedded
-   previews), and text after starts a new galley. The handler gets full control via the
-   `Ui` and returns a `Response`.
+   standalone widget. The link becomes a segment break. The renderer flushes the text
+   before the link as a galley. The handler then draws any egui widget it wants, such as
+   a button, a custom view, or an embedded preview. The text after the link starts a new
+   galley. The handler receives the `Ui` and returns a `Response`.
 
 2. **`layout_link(text, href, job, font, color)`** - Customize inline styling. The
-   handler appends sections to the LayoutJob directly (icons, colored segments,
-   backgrounds). All appended sections are mapped to this link's token so hover and
-   click still work. Returns true if handled.
+   handler appends sections to the `LayoutJob` directly (icons, colored segments,
+   backgrounds). The renderer maps every appended section to the token of this link, so
+   that hover and click continue to work. Returns true if the handler styled the link.
 
-3. **`link_style(href)`** - Simple color/underline override. Returns `None` for default
-   hyperlink styling.
+3. **`link_style(href)`** - Simple color and underline override. Returns `None` for
+   default hyperlink styling.
 
 At interaction time:
-- **Hover:** `link_style()` provides the underline color. Cursor changes to pointing hand.
-- **Click:** `on_click(text, href, ui)` is called. Return true if handled, false to
-  open the URL in the browser.
-- **Cache:** `cache_key()` returns a u64 mixed into the layout hash. When the handler's
-  behavior changes (e.g. different app context), change the key to invalidate cached layouts.
+
+- **Hover:** `link_style()` gives the underline color. The cursor changes to a pointing hand.
+- **Click:** `on_click(text, href, ui)` is called. Return true if the handler used the
+  click, false to open the URL in the browser.
+- **Cache:** `cache_key()` returns a u64 that the layout hash includes. When the behavior
+  of the handler changes, for example in a different app context, change the key to
+  invalidate the cached layouts.
 
 **Files:** `link.rs` (LinkHandler trait), `layout.rs` (layout-time dispatch), `label.rs` (hover/click dispatch)
 
@@ -39,71 +41,80 @@ At interaction time:
 
 ## Performance optimizations
 
-A naive approach (re-parse, re-layout, re-paint every frame) doesn't scale. Below are
-the optimizations, what problem each solves, and how it works.
+A naive approach, which parses, lays out, and paints again on every frame, does not
+scale. The sections below give each optimization, the problem it solves, and how it
+works.
 
 ## Layout caching
 
-**Problem:** Parsing markdown and building a LayoutJob (font metrics, text wrapping,
-section styling) is expensive. Doing it every frame wastes CPU on unchanged content.
-Scrolling code blocks add syntect highlighting on top of that.
+**Problem:** A markdown parse and a `LayoutJob` build (font metrics, text wrapping,
+section styling) are both expensive. The same work on every frame wastes CPU time on
+unchanged content. Scrolling code blocks also add syntect highlighting.
 
-**Solution:** Three cache layers stored in egui temp data:
+**Solution:** The widget keeps three cache layers in egui temp data:
 
-1. **Full-document cache** (`CachedMarkdownLayout`): Caches the parse + layout result
-   for the entire markdown string. Keyed by a hash of the text content, style, and
-   link handler cache key. On cache hit, skips parsing and layout entirely. When the
-   document needs the segmented path (tables, scrolling fences, blockquotes, …),
-   `layout` is stored as `None` and only the tokens are kept.
+1. **Full-document cache** (`CachedMarkdownLayout`): Holds the parse and layout result
+   for the whole markdown string. The key is a hash of the text content, the style, and
+   the cache key of the link handler. On a cache hit, the widget parses nothing and lays
+   out nothing. The segmented path handles tables, scrolling code blocks, blockquotes,
+   and similar elements. When the document needs that path, the entry holds `None` in
+   its `layout` field and keeps only the tokens.
 
-2. **Per-segment cache** (`CachedFlushRange`): When the document has block elements,
-   text between blocks is laid out independently. Each segment has its own cache keyed
-   by a context hash (tokens, style, font, color, dark mode). Changed segments are
-   re-laid out without affecting others. This covers prose around blocks, and also
-   non-scrolling code fences that stay inside a document galley.
+2. **Per-segment cache** (`CachedFlushRange`): When the document has block elements, the
+   widget lays out the text between the blocks independently. Each segment has its own
+   cache, keyed by a context hash of the tokens, style, font, color, and dark mode. The
+   widget lays out a changed segment again and leaves the other segments alone. This
+   covers the prose around blocks, and also the non-scrolling code blocks that stay
+   inside a document galley.
 
-3. **Scrolling code-block cache** (`StreamingCodeCache`): Fences rendered with
-   `scroll_code_blocks(true)` are standalone widgets, so they are not covered by
-   `CachedFlushRange`. Each stores `Arc`s for source, frozen `LayoutJob`, and galley,
-   plus syntect parse/highlight state frozen after every complete line (ending in `\n`).
-   Identity is language, code font size, dark mode, pixels-per-point, and the theme
-   actually used (per-call override pointer, else installed theme pointer via
-   `set_code_themes`, else builtin selected by dark mode). The source is compared
-   separately. Arcing the heavy fields keeps settled-hit `get_temp` clones cheap.
+3. **Scrolling code-block cache** (`StreamingCodeCache`): A code block that
+   `scroll_code_blocks(true)` renders is a standalone widget, so `CachedFlushRange` does
+   not cover it. Each entry holds an `Arc` for the source, one for the frozen
+   `LayoutJob`, and one for the galley. It also holds the syntect parse and highlight
+   state, frozen after each complete line, which is a line that ends in `\n`. The
+   identity of an entry is the language, the code font size, the dark mode flag, the
+   pixels-per-point value, and the theme in use. The theme in use is the per-call
+   override pointer when there is one. If there is not, it is the installed theme pointer
+   from `set_code_themes`, and then the built-in theme that the dark mode flag selects.
+   The cache compares the source separately. Each large field sits behind an `Arc`, so a
+   `get_temp` clone on a cache hit costs little.
 
-   - Exact source match: reuse the galley (no syntect).
-   - Source still starts with the frozen complete-line prefix: commit any newly completed
-     lines, tentatively highlight the incomplete tail, and reshape. Cost stays near the
-     size of the tail, not the whole fence.
-   - Otherwise: full rebuild.
+   - Exact source match: reuse the galley and call no syntect code.
+   - The source still starts with the frozen complete-line prefix: commit the lines that
+     are now complete, highlight the incomplete last line, and shape the text again. The
+     cost stays near the size of that last line, not the size of the whole code block.
+   - No match: build the entry again.
 
-   Callers that stream markdown into the same widget must keep a **stable widget id**
-   across length changes. Putting `content.len()` in the id empties temp caches every
-   token and defeats append-only highlighting.
+   A caller that streams markdown into the same widget must keep a **stable widget id**
+   as the length changes. An id that contains `content.len()` empties the temp caches on
+   every token, which disables append-only highlighting.
 
-Cache invalidation happens automatically: if the hash doesn't match, the cache is
-rebuilt. Tokens are converted from borrowed to owned (`Token<'static>`) for cache
-storage since the input string may not live across frames.
+The cache invalidates itself. If the hash does not match, the widget builds the entry
+again. The widget converts the tokens from borrowed to owned (`Token<'static>`) before it
+stores them, because the input string may not live across frames.
 
-**Wrap settings are deliberately absent from the layout cache keys.** A `LayoutJob` does
-not depend on the wrap width: `build_layout` only uses `max_width` and `break_anywhere` to
-seed `job.wrap`, and `render_galley` overwrites both with the live values before shaping.
-Hashing the width would rebuild every job on every frame of a resize — excluding it took
-resize frames on the benchmark document from 1.008ms to 426us, leaving only epaint
-reshaping text at the new width, which is inherent. Anyone adding a width to
-`hash_flush_context` would silently undo this.
+**The layout cache keys leave out the wrap settings, and this is intentional.** A
+`LayoutJob` does not depend on the wrap width. `build_layout` uses `max_width` and
+`break_anywhere` only to set the initial values on `job.wrap`. `render_galley` writes the
+live values over both before it shapes the text. A key that includes the width
+rebuilds every job on every frame of a resize. Without the width, a resize frame on the
+benchmark document costs 426us rather than 1.008ms. The remaining cost is epaint, which
+must shape the text again at each new width. A width added back to `hash_flush_context`
+removes this saving and shows no other symptom.
 
-`resolve_wrap` derives those live values once per render from the widget's wrap mode
-(explicit via `wrap_mode()`, else `ui.wrap_mode()`), and `apply_live_wrap` writes them onto
-the cached job. `Extend` gives an infinite width, `Wrap` uses `ui.available_width()` and
-sets `break_anywhere` only for `OverflowWrap::BreakAll`, and `Truncate` always breaks
-anywhere so the elision can land mid-token.
+`resolve_wrap` calculates the live values once per render. It reads the wrap mode from
+`wrap_mode()` when the caller set one, and from `ui.wrap_mode()` when the caller did not.
+`apply_live_wrap` then writes those values onto the cached job. `Extend` gives an infinite
+width. `Wrap` uses `ui.available_width()`, and sets `break_anywhere` only for
+`OverflowWrap::BreakAll`. `Truncate` always sets `break_anywhere`, so that the elision can
+fall inside a token.
 
-One value is not re-applied. `max_rows` is baked into the job when it is built, so toggling
-`truncate()` or `max_lines()` on otherwise unchanged text under the same widget id keeps the
-previous row budget until something else invalidates the entry. It is also where the
-`usize::MAX - 1` sentinel comes from: an unlimited job still needs a finite row count to
-defeat egui's paragraph-splitting optimization (egui #5411).
+One value stays as it was. `build_layout` writes `max_rows` into the job at build time,
+and `apply_live_wrap` does not replace it. A change to `truncate()` or `max_lines()` over
+unchanged text, under the same widget id, keeps the previous row limit until something
+else invalidates the entry. `max_rows` is also the reason for the `usize::MAX - 1` value.
+A job with no limit still needs a finite row count, because that count disables the
+paragraph-splitting optimization in egui (egui #5411).
 
 **Files:** `label.rs` (CachedMarkdownLayout, CachedFlushRange, hash_text,
 hash_flush_context, hash_code_block_identity, resolve_wrap, apply_live_wrap), `layout.rs`
@@ -111,100 +122,104 @@ hash_flush_context, hash_code_block_identity, resolve_wrap, apply_live_wrap), `l
 
 ## Viewport culling
 
-**Problem:** A 10,000-line document in a scroll area would layout and paint all content
-every frame, even though only ~50 lines are visible.
+**Problem:** A 10,000-line document in a scroll area lays out and paints all of its
+content on every frame, even though only about 50 lines are visible.
 
-**Solution:** For each block element and text segment, cache its rendered size. Before
-rendering, estimate the screen rect and check `ui.is_rect_visible()`. If off-screen,
-call `ui.allocate_space()` to reserve the correct amount of space (so scrollbars work)
-but skip all layout and painting.
+**Solution:** The widget caches the rendered size of each block element and each text
+segment. Before it renders one, it estimates the screen rect and calls
+`ui.is_rect_visible()`. If the rect is off-screen, the widget calls `ui.allocate_space()`
+to reserve the correct space, which keeps the scrollbars correct. It then lays out nothing
+and paints nothing.
 
-Unlike a layout job, a measured size *is* width-dependent, so the segment size cache stores
-the width it was measured at alongside the hash and requires both to match. This is the
-counterpart to the width being excluded from the layout keys above.
+A measured size does depend on the width, but a layout job does not. The segment size
+cache therefore stores the width it measured at together with the hash, and a hit needs
+both values to match. This is the counterpart to the layout keys above, which leave the
+width out.
 
-This reduces per-frame work from O(document) to O(visible area).
+This reduces the work per frame from O(document) to O(visible area).
 
 **Files:** `label.rs` (flush_text_range size cache, render_token_range block size caches)
 
 ## Segmented rendering
 
-**Problem:** Some markdown elements (tables, code blocks with scrolling, blockquotes,
-images, widget links) can't be part of a single text galley; they need separate egui
-widgets. A monolithic layout approach can't handle this.
+**Problem:** Some markdown elements cannot be part of a single text galley, because they
+need separate egui widgets. These elements are tables, scrolling code blocks,
+blockquotes, images, and widget links. One monolithic layout cannot render them.
 
-**Solution:** Layout identifies "segment breaks" (token indices where the text galley must
-be flushed and a block widget rendered). The render path then alternates between flushing
-text ranges (as galleys) and rendering block widgets.
+**Solution:** Layout identifies segment breaks, which are the token indices where the
+widget must flush the text galley and render a block widget. The render path then
+alternates between text ranges, which it flushes as galleys, and block widgets.
 
-The choice of path is made *before* laying anything out. `needs_segmentation` answers the
-same question `build_layout` would, by inspecting tokens only, so a document that will take
-the segmented path never builds a whole-document layout and discards it — doing so doubled
-the cost of every keystroke. The two must agree: `needs_segmentation` has to account for
-every `segment_breaks.push` in `build_layout`, and a `debug_assert!` on the non-segmented
-path fails if they ever disagree. Documents on the segmented path store `layout: None` in
-the cache entry and keep only their tokens.
+The widget chooses the path before it lays anything out. `needs_segmentation` answers the
+same question as `build_layout`, but it reads the tokens only. A document that takes the
+segmented path therefore never builds a whole-document layout and then discards it. That
+discarded work doubled the cost of every keystroke. The two functions must agree.
+`needs_segmentation` must account for every `segment_breaks.push` in `build_layout`, and a
+`debug_assert!` on the non-segmented path fails when they do not. A document on the
+segmented path holds `None` in the `layout` field of its cache entry and keeps only its
+tokens.
 
-This also enables per-segment viewport culling and caching, since each segment is
+This also permits viewport culling and caching per segment, because each segment is
 independent.
 
 **Files:** `layout.rs` (needs_segmentation, segment_breaks), `label.rs` (render_segmented, render_token_range, flush_text_range)
 
 ## Section-to-token mapping
 
-**Problem:** When the user hovers or clicks on rendered text, we need to know which
-markdown token is under the cursor. The galley only knows about layout sections (styled
-text runs), not tokens.
+**Problem:** When the user hovers or clicks the rendered text, the widget must know which
+markdown token is under the cursor. The galley knows only about layout sections, which
+are styled runs of text, and it knows nothing about tokens.
 
-**Solution:** During layout, build a parallel `Vec<usize>` mapping each section index
-to its originating token index. On hover, find the section under the cursor (via glyph
-position), then look up the token in O(1).
+**Solution:** Layout builds a parallel `Vec<usize>` that maps each section index to the
+index of its source token. On hover, the widget finds the section under the cursor
+from the glyph position, and then finds the token in O(1).
 
-A companion function `section_for_char()` walks sections to find the section index for
-a character offset, replacing a per-frame `Vec<u32>` allocation that would map every
+The function `section_for_char()` reads the sections in order to find the section index
+for a character offset. It replaces a per-frame `Vec<u32>` allocation that mapped every
 character to its section.
 
 **Files:** `layout.rs` (section_to_token, section_for_char)
 
 ## Streaming heal with zero-copy fast path
 
-**Problem:** LLM output arrives incrementally. Unclosed code fences, bold markers, or
-links cause pulldown-cmark to swallow subsequent text. We need to auto-close these
-constructs before parsing.
+**Problem:** LLM output arrives one piece at a time. An unclosed code fence, bold marker,
+or link makes pulldown-cmark treat all the text that follows as part of that construct.
+The renderer must close these constructs before it parses the text.
 
-**Solution:** `heal()` scans for unclosed constructs and appends closing markers. It
-returns `Cow::Borrowed` when no healing is needed (the common case for complete
-markdown), avoiding allocation entirely. Only incomplete input triggers `Cow::Owned`
-with a new string.
+**Solution:** `heal()` finds the unclosed constructs and appends the closing markers. It
+returns `Cow::Borrowed` when the text needs no repair, which is the common case for
+complete markdown, and this avoids an allocation. Only incomplete input produces a
+`Cow::Owned` with a new string.
 
 **Files:** `parser.rs` (heal, heal_inline, heal_table)
 
 ## Token size constraint
 
-**Problem:** Token vectors can be large (thousands of entries for big documents). If
-each Token enum variant is bloated, memory usage and cache performance suffer.
+**Problem:** A token vector can be large, with thousands of entries for a big document. A
+large `Token` variant therefore increases the memory use and reduces the cache
+performance.
 
-**Solution:** A compile-time test asserts `Token` stays under 88 bytes. The current
-size is driven by Link/Image variants with 3 CowStr fields (~80 bytes). The test
-catches accidental growth from new fields or variants.
+**Solution:** A compile-time test asserts that `Token` stays under 88 bytes. The `Link`
+and `Image` variants set the current size, because each one holds three `CowStr` fields,
+which is about 80 bytes. The test detects unintended growth from a new field or variant.
 
 **Files:** `types.rs` (size_tests)
 
 ## Benchmarks
 
-Criterion benchmarks cover the pieces caching is built on — parsing
-(`parse_100_sections`), hashing (`hash_text_100_sections`,
-`hash_token_slice_100_sections`), and cache retrieval (`arc_clone_tokens`) — which validate
-that the caching overhead is justified.
+Criterion benchmarks cover the operations that the caches depend on: the parse
+(`parse_100_sections`), the hashes (`hash_text_100_sections`,
+`hash_token_slice_100_sections`), and the retrieval (`arc_clone_tokens`). These confirm
+that the cost of a cache lookup stays below the cost of the work it prevents.
 
-Four more measure whole frames, so a regression in the cache layers shows up as frame cost
-rather than only as a slower hash:
+Four more benchmarks measure a whole frame. A regression in the cache layers therefore
+appears as a frame cost, and not only as a slower hash:
 
-- `render_steady_state` — repeated frames at a constant width, the case every cache should
-  make nearly free.
-- `render_resizing` — a changing width every frame, which is what the width-independent
-  layout keys exist for.
-- `render_scroll_code_steady_state` and `render_scroll_code_streaming_append` — settled and
-  growing scrolling code fences, covering the append-only syntect path.
+- `render_steady_state`: repeated frames at a constant width. The cache layers together
+  should make this case cost almost nothing.
+- `render_resizing`: a different width on every frame. This is the case that the
+  width-independent layout keys exist for.
+- `render_scroll_code_steady_state` and `render_scroll_code_streaming_append`: a settled
+  code block and a code block that grows. These two cover the append-only syntect path.
 
 **Files:** `benches/markdown.rs`

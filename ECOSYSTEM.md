@@ -2,17 +2,17 @@
 
 A brief survey of related crates, as of early 2025.
 
-`egui_markdown` renders markdown into a single egui galley (styled text layout),
-with block elements like tables, code blocks, blockquotes, and images breaking
-out as separate widgets. This differs from `egui_commonmark`, which renders
-every element as its own widget. The single-galley approach enables text
-selection across paragraphs, viewport culling, and layout caching.
+`egui_markdown` renders markdown into one egui galley, which is a styled text layout. It
+draws the block elements as separate widgets, and those elements are tables, code blocks,
+blockquotes, and images. `egui_commonmark` differs, because it renders every element as
+its own widget. One galley permits text selection across paragraphs, viewport culling,
+and layout caching.
 
-Unique to `egui_markdown`: streaming input healing (auto-closing unclosed
-markdown constructs for incomplete LLM output), a `LinkHandler` trait that
-allows links to be promoted to arbitrary custom widgets (e.g. rendering a
-custom protocol link as an interactive widget instead of plain text), and
-fully customizable visual styling via `MarkdownStyle`.
+Three features are unique to `egui_markdown`. It heals streaming input, which means that
+it closes the unclosed markdown constructs in incomplete LLM output. Its `LinkHandler`
+trait promotes a link to any custom widget. An application can therefore render a custom
+protocol link as an interactive widget rather than as plain text. Its `MarkdownStyle` type makes
+every visual style configurable.
 
 ## egui markdown widgets
 
@@ -36,7 +36,7 @@ These are the parsing backends. `egui_markdown` uses `pulldown-cmark`.
 | Crate | Description |
 |-------|-------------|
 | [`syntect`](https://crates.io/crates/syntect) | Sublime Text syntax definitions + themes. Used by `egui_markdown` for code blocks. |
-| [`tree-sitter-highlight`](https://crates.io/crates/tree-sitter-highlight) | Incremental parsing-based highlighting. Heavier dependency. |
+| [`tree-sitter-highlight`](https://crates.io/crates/tree-sitter-highlight) | Highlighting based on an incremental parse. Larger dependency. |
 
 ## Standalone markdown viewers / renderers
 

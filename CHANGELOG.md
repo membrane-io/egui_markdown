@@ -9,21 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `OverflowWrap` enum (`Normal`, `BreakAll`) and `MarkdownLabel::overflow_wrap` for token-level
-  breaking of runs wider than the available width.
-- `MarkdownLabel::wrap_mode` / `.wrap()` / `.truncate()` / `.extend()`, mirroring egui's `Label`.
-  Truncate elides after `max_lines` rows (default 1) and forces `BreakAll`.
+- `OverflowWrap` enum (`Normal`, `BreakAll`) and `MarkdownLabel::overflow_wrap`, which break a
+  run of text that is wider than the available width.
+- `MarkdownLabel::wrap_mode`, `.wrap()`, `.truncate()`, and `.extend()`, which mirror the same
+  methods on the egui `Label`. Truncate elides after `max_lines` rows, which defaults to 1, and
+  sets `BreakAll`.
 
 ### Changed
 
-- **Breaking:** `build_layout` now takes `max_width: f32` and `break_anywhere: bool` instead of
-  reading `ui.wrap_mode()` itself. Callers that cache the resulting job should keep re-applying
-  live wrap fields before shaping (as `MarkdownLabel` already does).
+- **Breaking:** `build_layout` now takes `max_width: f32` and `break_anywhere: bool`, and no
+  longer reads `ui.wrap_mode()` itself. A caller that caches the resulting job must write the
+  live wrap values over it before each shape, as `MarkdownLabel` already does.
 
 ### Fixed
 
-- `TextWrapMode::Truncate` on the surrounding `Ui` (and now the widget builders) actually truncates
-  instead of behaving like wrap.
+- `TextWrapMode::Truncate` on the surrounding `Ui`, and now on the widget builders, truncates
+  the text. It previously behaved as wrap.
 
 ## [0.1.0] - 2026-03-23
 
@@ -37,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code block background fill using `ui.visuals().code_bg_color`.
 - Image rendering via `egui_extras` (feature: `images`, `svg`).
 - Table rendering with column alignment and pre-measured column widths.
-- `heal_table()` for auto-completing partial table separators during streaming.
+- `heal_table()`, which completes a partial table separator in streaming input.
 - Blockquote rendering with configurable indent and vertical bar.
 - Horizontal rules.
 - Nested ordered and unordered lists.

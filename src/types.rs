@@ -13,14 +13,14 @@ pub enum Token<'s> {
   Text {
     /// The text content.
     text: CowStr<'s>,
-    /// Inline styling (bold, italic, etc.).
+    /// Inline styling, such as bold and italic.
     style: TokenStyle,
   },
   /// Fenced or indented code block.
   CodeBlock {
     /// The code content.
     text: CowStr<'s>,
-    /// The language hint (e.g. `"rust"`), if any.
+    /// The language hint, such as `"rust"`, when the fence gives one.
     language: Option<CowStr<'s>>,
   },
   /// Hyperlink with display text, URL, and optional title.
@@ -32,9 +32,9 @@ pub enum Token<'s> {
     /// Optional hover title.
     title: Option<CowStr<'s>>,
   },
-  /// List item bullet or number (e.g. `"• "` or `"1. "`).
+  /// List item bullet or number, such as `"• "` or `"1. "`.
   ListMarker {
-    /// The marker string (e.g. `"• "`, `"1. "`).
+    /// The marker string, such as `"• "` or `"1. "`.
     marker: CowStr<'s>,
     /// Nesting depth (1 = top-level).
     indent_level: usize,
@@ -63,12 +63,12 @@ pub enum Token<'s> {
     /// Nesting depth (1 = top-level).
     indent_level: usize,
   },
-  /// Footnote reference (e.g. `[^1]`).
+  /// Footnote reference, such as `[^1]`.
   FootnoteRef {
     /// The footnote label.
     label: CowStr<'s>,
   },
-  /// Footnote definition (e.g. `[^1]: ...`).
+  /// Footnote definition, such as `[^1]: ...`.
   FootnoteDef {
     /// The footnote label.
     label: CowStr<'s>,
@@ -104,7 +104,7 @@ pub struct TableData<'s> {
   pub alignments: Vec<Alignment>,
   /// Header cells, each containing a token stream.
   pub headers: Vec<Vec<Token<'s>>>,
-  /// Body rows. Each row is a `Vec` of cells; each cell is a `Vec<Token>`.
+  /// Body rows. Each row is a `Vec` of cells, and each cell is a `Vec<Token>`.
   pub rows: Vec<Vec<Vec<Token<'s>>>>,
 }
 

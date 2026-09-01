@@ -22,12 +22,13 @@ fn trim_end_newlines<'s>(s: CowStr<'s>) -> CowStr<'s> {
 
 /// Auto-close unclosed markdown constructs for streaming/incomplete input.
 ///
-/// When markdown is being streamed (e.g. from an LLM), unclosed constructs cause
-/// pulldown-cmark to render raw syntax characters (`**`, `[`, etc.) as literal text.
+/// When an application streams markdown, for example from an LLM, an unclosed construct
+/// makes pulldown-cmark render the raw syntax characters, such as `**` and `[`, as literal
+/// text.
 /// This function detects unclosed code fences, bold, italic, strikethrough, inline
 /// code, and links, and appends the necessary closing markers.
 ///
-/// Returns `Cow::Borrowed` when no healing is needed (zero-cost).
+/// Returns `Cow::Borrowed` when the text needs no repair, which costs no allocation.
 ///
 /// ```
 /// use egui_markdown::heal;
@@ -322,7 +323,8 @@ fn heal_table(s: &str) -> String {
   String::new()
 }
 
-/// A line that looks like a table row: starts and ends with `|`, has at least 2 cells.
+/// A line with the form of a table row. It starts and ends with `|`, and it has at least
+/// two cells.
 fn is_table_row(line: &str) -> bool {
   line.starts_with('|') && line.ends_with('|') && line.matches('|').count() >= 3
 }

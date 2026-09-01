@@ -152,7 +152,7 @@ pub struct InlineCodeStyle {
   /// How much to expand the background rectangle horizontally beyond the text bounds (in pixels).
   pub expand_bg: f32,
   /// How much to expand the background rectangle vertically (requires `membrane` feature).
-  /// When not set or without `membrane`, falls back to `expand_bg` for both axes.
+  /// When this is not set, or when the `membrane` feature is off, both axes use `expand_bg`.
   #[cfg(feature = "membrane")]
   pub expand_bg_y: f32,
   /// Corner radius for inline code backgrounds (requires `membrane` feature).

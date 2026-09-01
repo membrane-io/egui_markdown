@@ -200,26 +200,28 @@ fn token_to_owned(t: &Token<'_>) -> Token<'static> {
   }
 }
 
-/// How a token wider than the available width is handled.
+/// What the layout does with a token that is wider than the available width.
 ///
-/// Independent of [`MarkdownLabel::wrap_mode`]: that chooses whether the box wraps,
-/// truncates, or extends; this chooses what happens when a single run of characters
-/// still does not fit.
+/// This setting is independent of [`MarkdownLabel::wrap_mode`]. The wrap mode selects
+/// whether the box wraps, truncates, or extends. This enum selects what happens when one
+/// run of characters still does not fit.
 ///
-/// Corresponds roughly to CSS `overflow-wrap` / `word-break`. A future `BreakWord`
-/// variant (wrap at spaces; split a token only when that token alone exceeds the
-/// width) needs engine support and is intentionally not stubbed here.
+/// The variants are close to the CSS `overflow-wrap` and `word-break` properties. A
+/// `BreakWord` variant, which would wrap at a space and split a token only when that
+/// token alone is wider than the box, needs support from the text engine. This crate
+/// does not declare that variant until the support exists.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OverflowWrap {
-  /// Prefer word boundaries; overrun the box when a token has none.
+  /// Prefer a word boundary, and overrun the box when a token has none.
   ///
-  /// CSS `overflow-wrap: normal`.
+  /// This matches CSS `overflow-wrap: normal`.
   #[default]
   Normal,
-  /// Break between any characters once the row exceeds `max_width`.
+  /// Break between any two characters when the row reaches `max_width`.
   ///
-  /// CSS `word-break: break-all`. Ordinary sentences can split mid-word.
+  /// This matches CSS `word-break: break-all`. It can split an ordinary sentence inside
+  /// a word.
   BreakAll,
 }
 
@@ -398,8 +400,9 @@ impl<'a> MarkdownLabel<'a> {
 
   /// Override visual styling for this widget.
   ///
-  /// Without this, the context-wide style from [`egui_markdown_style::global_style`]
-  /// is used (falling back to [`MarkdownStyle::default`] if none is installed).
+  /// Without this, the widget uses the context-wide style from
+  /// [`egui_markdown_style::global_style`], or [`MarkdownStyle::default`] when no context
+  /// style is installed.
   pub fn style(self, style: &'a MarkdownStyle) -> Self {
     Self { style: Some(style), ..self }
   }

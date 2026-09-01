@@ -83,9 +83,9 @@ fn text_format(font_id: FontId, color: Color32) -> TextFormat {
 /// Outcome of appending a Link token to a [`LayoutJob`].
 #[derive(Default)]
 pub struct LinkAppend {
-  /// True when the [`LinkHandler`] indicated this link is a block widget.
-  /// The caller should render the link separately via [`LinkHandler::block_widget`];
-  /// no sections are appended in this case.
+  /// True when the [`LinkHandler`] reported that this link is a block widget.
+  /// The caller must render the link separately with [`LinkHandler::block_widget`].
+  /// Layout appends no sections in this case.
   pub is_block_widget: bool,
   /// Inline-widget placeholder span `(start_char, end_char)` in the job's text.
   /// `None` for non-inline-widget links.
@@ -225,7 +225,7 @@ fn has_bold_font(ui: &Ui) -> bool {
   ui.ctx().fonts(|f| f.families().contains(&bold_family))
 }
 
-/// Apply bold styling: use bold font family if registered, otherwise fall back to strong text color.
+/// Apply bold styling. Use the bold font family when it is registered, and the strong text color when it is not.
 #[inline]
 fn apply_bold(format: &mut TextFormat, ui: &Ui, has_bold: bool) {
   if has_bold {
@@ -248,7 +248,7 @@ fn code_line_indents(ui: &Ui, text: &str, code_font_size: f32) -> Vec<f32> {
 }
 
 /// Whether a token stream contains anything that [`build_layout`] would report as a segment
-/// break, i.e. whether it must go through the segmented render path.
+/// break, which means whether it must use the segmented render path.
 ///
 /// Must stay in sync with every `segment_breaks.push` in [`build_layout`]. It exists so a
 /// caller can make that decision without paying for a full layout it would then discard.

@@ -1,10 +1,10 @@
 # Contributing to egui_markdown
 
-## Getting Started
+## Get started
 
 1. Clone the repository.
 2. Run `cargo check` to verify your setup.
-3. Run `cargo run --example simple` to see the library in action.
+3. Run `cargo run --example simple` to see the library render a document.
 
 ## Code Style
 
@@ -12,10 +12,10 @@
 - All inline comments end with a period.
 - Doc comments (`///`) come before `#[allow(...)]` attributes.
 - No comment banners or section headers.
-- No `.to_string()` inside `format!`, `println!`, `tracing::info!`, etc.
+- No `.to_string()` inside a formatting macro such as `format!`, `println!`, or `tracing::info!`.
 - Keep `use` imports sorted.
 
-## Before Submitting
+## Before you submit
 
 Run the local CI script:
 
@@ -27,7 +27,7 @@ This runs `cargo fmt --check`, `cargo clippy` across all feature configurations,
 
 ## Pull Request Guidelines
 
-- Keep PRs focused on a single change.
+- Keep each pull request to a single change.
 - Add tests for new parser or layout behavior.
 - Update `CHANGELOG.md` under an `[Unreleased]` section.
-- Ensure `./check.sh` passes before requesting review.
+- Make sure that `./check.sh` passes before you request a review.

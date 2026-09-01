@@ -19,8 +19,8 @@ use egui::{Context, Id};
 #[derive(Clone)]
 struct MarkdownStyleSlot(Arc<MarkdownStyle>);
 
-/// Install a context-wide markdown style. Cheap to call on theme changes —
-/// stores an [`Arc`] that widgets clone or deref.
+/// Install a context-wide markdown style. It stores an [`Arc`] that a widget clones or
+/// dereferences, so a call on each theme change costs little.
 pub fn set_style(ctx: &Context, style: impl Into<Arc<MarkdownStyle>>) {
   ctx.data_mut(|d| d.insert_temp(Id::NULL, MarkdownStyleSlot(style.into())));
 }
