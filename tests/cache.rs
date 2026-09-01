@@ -133,6 +133,8 @@ fn needs_segmentation_matches_build_layout() {
           FontId::proportional(14.0),
           Color32::WHITE,
           None,
+          ui.available_width(),
+          false,
           None,
           scroll_code_blocks,
           &style,

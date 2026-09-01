@@ -1,8 +1,7 @@
 //! Layout job construction from parsed markdown token streams.
 
 use egui::{
-  text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat,
-  TextWrapMode, Ui,
+  text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,
 };
 
 use crate::link::LinkHandler;
@@ -269,6 +268,10 @@ pub fn needs_segmentation(
 ///
 /// Converts tokens into styled text sections suitable for galley layout.
 /// Returns segment breaks for tokens that need separate rendering (tables, images, blockquotes).
+///
+/// `max_width` and `break_anywhere` seed [`LayoutJob::wrap`]. Callers that cache the
+/// resulting job should re-apply the live wrap width (and break flag) before shaping,
+/// since those values are typically excluded from layout cache keys.
 #[allow(clippy::too_many_arguments)]
 pub fn build_layout(
   ui: &mut Ui,
@@ -276,6 +279,8 @@ pub fn build_layout(
   font_id: FontId,
   color: Color32,
   max_rows: Option<u32>,
+  max_width: f32,
+  break_anywhere: bool,
   link_handler: Option<&dyn LinkHandler>,
   scroll_code_blocks: bool,
   style: &MarkdownStyle,
@@ -287,7 +292,8 @@ pub fn build_layout(
   let bold_available = has_bold_font(ui);
 
   let mut job = LayoutJob::default();
-  job.wrap.max_width = if ui.wrap_mode() == TextWrapMode::Extend { f32::INFINITY } else { ui.available_width() };
+  job.wrap.max_width = max_width;
+  job.wrap.break_anywhere = break_anywhere;
 
   let mut section_to_token: Vec<usize> = Vec::new();
   let mut code_block_spans: Vec<(usize, usize)> = Vec::new();

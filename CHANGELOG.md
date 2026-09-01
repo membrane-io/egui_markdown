@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `OverflowWrap` enum (`Normal`, `BreakAll`) and `MarkdownLabel::overflow_wrap` for token-level
+  breaking of runs wider than the available width.
+- `MarkdownLabel::wrap_mode` / `.wrap()` / `.truncate()` / `.extend()`, mirroring egui's `Label`.
+  Truncate elides after `max_lines` rows (default 1) and forces `BreakAll`.
+
+### Changed
+
+- **Breaking:** `build_layout` now takes `max_width: f32` and `break_anywhere: bool` instead of
+  reading `ui.wrap_mode()` itself. Callers that cache the resulting job should keep re-applying
+  live wrap fields before shaping (as `MarkdownLabel` already does).
+
+### Fixed
+
+- `TextWrapMode::Truncate` on the surrounding `Ui` (and now the widget builders) actually truncates
+  instead of behaving like wrap.
+
 ## [0.1.0] - 2026-03-23
 
 ### Added
