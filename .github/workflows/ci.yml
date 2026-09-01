@@ -13,7 +13,7 @@ name: CI
 
 on:
   push:
-    branches: [main, membrane]
+    branches: [main]
   pull_request:
 
 env:
