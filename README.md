@@ -51,6 +51,37 @@ footnotes.
 | `syntax_highlighting` | Yes | Syntax-highlighted code blocks via `syntect`. |
 | `images` | No | Render images inline via `egui_extras` image support. |
 | `svg` | No | SVG image support via `egui_extras`. |
+| `membrane` | No | Rendering that needs [Membrane's egui fork](https://github.com/membrane-io/egui). Does not compile against published egui — see below. |
+
+### The `membrane` feature
+
+Everything above works against published egui. `membrane` is different: it calls
+`epaint::text::LeadingSpace`, `TextFormat::bg_corner_radius`, and a two-dimensional
+`TextFormat::expand_bg`, none of which exist upstream, so enabling it without patching egui
+to [the fork](https://github.com/membrane-io/egui) is a compile error rather than a
+fallback.
+
+```toml
+[patch.crates-io]
+egui = { path = "path/to/egui/crates/egui" }
+epaint = { path = "path/to/egui/crates/epaint" }
+egui_extras = { path = "path/to/egui/crates/egui_extras" }
+emath = { path = "path/to/egui/crates/emath" }
+ecolor = { path = "path/to/egui/crates/ecolor" }
+```
+
+Patch `emath` and `ecolor` even though you may not depend on them directly, or you end up
+with two incompatible copies of the types egui passes around. Add `eframe` too if you use it.
+
+Three things render differently without the feature. Inline code backgrounds have square
+corners, and their padding expands by the same amount horizontally and vertically instead of
+separately. A row that soft-wraps inside a list or other indented block returns to the left
+margin rather than keeping the indentation of the line it continues. And a long run of text
+with no spaces breaks between two glyphs instead of overrunning the available width, which
+[`OverflowWrap`](https://docs.rs/egui_markdown/latest/egui_markdown/enum.OverflowWrap.html)
+lets you ask for explicitly either way.
+
+Parsing, selection, links, tables, and syntax highlighting are identical either way.
 
 ## Customization
 
