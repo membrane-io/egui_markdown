@@ -435,10 +435,10 @@ pub fn build_layout(
         let leading = (nesting + slot_width - nudge - marker_width).max(0.0);
         // The nudge and the gap are made up after the marker, so moving a marker never moves text.
         let trailing = nesting + slot_width + list.gap - leading - marker_width;
-        let text_start = leading + marker_width + trailing.max(0.0);
 
         #[cfg(feature = "membrane")]
         {
+          let text_start = leading + marker_width + trailing.max(0.0);
           let mut format = base_format.clone();
           format.line_height = MARKDOWN_LINE_HEIGHT_POINTS.map(|h| h * 4.0);
           if leading > 0.0 {

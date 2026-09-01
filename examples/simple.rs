@@ -45,7 +45,7 @@ impl eframe::App for DemoApp {
       });
     }
 
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
       ui.heading("Rendered Output");
       ui.separator();
       egui::ScrollArea::vertical().show(ui, |ui| {

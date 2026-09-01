@@ -246,7 +246,7 @@ impl eframe::App for AdvancedApp {
       ui.request_repaint();
     }
 
-    egui::CentralPanel::default().show_inside(ui, |ui| {
+    egui::CentralPanel::default().show(ui, |ui| {
       ui.heading("Rendered Output");
       ui.separator();
       ui.style_mut().url_in_tooltip = true;

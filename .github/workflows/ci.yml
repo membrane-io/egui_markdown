@@ -1,8 +1,13 @@
 name: CI
 
+# This crate patches egui to the membrane fork through relative paths
+# (`../egui/crates/*`), so every job that resolves dependencies needs that fork
+# checked out beside this one. Both are placed under the workspace directory and
+# cargo runs from `egui_markdown`, which puts the fork at `../egui`.
+
 on:
   push:
-    branches: [main]
+    branches: [main, membrane]
   pull_request:
 
 env:
@@ -15,39 +20,74 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: egui_markdown
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --all -- --check
+        working-directory: egui_markdown
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: egui_markdown
+      - uses: actions/checkout@v4
+        with:
+          repository: membrane-io/egui
+          ref: membrane
+          path: egui
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo clippy --all-features -- -D warnings
+        working-directory: egui_markdown
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: egui_markdown
+      - uses: actions/checkout@v4
+        with:
+          repository: membrane-io/egui
+          ref: membrane
+          path: egui
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-features
+        working-directory: egui_markdown
 
   doc:
     name: Doc
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: egui_markdown
+      - uses: actions/checkout@v4
+        with:
+          repository: membrane-io/egui
+          ref: membrane
+          path: egui
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc --no-deps --all-features
+        working-directory: egui_markdown
 
   wasm:
     name: Check WASM
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: egui_markdown
+      - uses: actions/checkout@v4
+        with:
+          repository: membrane-io/egui
+          ref: membrane
+          path: egui
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - run: cargo check --target wasm32-unknown-unknown --no-default-features
+        working-directory: egui_markdown
