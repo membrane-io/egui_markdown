@@ -101,6 +101,7 @@ pub struct LinkAppend {
 ///
 /// The caller is responsible for mapping the appended sections to their token index
 /// (see [`LinkAppend::sections_added`]).
+#[allow(clippy::too_many_arguments)]
 pub fn append_link_to_job(
   ui: &Ui,
   job: &mut LayoutJob,
@@ -722,7 +723,7 @@ mod syntect_code {
     use egui_extras::syntax_highlighting;
 
     let ss = syntax_set();
-    let style = &*ui.style();
+    let style = ui.style();
     let installed = crate::theme::code_theme(ui.ctx(), style.visuals.dark_mode);
     let syn_theme = resolve_syntect_theme(style.visuals.dark_mode, code_theme, &installed);
 
@@ -935,15 +936,8 @@ mod syntect_code {
         assert_eq!(c1.frozen_len, "fn main() {\n".len());
         assert!(c1.source.as_ref().ends_with("let x"));
 
-        let c2 = scrolling_code_galley(
-          &mut child,
-          "fn main() {\n    let x = 1;\n    let y",
-          "rust",
-          12.0,
-          1,
-          None,
-          Some(c1),
-        );
+        let c2 =
+          scrolling_code_galley(&mut child, "fn main() {\n    let x = 1;\n    let y", "rust", 12.0, 1, None, Some(c1));
         assert_eq!(c2.frozen_len, "fn main() {\n    let x = 1;\n".len());
         assert_eq!(c2.source.as_ref(), "fn main() {\n    let x = 1;\n    let y");
       });

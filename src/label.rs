@@ -12,11 +12,11 @@ use epaint::{
   text::{Galley, Glyph, Row},
 };
 
+#[cfg(not(feature = "syntax_highlighting"))]
+use crate::layout::highlight_code;
 use crate::layout::{build_layout, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult};
 #[cfg(feature = "syntax_highlighting")]
 use crate::layout::{scrolling_code_galley, StreamingCodeCache};
-#[cfg(not(feature = "syntax_highlighting"))]
-use crate::layout::highlight_code;
 use crate::link::LinkHandler;
 use crate::paint;
 use crate::parser;
@@ -1217,15 +1217,8 @@ fn render_code_block(
       code_theme,
     );
     let cached = ui.data(|d| d.get_temp::<StreamingCodeCache>(cache_id));
-    let updated = scrolling_code_galley(
-      ui,
-      text.as_ref(),
-      lang,
-      style.code_font_size,
-      identity_hash,
-      code_theme,
-      cached,
-    );
+    let updated =
+      scrolling_code_galley(ui, text.as_ref(), lang, style.code_font_size, identity_hash, code_theme, cached);
     let galley = Arc::clone(&updated.galley);
     ui.data_mut(|d| d.insert_temp(cache_id, updated));
     galley
