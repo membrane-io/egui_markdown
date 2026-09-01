@@ -48,12 +48,3 @@ path = "examples/advanced.rs"
 [[bench]]
 name = "markdown"
 harness = false
-
-# Use the gaze egui fork so this crate is tested against what gaze actually builds with.
-[patch.crates-io]
-egui = { path = "../egui/crates/egui" }
-eframe = { path = "../egui/crates/eframe" }
-epaint = { path = "../egui/crates/epaint" }
-emath = { path = "../egui/crates/emath" }
-ecolor = { path = "../egui/crates/ecolor" }
-egui_extras = { path = "../egui/crates/egui_extras" }

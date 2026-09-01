@@ -309,7 +309,7 @@ fn token_style_to_format(
     format.italics = true;
   }
   if style.strikethrough {
-    format.strikethrough = egui::Stroke::new(1.0, color);
+    format.strikethrough = egui::Stroke::new(1.0_f32, color);
   }
   if style.inline_code {
     crate::layout::apply_inline_code_bg(&mut format, dark_mode, inline_code_style);
