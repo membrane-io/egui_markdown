@@ -85,9 +85,29 @@ Cache invalidation happens automatically: if the hash doesn't match, the cache i
 rebuilt. Tokens are converted from borrowed to owned (`Token<'static>`) for cache
 storage since the input string may not live across frames.
 
+**Wrap settings are deliberately absent from the layout cache keys.** A `LayoutJob` does
+not depend on the wrap width: `build_layout` only uses `max_width` and `break_anywhere` to
+seed `job.wrap`, and `render_galley` overwrites both with the live values before shaping.
+Hashing the width would rebuild every job on every frame of a resize — excluding it took
+resize frames on the benchmark document from 1.008ms to 426us, leaving only epaint
+reshaping text at the new width, which is inherent. Anyone adding a width to
+`hash_flush_context` would silently undo this.
+
+`resolve_wrap` derives those live values once per render from the widget's wrap mode
+(explicit via `wrap_mode()`, else `ui.wrap_mode()`), and `apply_live_wrap` writes them onto
+the cached job. `Extend` gives an infinite width, `Wrap` uses `ui.available_width()` and
+sets `break_anywhere` only for `OverflowWrap::BreakAll`, and `Truncate` always breaks
+anywhere so the elision can land mid-token.
+
+One value is not re-applied. `max_rows` is baked into the job when it is built, so toggling
+`truncate()` or `max_lines()` on otherwise unchanged text under the same widget id keeps the
+previous row budget until something else invalidates the entry. It is also where the
+`usize::MAX - 1` sentinel comes from: an unlimited job still needs a finite row count to
+defeat egui's paragraph-splitting optimization (egui #5411).
+
 **Files:** `label.rs` (CachedMarkdownLayout, CachedFlushRange, hash_text,
-hash_flush_context, hash_code_block_identity), `layout.rs` (StreamingCodeCache,
-scrolling_code_galley)
+hash_flush_context, hash_code_block_identity, resolve_wrap, apply_live_wrap), `layout.rs`
+(StreamingCodeCache, scrolling_code_galley)
 
 ## Viewport culling
 
@@ -99,6 +119,10 @@ rendering, estimate the screen rect and check `ui.is_rect_visible()`. If off-scr
 call `ui.allocate_space()` to reserve the correct amount of space (so scrollbars work)
 but skip all layout and painting.
 
+Unlike a layout job, a measured size *is* width-dependent, so the segment size cache stores
+the width it was measured at alongside the hash and requires both to match. This is the
+counterpart to the width being excluded from the layout keys above.
+
 This reduces per-frame work from O(document) to O(visible area).
 
 **Files:** `label.rs` (flush_text_range size cache, render_token_range block size caches)
@@ -109,14 +133,22 @@ This reduces per-frame work from O(document) to O(visible area).
 images, widget links) can't be part of a single text galley; they need separate egui
 widgets. A monolithic layout approach can't handle this.
 
-**Solution:** During layout, identify "segment breaks" (token indices where the text
-galley must be flushed and a block widget rendered). The render path then alternates
-between flushing text ranges (as galleys) and rendering block widgets.
+**Solution:** Layout identifies "segment breaks" (token indices where the text galley must
+be flushed and a block widget rendered). The render path then alternates between flushing
+text ranges (as galleys) and rendering block widgets.
+
+The choice of path is made *before* laying anything out. `needs_segmentation` answers the
+same question `build_layout` would, by inspecting tokens only, so a document that will take
+the segmented path never builds a whole-document layout and discards it — doing so doubled
+the cost of every keystroke. The two must agree: `needs_segmentation` has to account for
+every `segment_breaks.push` in `build_layout`, and a `debug_assert!` on the non-segmented
+path fails if they ever disagree. Documents on the segmented path store `layout: None` in
+the cache entry and keep only their tokens.
 
 This also enables per-segment viewport culling and caching, since each segment is
 independent.
 
-**Files:** `layout.rs` (segment_breaks), `label.rs` (render_segmented, render_token_range, flush_text_range)
+**Files:** `layout.rs` (needs_segmentation, segment_breaks), `label.rs` (render_segmented, render_token_range, flush_text_range)
 
 ## Section-to-token mapping
 
@@ -160,8 +192,19 @@ catches accidental growth from new fields or variants.
 
 ## Benchmarks
 
-Criterion benchmarks cover parsing, text hashing, context hashing, and cache retrieval
-(Arc clone). These validate that caching overhead is justified and catch performance
-regressions.
+Criterion benchmarks cover the pieces caching is built on — parsing
+(`parse_100_sections`), hashing (`hash_text_100_sections`,
+`hash_token_slice_100_sections`), and cache retrieval (`arc_clone_tokens`) — which validate
+that the caching overhead is justified.
+
+Four more measure whole frames, so a regression in the cache layers shows up as frame cost
+rather than only as a slower hash:
+
+- `render_steady_state` — repeated frames at a constant width, the case every cache should
+  make nearly free.
+- `render_resizing` — a changing width every frame, which is what the width-independent
+  layout keys exist for.
+- `render_scroll_code_steady_state` and `render_scroll_code_streaming_append` — settled and
+  growing scrolling code fences, covering the append-only syntect path.
 
 **Files:** `benches/markdown.rs`
