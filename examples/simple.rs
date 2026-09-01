@@ -1,3 +1,8 @@
+// The fork deprecates `Panel::show_inside` in favour of `show`, and published egui
+// deprecates `show` in favour of `show_inside`. Both spellings compile against both,
+// so this picks one rather than cfg-ing between them.
+#![allow(deprecated)]
+
 use eframe::egui;
 use egui_markdown::MarkdownLabel;
 

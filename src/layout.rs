@@ -334,7 +334,7 @@ pub fn build_layout(
           format.italics = true;
         }
         if style.strikethrough {
-          format.strikethrough = Stroke::new(1.0, color);
+          format.strikethrough = Stroke::new(1.0_f32, color);
         }
         if style.inline_code {
           apply_inline_code_bg(&mut format, ui.visuals().dark_mode, &style_ref.inline_code);
@@ -634,7 +634,7 @@ mod syntect_code {
       let fg = syn_style.foreground;
       #[allow(clippy::useless_conversion)]
       job.sections.push(LayoutSection {
-        leading_space: 0.0.into(),
+        leading_space: 0.0_f32.into(),
         byte_range: byte_start..byte_end,
         format: TF {
           font_id: FontId::monospace(code_font_size),
@@ -653,7 +653,7 @@ mod syntect_code {
     job.text.push_str(padded_line);
     #[allow(clippy::useless_conversion)]
     job.sections.push(LayoutSection {
-      leading_space: 0.0.into(),
+      leading_space: 0.0_f32.into(),
       byte_range: byte_start..job.text.len(),
       format: TF { font_id: FontId::monospace(code_font_size), ..Default::default() },
     });

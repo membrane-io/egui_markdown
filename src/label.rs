@@ -1049,7 +1049,7 @@ impl<'a> MarkdownLabel<'a> {
         } else {
           ui.visuals().hyperlink_color
         };
-        Some(Stroke::new(1.0, link_color))
+        Some(Stroke::new(1.0_f32, link_color))
       }
       _ => None,
     };
