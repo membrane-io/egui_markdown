@@ -1,9 +1,15 @@
 name: CI
 
-# This crate patches egui to the membrane fork through relative paths
-# (`../egui/crates/*`), so every job that resolves dependencies needs that fork
-# checked out beside this one. Both are placed under the workspace directory and
-# cargo runs from `egui_markdown`, which puts the fork at `../egui`.
+# This crate builds two ways, and both are tested here.
+#
+# Default features are what a standalone clone gets from crates.io. They exclude
+# `membrane`, so the `not(feature = "membrane")` fallbacks are the code under test.
+#
+# `--all-features` turns on `membrane`, which calls APIs only the membrane egui fork
+# has (`epaint::text::LeadingSpace`, `TextFormat::bg_corner_radius`, and a `Vec2`
+# `expand_bg`). Those jobs check the fork out beside this repo and patch to it, which
+# is the combination gaze ships. The patch is applied here rather than committed to
+# Cargo.toml so a standalone clone stays buildable without a sibling checkout.
 
 on:
   push:
@@ -15,68 +21,54 @@ env:
   RUSTDOCFLAGS: -D warnings
 
 jobs:
+  # Resolves no dependencies, so it is the same under either configuration.
   fmt:
     name: Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: egui_markdown
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --all -- --check
-        working-directory: egui_markdown
 
-  clippy:
-    name: Clippy
+  upstream:
+    name: ${{ matrix.name }} (upstream egui)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Clippy
+            run: cargo clippy -- -D warnings
+          - name: Test
+            run: cargo test
+          - name: Doc
+            run: cargo doc --no-deps
+          - name: Check WASM
+            run: cargo check --target wasm32-unknown-unknown --no-default-features
+            target: wasm32-unknown-unknown
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: egui_markdown
-      - uses: actions/checkout@v4
-        with:
-          repository: membrane-io/egui
-          ref: membrane
-          path: egui
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo clippy --all-features -- -D warnings
-        working-directory: egui_markdown
+        with:
+          targets: ${{ matrix.target }}
+      - run: ${{ matrix.run }}
 
-  test:
-    name: Test
+  fork:
+    name: ${{ matrix.name }} (egui fork)
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: egui_markdown
-      - uses: actions/checkout@v4
-        with:
-          repository: membrane-io/egui
-          ref: membrane
-          path: egui
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --all-features
-        working-directory: egui_markdown
-
-  doc:
-    name: Doc
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: egui_markdown
-      - uses: actions/checkout@v4
-        with:
-          repository: membrane-io/egui
-          ref: membrane
-          path: egui
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --no-deps --all-features
-        working-directory: egui_markdown
-
-  wasm:
-    name: Check WASM
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Clippy
+            run: cargo clippy --all-features -- -D warnings
+          - name: Test
+            run: cargo test --all-features
+          - name: Doc
+            run: cargo doc --no-deps --all-features
+          - name: Check WASM
+            run: cargo check --target wasm32-unknown-unknown --no-default-features --features membrane
+            target: wasm32-unknown-unknown
     steps:
       - uses: actions/checkout@v4
         with:
@@ -88,6 +80,19 @@ jobs:
           path: egui
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
-      - run: cargo check --target wasm32-unknown-unknown --no-default-features
+          targets: ${{ matrix.target }}
+      - name: Patch egui to the fork
+        working-directory: egui_markdown
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml <<'EOF'
+          [patch.crates-io]
+          egui = { path = "../egui/crates/egui" }
+          eframe = { path = "../egui/crates/eframe" }
+          epaint = { path = "../egui/crates/epaint" }
+          emath = { path = "../egui/crates/emath" }
+          ecolor = { path = "../egui/crates/ecolor" }
+          egui_extras = { path = "../egui/crates/egui_extras" }
+          EOF
+      - run: ${{ matrix.run }}
         working-directory: egui_markdown

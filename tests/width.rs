@@ -83,6 +83,9 @@ fn unbroken_string_breaks_with_break_all() {
   );
 }
 
+/// Requires the `membrane` feature: upstream epaint falls back to breaking between any two
+/// glyphs when it finds no word boundary, so it wraps this instead of overrunning.
+#[cfg(feature = "membrane")]
 #[test]
 fn unbroken_string_overruns_with_normal() {
   let width = 120.0;
