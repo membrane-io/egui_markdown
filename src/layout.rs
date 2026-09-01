@@ -1,8 +1,7 @@
 //! Layout job construction from parsed markdown token streams.
 
 use egui::{
-  text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat,
-  TextWrapMode, Ui,
+  text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,
 };
 
 use crate::link::LinkHandler;
@@ -102,6 +101,7 @@ pub struct LinkAppend {
 ///
 /// The caller is responsible for mapping the appended sections to their token index
 /// (see [`LinkAppend::sections_added`]).
+#[allow(clippy::too_many_arguments)]
 pub fn append_link_to_job(
   ui: &Ui,
   job: &mut LayoutJob,
@@ -269,6 +269,10 @@ pub fn needs_segmentation(
 ///
 /// Converts tokens into styled text sections suitable for galley layout.
 /// Returns segment breaks for tokens that need separate rendering (tables, images, blockquotes).
+///
+/// `max_width` and `break_anywhere` seed [`LayoutJob::wrap`]. Callers that cache the
+/// resulting job should re-apply the live wrap width (and break flag) before shaping,
+/// since those values are typically excluded from layout cache keys.
 #[allow(clippy::too_many_arguments)]
 pub fn build_layout(
   ui: &mut Ui,
@@ -276,6 +280,8 @@ pub fn build_layout(
   font_id: FontId,
   color: Color32,
   max_rows: Option<u32>,
+  max_width: f32,
+  break_anywhere: bool,
   link_handler: Option<&dyn LinkHandler>,
   scroll_code_blocks: bool,
   style: &MarkdownStyle,
@@ -287,7 +293,8 @@ pub fn build_layout(
   let bold_available = has_bold_font(ui);
 
   let mut job = LayoutJob::default();
-  job.wrap.max_width = if ui.wrap_mode() == TextWrapMode::Extend { f32::INFINITY } else { ui.available_width() };
+  job.wrap.max_width = max_width;
+  job.wrap.break_anywhere = break_anywhere;
 
   let mut section_to_token: Vec<usize> = Vec::new();
   let mut code_block_spans: Vec<(usize, usize)> = Vec::new();
@@ -428,10 +435,10 @@ pub fn build_layout(
         let leading = (nesting + slot_width - nudge - marker_width).max(0.0);
         // The nudge and the gap are made up after the marker, so moving a marker never moves text.
         let trailing = nesting + slot_width + list.gap - leading - marker_width;
-        let text_start = leading + marker_width + trailing.max(0.0);
 
         #[cfg(feature = "membrane")]
         {
+          let text_start = leading + marker_width + trailing.max(0.0);
           let mut format = base_format.clone();
           format.line_height = MARKDOWN_LINE_HEIGHT_POINTS.map(|h| h * 4.0);
           if leading > 0.0 {
@@ -716,7 +723,7 @@ mod syntect_code {
     use egui_extras::syntax_highlighting;
 
     let ss = syntax_set();
-    let style = &*ui.style();
+    let style = ui.style();
     let installed = crate::theme::code_theme(ui.ctx(), style.visuals.dark_mode);
     let syn_theme = resolve_syntect_theme(style.visuals.dark_mode, code_theme, &installed);
 
@@ -929,15 +936,8 @@ mod syntect_code {
         assert_eq!(c1.frozen_len, "fn main() {\n".len());
         assert!(c1.source.as_ref().ends_with("let x"));
 
-        let c2 = scrolling_code_galley(
-          &mut child,
-          "fn main() {\n    let x = 1;\n    let y",
-          "rust",
-          12.0,
-          1,
-          None,
-          Some(c1),
-        );
+        let c2 =
+          scrolling_code_galley(&mut child, "fn main() {\n    let x = 1;\n    let y", "rust", 12.0, 1, None, Some(c1));
         assert_eq!(c2.frozen_len, "fn main() {\n    let x = 1;\n".len());
         assert_eq!(c2.source.as_ref(), "fn main() {\n    let x = 1;\n    let y");
       });

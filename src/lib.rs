@@ -55,13 +55,12 @@ pub mod types;
 
 pub use egui_markdown_style::{global_style, set_style};
 pub use label::MarkdownLabel;
+pub use label::{cursor_from_pos, glyph_at_index, last_non_whitespace_glyph, OverflowWrap};
 pub use layout::CodeThemeArg;
 pub use link::{LinkHandler, LinkStyle};
 pub use parser::{heal, parse};
 pub use style::MarkdownStyle;
 pub use types::{Alignment, Markdown, TableData, Token, TokenStyle};
-
-pub use label::{cursor_from_pos, glyph_at_index, last_non_whitespace_glyph};
 
 #[cfg(feature = "syntax_highlighting")]
 pub use theme::{code_theme, default_code_theme, set_code_themes};

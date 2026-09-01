@@ -122,7 +122,7 @@ fn needs_segmentation_matches_build_layout() {
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(500.0, 2000.0));
   let style = MarkdownStyle::default();
 
-  ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     for doc in docs {
       for scroll_code_blocks in [false, true] {
         let md = egui_markdown::parse(doc);
@@ -133,6 +133,8 @@ fn needs_segmentation_matches_build_layout() {
           FontId::proportional(14.0),
           Color32::WHITE,
           None,
+          ui.available_width(),
+          false,
           None,
           scroll_code_blocks,
           &style,

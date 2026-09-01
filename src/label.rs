@@ -5,18 +5,18 @@ use std::sync::Arc;
 
 use egui::{
   text::LayoutJob, text_selection::LabelSelectionState, Align, Color32, CursorIcon, FontId, FontSelection, Id, Layout,
-  OpenUrl, Pos2, Rect, Response, Sense, Stroke, Ui, UiBuilder, Vec2,
+  OpenUrl, Pos2, Rect, Response, Sense, Stroke, TextWrapMode, Ui, UiBuilder, Vec2,
 };
 use epaint::{
   pos2,
   text::{Galley, Glyph, Row},
 };
 
+#[cfg(not(feature = "syntax_highlighting"))]
+use crate::layout::highlight_code;
 use crate::layout::{build_layout, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult};
 #[cfg(feature = "syntax_highlighting")]
 use crate::layout::{scrolling_code_galley, StreamingCodeCache};
-#[cfg(not(feature = "syntax_highlighting"))]
-use crate::layout::highlight_code;
 use crate::link::LinkHandler;
 use crate::paint;
 use crate::parser;
@@ -66,9 +66,9 @@ fn hash_text(text: &str, style: &MarkdownStyle, handler: Option<&dyn LinkHandler
 
 /// Identity of everything a [`LayoutResult`] depends on.
 ///
-/// Deliberately excludes the wrap width: `build_layout` only uses it to seed
-/// `job.wrap.max_width`, which `render_galley` overwrites with the current available width
-/// before shaping. Hashing it here would rebuild every job on every frame of a resize.
+/// Deliberately excludes the wrap width and break flag: `build_layout` only seeds
+/// those on `job.wrap`, and `render_galley` overwrites them with the live values
+/// before shaping. Hashing them here would rebuild every job on every frame of a resize.
 #[inline]
 fn hash_flush_context(
   tokens: &[Token<'_>],
@@ -200,6 +200,37 @@ fn token_to_owned(t: &Token<'_>) -> Token<'static> {
   }
 }
 
+/// How a token wider than the available width is handled.
+///
+/// Independent of [`MarkdownLabel::wrap_mode`]: that chooses whether the box wraps,
+/// truncates, or extends; this chooses what happens when a single run of characters
+/// still does not fit.
+///
+/// Corresponds roughly to CSS `overflow-wrap` / `word-break`. A future `BreakWord`
+/// variant (wrap at spaces; split a token only when that token alone exceeds the
+/// width) needs engine support and is intentionally not stubbed here.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum OverflowWrap {
+  /// Prefer word boundaries; overrun the box when a token has none.
+  ///
+  /// CSS `overflow-wrap: normal`.
+  #[default]
+  Normal,
+  /// Break between any characters once the row exceeds `max_width`.
+  ///
+  /// CSS `word-break: break-all`. Ordinary sentences can split mid-word.
+  BreakAll,
+}
+
+/// Resolved wrap settings for one layout/paint pass.
+struct ResolvedWrap {
+  mode: TextWrapMode,
+  max_width: f32,
+  break_anywhere: bool,
+  max_rows: Option<u32>,
+}
+
 /// An interactive markdown-rendered label widget for egui.
 ///
 /// Parses markdown text and renders it with formatting, clickable links,
@@ -219,6 +250,8 @@ pub struct MarkdownLabel<'a> {
   text: &'a str,
   font: Option<FontId>,
   max_lines: Option<u32>,
+  wrap_mode: Option<TextWrapMode>,
+  overflow_wrap: OverflowWrap,
   selectable: bool,
   interactable: bool,
   link_handler: Option<&'a dyn LinkHandler>,
@@ -241,6 +274,8 @@ impl<'a> MarkdownLabel<'a> {
       text,
       font: None,
       max_lines: None,
+      wrap_mode: None,
+      overflow_wrap: OverflowWrap::Normal,
       selectable: true,
       interactable: true,
       link_handler: None,
@@ -261,8 +296,51 @@ impl<'a> MarkdownLabel<'a> {
   }
 
   /// Limit the number of visible lines (rows).
+  ///
+  /// Under [`Self::truncate`], this is the elision row budget (default `1` when unset),
+  /// so `.truncate().max_lines(3)` acts like a CSS line-clamp.
+  ///
+  /// Row limits apply only to the whole-document render path. Documents that need
+  /// segmentation (tables, images, blockquotes, scrolling code blocks) ignore this.
   pub fn max_lines(self, n: u32) -> Self {
     Self { max_lines: Some(n), ..self }
+  }
+
+  /// Override the wrap mode for this widget.
+  ///
+  /// When unset, [`Ui::wrap_mode`] is used (same as egui's [`egui::Label`]).
+  pub fn wrap_mode(self, wrap_mode: TextWrapMode) -> Self {
+    Self { wrap_mode: Some(wrap_mode), ..self }
+  }
+
+  /// Set wrap mode to [`TextWrapMode::Wrap`].
+  pub fn wrap(self) -> Self {
+    self.wrap_mode(TextWrapMode::Wrap)
+  }
+
+  /// Set wrap mode to [`TextWrapMode::Truncate`].
+  ///
+  /// Forces [`OverflowWrap::BreakAll`] at layout time. An explicit
+  /// [`OverflowWrap::Normal`] from [`Self::overflow_wrap`] does not survive truncate,
+  /// matching egui/`epaint` guidance for `max_rows = 1`.
+  ///
+  /// Elides after [`Self::max_lines`] rows, or 1 when `max_lines` is unset.
+  /// Same segmentation limitation as [`Self::max_lines`].
+  pub fn truncate(self) -> Self {
+    self.wrap_mode(TextWrapMode::Truncate)
+  }
+
+  /// Set wrap mode to [`TextWrapMode::Extend`], disabling wrapping and truncation.
+  pub fn extend(self) -> Self {
+    self.wrap_mode(TextWrapMode::Extend)
+  }
+
+  /// How to break tokens that are wider than the available width.
+  ///
+  /// Default: [`OverflowWrap::Normal`]. Ignored under [`Self::extend`] (nothing to
+  /// break against) and overridden to [`OverflowWrap::BreakAll`] under [`Self::truncate`].
+  pub fn overflow_wrap(self, overflow_wrap: OverflowWrap) -> Self {
+    Self { overflow_wrap, ..self }
   }
 
   /// Enable or disable text selection. Default: `true`.
@@ -336,6 +414,34 @@ impl<'a> MarkdownLabel<'a> {
     Self { code_theme: Some(theme), ..self }
   }
 
+  /// Resolve wrap mode, overflow, width, and row budget for this frame.
+  fn resolve_wrap(&self, ui: &Ui) -> ResolvedWrap {
+    let mode = self.wrap_mode.unwrap_or_else(|| ui.wrap_mode());
+    match mode {
+      TextWrapMode::Extend => {
+        ResolvedWrap { mode, max_width: f32::INFINITY, break_anywhere: false, max_rows: self.max_lines }
+      }
+      TextWrapMode::Wrap => ResolvedWrap {
+        mode,
+        max_width: ui.available_width(),
+        break_anywhere: matches!(self.overflow_wrap, OverflowWrap::BreakAll),
+        max_rows: self.max_lines,
+      },
+      TextWrapMode::Truncate => ResolvedWrap {
+        mode,
+        max_width: ui.available_width(),
+        break_anywhere: true,
+        max_rows: Some(self.max_lines.unwrap_or(1)),
+      },
+    }
+  }
+
+  /// Re-apply live wrap fields that are deliberately excluded from layout cache keys.
+  fn apply_live_wrap(wrap: &ResolvedWrap, job: &mut LayoutJob) {
+    job.wrap.max_width = wrap.max_width;
+    job.wrap.break_anywhere = wrap.break_anywhere;
+  }
+
   /// Return the code theme argument for passing to layout functions.
   #[cfg(feature = "syntax_highlighting")]
   fn code_theme_arg(&self) -> CodeThemeArg<'_> {
@@ -361,7 +467,20 @@ impl<'a> MarkdownLabel<'a> {
     let md = parser::parse(self.text);
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
     let code_theme = self.code_theme_arg();
-    let result = build_layout(ui, &md.tokens, font, color, self.max_lines, self.link_handler, false, style, code_theme);
+    let wrap = self.resolve_wrap(ui);
+    let result = build_layout(
+      ui,
+      &md.tokens,
+      font,
+      color,
+      wrap.max_rows,
+      wrap.max_width,
+      wrap.break_anywhere,
+      self.link_handler,
+      false,
+      style,
+      code_theme,
+    );
     let galley = ui.fonts_mut(|f| f.layout_job(result.job));
     galley.size()
   }
@@ -374,11 +493,22 @@ impl<'a> MarkdownLabel<'a> {
     let md = parser::parse(self.text);
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
     let code_theme = self.code_theme_arg();
-    let result = build_layout(ui, &md.tokens, font, color, self.max_lines, self.link_handler, false, style, code_theme);
+    let wrap = self.resolve_wrap(ui);
+    let result = build_layout(
+      ui,
+      &md.tokens,
+      font,
+      color,
+      wrap.max_rows,
+      wrap.max_width,
+      wrap.break_anywhere,
+      self.link_handler,
+      false,
+      style,
+      code_theme,
+    );
 
     let mut job = result.job;
-    let available_width = ui.available_width();
-    job.wrap.max_width = available_width;
     job.halign = ui.layout().horizontal_placement();
     job.justify = ui.layout().horizontal_justify();
 
@@ -456,12 +586,15 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     let code_theme = self.code_theme_arg();
+    let wrap = self.resolve_wrap(ui);
     let layout = build_layout(
       ui,
       &md.tokens,
       font.clone(),
       color,
-      self.max_lines,
+      wrap.max_rows,
+      wrap.max_width,
+      wrap.break_anywhere,
       self.link_handler,
       self.scroll_code_blocks,
       style,
@@ -727,7 +860,8 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     let token_slice = &md.tokens[start..trimmed_end];
-    let max_width = if ui.wrap_mode() == egui::TextWrapMode::Extend { f32::INFINITY } else { ui.available_width() };
+    let wrap = self.resolve_wrap(ui);
+    let max_width = wrap.max_width;
     let dark_mode = ui.visuals().dark_mode;
     let ctx_hash = hash_flush_context(token_slice, style, font, color, dark_mode, self.link_handler);
     let cache_id = self.id.with(("flush", start));
@@ -765,7 +899,20 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     let code_theme = self.code_theme_arg();
-    let layout = build_layout(ui, token_slice, font.clone(), color, None, self.link_handler, false, style, code_theme);
+    // Segmented flush ranges ignore row limits (tables/images/etc. already split the doc).
+    let layout = build_layout(
+      ui,
+      token_slice,
+      font.clone(),
+      color,
+      None,
+      wrap.max_width,
+      wrap.break_anywhere,
+      self.link_handler,
+      false,
+      style,
+      code_theme,
+    );
     debug_assert!(layout.segment_breaks.is_empty());
     let owned = Arc::new(tokens_to_owned(token_slice));
     let layout = Arc::new(layout);
@@ -801,16 +948,16 @@ impl<'a> MarkdownLabel<'a> {
     color: Color32,
     style: &MarkdownStyle,
   ) -> Vec2 {
-    let extend = ui.wrap_mode() == egui::TextWrapMode::Extend;
+    let wrap = self.resolve_wrap(ui);
     let mut job = job;
-    job.wrap.max_width = if extend { f32::INFINITY } else { ui.available_width() };
+    Self::apply_live_wrap(&wrap, &mut job);
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
     let available_width = ui.available_width();
     // Decorations (code block backgrounds, horizontal rules) span the full available width, so the
     // widget must claim it too — otherwise they paint outside the allocated rect.
     let mut size = galley.size();
-    if !extend {
+    if wrap.mode != TextWrapMode::Extend {
       size.x = size.x.max(available_width);
     }
 
@@ -1070,15 +1217,8 @@ fn render_code_block(
       code_theme,
     );
     let cached = ui.data(|d| d.get_temp::<StreamingCodeCache>(cache_id));
-    let updated = scrolling_code_galley(
-      ui,
-      text.as_ref(),
-      lang,
-      style.code_font_size,
-      identity_hash,
-      code_theme,
-      cached,
-    );
+    let updated =
+      scrolling_code_galley(ui, text.as_ref(), lang, style.code_font_size, identity_hash, code_theme, cached);
     let galley = Arc::clone(&updated.galley);
     ui.data_mut(|d| d.insert_temp(cache_id, updated));
     galley
