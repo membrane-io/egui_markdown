@@ -24,7 +24,6 @@ pub fn render_table(
   table_style: &TableStyle,
   link_handler: Option<&dyn LinkHandler>,
 ) {
-
   let num_cols = data.alignments.len();
   if num_cols == 0 {
     return;
