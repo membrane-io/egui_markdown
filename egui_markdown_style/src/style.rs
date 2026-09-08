@@ -36,6 +36,9 @@ pub struct MarkdownStyle {
   pub blockquote: BlockquoteStyle,
   /// Styling for list markers (bullets and numbers).
   pub list: ListStyle,
+  /// Styling for tables.
+  #[cfg_attr(feature = "serde", serde(default))]
+  pub table: TableStyle,
   /// Vertical spacing between block elements in pixels.
   pub block_spacing: f32,
   /// Font size for code blocks. Default: `10.0`.
@@ -53,6 +56,7 @@ impl Default for MarkdownStyle {
       horizontal_rule: HorizontalRuleStyle::default(),
       blockquote: BlockquoteStyle::default(),
       list: ListStyle::default(),
+      table: TableStyle::default(),
       block_spacing: 8.0,
       code_font_size: 10.0,
       default_code_language: String::new(),
@@ -68,6 +72,7 @@ impl Hash for MarkdownStyle {
     self.horizontal_rule.hash(state);
     self.blockquote.hash(state);
     self.list.hash(state);
+    self.table.hash(state);
     self.block_spacing.to_bits().hash(state);
     self.code_font_size.to_bits().hash(state);
     self.default_code_language.hash(state);
@@ -133,6 +138,10 @@ impl MarkdownStyle {
 
     egui::CollapsingHeader::new("Lists").default_open(false).show(ui, |ui| {
       self.list.ui(ui);
+    });
+
+    egui::CollapsingHeader::new("Tables").default_open(false).show(ui, |ui| {
+      self.table.ui(ui);
     });
   }
 }
@@ -442,6 +451,69 @@ impl Hash for ListStyle {
     self.bullet_nudge.to_bits().hash(state);
     self.number_nudge.to_bits().hash(state);
     self.bullet_scale.to_bits().hash(state);
+  }
+}
+
+fn default_cell_padding() -> [f32; 4] {
+  [8.0, 3.0, 8.0, 3.0]
+}
+
+/// Styling for markdown tables.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TableStyle {
+  /// Width of separator lines between cells. `0.0` draws none.
+  pub stroke_width: f32,
+  /// Corner radius of the outer table stroke. Only visible when [`Self::stroke_width`] is non-zero.
+  pub corner_radius: f32,
+  /// Inner cell padding `[left, top, right, bottom]`.
+  #[cfg_attr(feature = "serde", serde(default = "default_cell_padding"))]
+  pub cell_padding: [f32; 4],
+}
+
+impl Default for TableStyle {
+  fn default() -> Self {
+    Self { stroke_width: 0.0, corner_radius: 0.0, cell_padding: default_cell_padding() }
+  }
+}
+
+impl Hash for TableStyle {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.stroke_width.to_bits().hash(state);
+    self.corner_radius.to_bits().hash(state);
+    for v in &self.cell_padding {
+      v.to_bits().hash(state);
+    }
+  }
+}
+
+impl TableStyle {
+  fn ui(&mut self, ui: &mut Ui) {
+    Grid::new("table_style").num_columns(2).striped(true).show(ui, |ui| {
+      ui.label("Stroke width:");
+      ui.add(DragValue::new(&mut self.stroke_width).range(0.0..=5.0).speed(0.1));
+      ui.end_row();
+
+      ui.label("Corner radius:");
+      ui.add(DragValue::new(&mut self.corner_radius).range(0.0..=20.0).speed(0.5));
+      ui.end_row();
+
+      ui.label("Cell padding left:");
+      ui.add(DragValue::new(&mut self.cell_padding[0]).range(0.0..=30.0).speed(0.5));
+      ui.end_row();
+
+      ui.label("Cell padding top:");
+      ui.add(DragValue::new(&mut self.cell_padding[1]).range(0.0..=30.0).speed(0.5));
+      ui.end_row();
+
+      ui.label("Cell padding right:");
+      ui.add(DragValue::new(&mut self.cell_padding[2]).range(0.0..=30.0).speed(0.5));
+      ui.end_row();
+
+      ui.label("Cell padding bottom:");
+      ui.add(DragValue::new(&mut self.cell_padding[3]).range(0.0..=30.0).speed(0.5));
+      ui.end_row();
+    });
   }
 }
 

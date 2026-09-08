@@ -705,7 +705,16 @@ impl<'a> MarkdownLabel<'a> {
             continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          table::render_table(ui, self.id.with(("table", i)), data, font, color, &style.inline_code, self.link_handler);
+          table::render_table(
+            ui,
+            self.id.with(("table", i)),
+            data,
+            font,
+            color,
+            &style.inline_code,
+            &style.table,
+            self.link_handler,
+          );
           cache_block_height(ui, block_sz_id, text_hash, before_y);
           i += 1;
           text_start = i;

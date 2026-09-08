@@ -1,12 +1,12 @@
 //! Table rendering for markdown tables.
 
 use egui::text::LayoutJob;
-use egui::{Align, Color32, FontFamily, FontId, Id, Margin, ScrollArea, TextFormat, Ui};
+use egui::{Align, Color32, FontFamily, FontId, Id, Margin, Rect, ScrollArea, Stroke, TextFormat, Ui, Vec2};
 use egui_extras::{Column, TableBuilder};
 
 use crate::layout::{append_link_to_job, render_link_in_ui};
 use crate::link::LinkHandler;
-use crate::style::InlineCodeStyle;
+use crate::style::{InlineCodeStyle, TableStyle};
 use crate::types::{Alignment, TableData, Token, TokenStyle};
 
 /// Render a markdown table using `egui_extras::TableBuilder`.
@@ -18,8 +18,10 @@ pub fn render_table(
   font_id: &FontId,
   color: Color32,
   inline_code_style: &InlineCodeStyle,
+  table_style: &TableStyle,
   link_handler: Option<&dyn LinkHandler>,
 ) {
+
   let num_cols = data.alignments.len();
   if num_cols == 0 {
     return;
@@ -31,7 +33,7 @@ pub fn render_table(
   let bold_family = FontFamily::Name("bold".into());
   let has_bold = ui.ctx().fonts(|f| f.families().contains(&bold_family));
 
-  let padding = 16.0;
+  let pad = table_style.cell_padding;
   let col_widths = measure_column_widths(
     ui,
     data,
@@ -43,48 +45,34 @@ pub fn render_table(
     dark_mode,
     inline_code_style,
     link_handler,
-    padding,
+    pad[0] + pad[2],
   );
+
+  let stroke = (table_style.stroke_width > 0.0)
+    .then(|| Stroke::new(table_style.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color));
+  let last_body = data.rows.len().saturating_sub(1);
+  let header_h = 20.0 + pad[1] + pad[3];
+  let body_h = 18.0 + pad[1] + pad[3];
+  let cell_margin = egui::Margin { left: pad[0] as i8, top: pad[1] as i8, right: pad[2] as i8, bottom: pad[3] as i8 };
 
   ScrollArea::horizontal()
     .id_salt(id.with("scroll"))
     .content_margin(Margin { top: 0, right: 0, bottom: 4, left: 0 })
     .show(ui, |ui| {
-      let mut builder = TableBuilder::new(ui).id_salt(id).striped(false).vscroll(false);
-      for &w in &col_widths {
-        builder = builder.column(Column::exact(w));
-      }
-      builder
-        .header(20.0, |mut header| {
-          for (col_idx, cell_tokens) in data.headers.iter().enumerate() {
-            let align = col_alignment(data.alignments.get(col_idx).copied().unwrap_or(Alignment::None));
-            header.col(|ui| {
-              ui.with_layout(egui::Layout::left_to_right(align), |ui| {
-                render_cell(
-                  ui,
-                  cell_tokens,
-                  font_id,
-                  color,
-                  hyperlink_color,
-                  strong_color,
-                  has_bold,
-                  true,
-                  dark_mode,
-                  inline_code_style,
-                  link_handler,
-                );
-              });
-            });
-          }
-        })
-        .body(|body| {
-          body.rows(18.0, data.rows.len(), |mut row| {
-            let row_idx = row.index();
-            let row_data = &data.rows[row_idx];
-            for (col_idx, cell_tokens) in row_data.iter().enumerate() {
+      let paint_table = |ui: &mut Ui| {
+        if stroke.is_some() {
+          ui.spacing_mut().item_spacing = Vec2::ZERO;
+        }
+        let mut builder = TableBuilder::new(ui).id_salt(id).striped(false).vscroll(false);
+        for &w in &col_widths {
+          builder = builder.column(Column::exact(w));
+        }
+        builder
+          .header(header_h, |mut header| {
+            for (col_idx, cell_tokens) in data.headers.iter().enumerate() {
               let align = col_alignment(data.alignments.get(col_idx).copied().unwrap_or(Alignment::None));
-              row.col(|ui| {
-                ui.with_layout(egui::Layout::left_to_right(align), |ui| {
+              header.col(|ui| {
+                padded_cell(ui, cell_margin, align, |ui| {
                   render_cell(
                     ui,
                     cell_tokens,
@@ -93,17 +81,79 @@ pub fn render_table(
                     hyperlink_color,
                     strong_color,
                     has_bold,
-                    false,
+                    true,
                     dark_mode,
                     inline_code_style,
                     link_handler,
                   );
                 });
+                if let Some(stroke) = stroke {
+                  paint_cell_separators(ui, ui.max_rect(), stroke, col_idx + 1 == num_cols, data.rows.is_empty());
+                }
               });
             }
+          })
+          .body(|body| {
+            body.rows(body_h, data.rows.len(), |mut row| {
+              let row_idx = row.index();
+              let row_data = &data.rows[row_idx];
+              for (col_idx, cell_tokens) in row_data.iter().enumerate() {
+                let align = col_alignment(data.alignments.get(col_idx).copied().unwrap_or(Alignment::None));
+                row.col(|ui| {
+                  padded_cell(ui, cell_margin, align, |ui| {
+                    render_cell(
+                      ui,
+                      cell_tokens,
+                      font_id,
+                      color,
+                      hyperlink_color,
+                      strong_color,
+                      has_bold,
+                      false,
+                      dark_mode,
+                      inline_code_style,
+                      link_handler,
+                    );
+                  });
+                  if let Some(stroke) = stroke {
+                    paint_cell_separators(ui, ui.max_rect(), stroke, col_idx + 1 == num_cols, row_idx == last_body);
+                  }
+                });
+              }
+            });
           });
-        });
+      };
+
+      if let Some(stroke) = stroke {
+        egui::Frame::NONE
+          .inner_margin(0)
+          .stroke(stroke)
+          .corner_radius(table_style.corner_radius)
+          .show(ui, |ui| paint_table(ui));
+      } else {
+        paint_table(ui);
+      }
     });
+}
+
+fn padded_cell(ui: &mut Ui, margin: egui::Margin, align: Align, add: impl FnOnce(&mut Ui)) {
+  egui::Frame::NONE.inner_margin(margin).show(ui, |ui| {
+    ui.with_layout(egui::Layout::left_to_right(align), add);
+  });
+}
+
+/// Internal separators only. The outer rectangle is the [`egui::Frame`] so its
+/// corners can be rounded.
+fn paint_cell_separators(ui: &Ui, rect: Rect, stroke: Stroke, last_col: bool, last_row: bool) {
+  // Exact columns clip their cells; pull the lines in so the stroke is not discarded.
+  let rect = rect.shrink(stroke.width * 0.5);
+  let painter = ui.painter();
+  if !last_col {
+    painter.line_segment([rect.right_top(), rect.right_bottom()], stroke);
+  }
+  if !last_row {
+    painter.line_segment([rect.left_bottom(), rect.right_bottom()], stroke);
+  }
 }
 
 #[allow(clippy::too_many_arguments)]
