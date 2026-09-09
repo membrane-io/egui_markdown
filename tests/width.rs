@@ -38,6 +38,20 @@ fn allocates_full_width_regardless_of_code_block_scrolling() {
 }
 
 #[test]
+fn hug_content_allocates_galley_width() {
+  let available = 400.0;
+  let ctx = Context::default();
+  let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(available, 600.0));
+  let mut allocated = 0.0;
+  let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+    let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+    MarkdownLabel::new(Id::new("hug"), "short").hug_content(true).show(&mut child);
+    allocated = child.min_rect().width();
+  });
+  assert!(allocated < available / 2.0, "hug_content should size to the galley, got {allocated} in {available}");
+}
+
+#[test]
 fn paints_inside_allocated_rect() {
   let width = 400.0;
   for scroll in [false, true] {

@@ -261,6 +261,7 @@ pub struct MarkdownLabel<'a> {
   code_block_buttons: Option<&'a dyn Fn(&mut Ui, &str, &str)>,
   scroll_code_blocks: bool,
   shrink_code_blocks: bool,
+  hug_content: bool,
   code_block_min_width: Option<f32>,
   style: Option<&'a MarkdownStyle>,
   heal: bool,
@@ -284,6 +285,7 @@ impl<'a> MarkdownLabel<'a> {
       code_block_buttons: None,
       scroll_code_blocks: false,
       shrink_code_blocks: false,
+      hug_content: false,
       code_block_min_width: None,
       style: None,
       heal: false,
@@ -379,6 +381,15 @@ impl<'a> MarkdownLabel<'a> {
   /// Useful for tooltips and popovers that should hug their content.
   pub fn shrink_code_blocks(self, shrink: bool) -> Self {
     Self { shrink_code_blocks: shrink, ..self }
+  }
+
+  /// Size the whole widget to the laid-out galley instead of filling available width.
+  /// Default: `false` (fill). Wrapping still uses the available width as a cap.
+  ///
+  /// Decorations (code-block backgrounds, horizontal rules) span the allocated
+  /// width, not the leftover space in the parent.
+  pub fn hug_content(self, hug: bool) -> Self {
+    Self { hug_content: hug, ..self }
   }
 
   /// Minimum width for shrunk code blocks (capped at the available width).
@@ -957,16 +968,18 @@ impl<'a> MarkdownLabel<'a> {
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
     let available_width = ui.available_width();
-    // Decorations (code block backgrounds, horizontal rules) span the full available width, so the
-    // widget must claim it too — otherwise they paint outside the allocated rect.
+    // Decorations (code block backgrounds, horizontal rules) span the allocated width, so a
+    // filling widget must claim the leftover space — otherwise they paint outside the rect.
+    // Popovers that hug content skip that expand and paint decorations at the galley width.
     let mut size = galley.size();
-    if wrap.mode != TextWrapMode::Extend {
+    if !self.hug_content && wrap.mode != TextWrapMode::Extend {
       size.x = size.x.max(available_width);
     }
+    let decoration_width = if self.hug_content { size.x } else { available_width };
 
     if !self.interactable {
       let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
-      paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, available_width, style);
+      paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
       ui.painter().galley(rect.min, galley.clone(), color);
       if let Some(handler) = self.link_handler {
         paint_inline_widgets(ui, handler, tokens, inline_widget_spans, &galley, rect.min);
@@ -975,7 +988,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
-    paint_decorations(ui, hr_positions, &galley, &code_block_rects, response.rect.min, available_width, style);
+    paint_decorations(ui, hr_positions, &galley, &code_block_rects, response.rect.min, decoration_width, style);
 
     let disable_text_selection = !self.selectable || ui.input(|input| input.modifiers.shift);
     if !disable_text_selection {
