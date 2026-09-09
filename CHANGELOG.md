@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MarkdownLabel::wrap_mode`, `.wrap()`, `.truncate()`, and `.extend()`, which mirror the same
   methods on the egui `Label`. Truncate elides after `max_lines` rows, which defaults to 1, and
   sets `BreakAll`.
+- `TableStyle::stroke_width` on `MarkdownStyle`. A non-zero width draws separator lines
+  between table cells. Default is `0.0` (no stroke).
+- `TableStyle::corner_radius` on the outer table stroke.
+- `TableStyle::cell_padding` (`[left, top, right, bottom]`) for the inset inside each cell.
+- Overflow chrome on tables: a matching stroke on the visible cut edge, and a
+  light inner shadow when the table does not fit horizontally or vertically.
 
 ### Changed
 

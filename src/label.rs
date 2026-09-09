@@ -4,8 +4,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use egui::{
-  text::LayoutJob, text_selection::LabelSelectionState, Align, Color32, CursorIcon, FontId, FontSelection, Id, Layout,
-  OpenUrl, Pos2, Rect, Response, Sense, Stroke, TextWrapMode, Ui, UiBuilder, Vec2,
+  text::LayoutJob, text_selection::LabelSelectionState, Align, Color32, Context, CursorIcon, FontId, FontSelection, Id,
+  Layout, OpenUrl, Pos2, Rect, Response, Sense, Stroke, TextWrapMode, Ui, UiBuilder, Vec2,
 };
 use epaint::{
   pos2,
@@ -265,6 +265,8 @@ pub struct MarkdownLabel<'a> {
   code_block_min_width: Option<f32>,
   style: Option<&'a MarkdownStyle>,
   heal: bool,
+  #[allow(clippy::type_complexity)]
+  map_job: Option<Box<dyn Fn(&Context, LayoutJob) -> LayoutJob + 'a>>,
   #[cfg(feature = "syntax_highlighting")]
   code_theme: Option<&'a syntect::highlighting::Theme>,
 }
@@ -289,6 +291,7 @@ impl<'a> MarkdownLabel<'a> {
       code_block_min_width: None,
       style: None,
       heal: false,
+      map_job: None,
       #[cfg(feature = "syntax_highlighting")]
       code_theme: None,
     }
@@ -407,6 +410,17 @@ impl<'a> MarkdownLabel<'a> {
   /// enabling heal appends a closing fence before parsing.
   pub fn heal(self, heal: bool) -> Self {
     Self { heal, ..self }
+  }
+
+  /// Rewrite the laid-out [`LayoutJob`] just before it is shaped into a galley.
+  ///
+  /// The parse/layout cache is unchanged; only the painted job is rewritten. Pass `None` to
+  /// leave the job as built.
+  pub fn map_job<F>(self, f: Option<F>) -> Self
+  where
+    F: for<'c> Fn(&'c Context, LayoutJob) -> LayoutJob + 'a,
+  {
+    Self { map_job: f.map(|f| Box::new(f) as _), ..self }
   }
 
   /// Override visual styling for this widget.
@@ -580,6 +594,7 @@ impl<'a> MarkdownLabel<'a> {
           &layout.inline_widget_spans,
           color,
           style,
+          true,
         );
         return;
       }
@@ -635,6 +650,7 @@ impl<'a> MarkdownLabel<'a> {
       &layout.inline_widget_spans,
       color,
       style,
+      true,
     );
   }
 
@@ -700,7 +716,16 @@ impl<'a> MarkdownLabel<'a> {
             continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          table::render_table(ui, self.id.with(("table", i)), data, font, color, &style.inline_code, self.link_handler);
+          table::render_table(
+            ui,
+            self.id.with(("table", i)),
+            data,
+            font,
+            color,
+            &style.inline_code,
+            &style.table,
+            self.link_handler,
+          );
           cache_block_height(ui, block_sz_id, text_hash, before_y);
           i += 1;
           text_start = i;
@@ -874,6 +899,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     let token_slice = &md.tokens[start..trimmed_end];
+    let apply_map_job = end == md.tokens.len();
     let wrap = self.resolve_wrap(ui);
     let max_width = wrap.max_width;
     let dark_mode = ui.visuals().dark_mode;
@@ -906,6 +932,7 @@ impl<'a> MarkdownLabel<'a> {
           &cached.layout.inline_widget_spans,
           color,
           style,
+          apply_map_job,
         );
         ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
         return;
@@ -944,6 +971,7 @@ impl<'a> MarkdownLabel<'a> {
       &layout.inline_widget_spans,
       color,
       style,
+      apply_map_job,
     );
     ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
   }
@@ -961,10 +989,16 @@ impl<'a> MarkdownLabel<'a> {
     inline_widget_spans: &[(usize, usize, usize)],
     color: Color32,
     style: &MarkdownStyle,
+    apply_map_job: bool,
   ) -> Vec2 {
     let wrap = self.resolve_wrap(ui);
     let mut job = job;
     Self::apply_live_wrap(&wrap, &mut job);
+    if apply_map_job {
+      if let Some(map_job) = &self.map_job {
+        job = map_job(ui.ctx(), job);
+      }
+    }
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
     let available_width = ui.available_width();

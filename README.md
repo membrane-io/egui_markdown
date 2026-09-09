@@ -40,7 +40,7 @@ footnotes.
 - **Syntax highlighting** - highlighting through `syntect`, with built-in base16-ocean dark and light themes, and support for custom themes.
 - **Custom link handlers** - the `LinkHandler` trait lets you style links, respond to clicks, and override the layout. It can also render a link as an inline or block-level widget.
 - **Streaming and heal mode** - `.heal(true)` closes unclosed code fences, bold, italic, links, and tables, so that partial LLM output renders correctly.
-- **Configurable style** - `MarkdownStyle` controls the inline code colors, and the code block padding, radius, stroke, and font size. It also controls the heading scales, the horizontal rule stroke, the blockquote indent, and the block spacing. `MarkdownStyle::ui()` gives a built-in interactive editor.
+- **Configurable style** - `MarkdownStyle` controls the inline code colors, and the code block padding, radius, stroke, and font size. It also controls the heading scales, the horizontal rule stroke, the blockquote indent, the table stroke, corner radius, and cell padding, and the block spacing. `MarkdownStyle::ui()` gives a built-in interactive editor.
 - **Bold font family** - uses a registered `"bold"` font family when one exists, and the strong text color when none exists.
 - **Layout caching and viewport culling** - layout caching based on a hash, with viewport culling per segment, for smooth scrolling through large documents.
 
