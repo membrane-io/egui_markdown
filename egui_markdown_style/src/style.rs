@@ -2,7 +2,10 @@
 
 use std::hash::{Hash, Hasher};
 
-use egui::{self, Color32, DragValue, Grid, Stroke, Ui};
+use egui::{self, Color32, DragValue, Grid, Ui};
+// Only `InlineCodeStyle::stroke` uses this, and the membrane feature gates that method.
+#[cfg(feature = "membrane")]
+use egui::Stroke;
 
 /// Visual styling for markdown rendering.
 ///
