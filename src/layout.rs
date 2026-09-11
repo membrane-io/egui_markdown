@@ -65,6 +65,7 @@ pub fn apply_inline_code_bg(format: &mut TextFormat, dark_mode: bool, inline_sty
   {
     format.expand_bg = epaint::Vec2::new(inline_style.expand_bg, inline_style.expand_bg_y);
     format.bg_corner_radius = inline_style.bg_corner_radius;
+    format.bg_stroke = inline_style.stroke(dark_mode);
   }
   #[cfg(not(feature = "membrane"))]
   {

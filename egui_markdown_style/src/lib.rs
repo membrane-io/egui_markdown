@@ -9,6 +9,7 @@ mod style;
 
 pub use style::{
   BlockquoteStyle, CodeBlockStyle, HeadingStyle, HorizontalRuleStyle, InlineCodeStyle, ListStyle, MarkdownStyle,
+  TableStyle,
 };
 
 use std::sync::Arc;
