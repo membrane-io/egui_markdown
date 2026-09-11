@@ -2,7 +2,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use egui::{self, Color32, DragValue, Grid, Ui};
+use egui::{self, Color32, DragValue, Grid, Stroke, Ui};
 
 /// Visual styling for markdown rendering.
 ///
@@ -167,6 +167,16 @@ pub struct InlineCodeStyle {
   /// Corner radius for inline code backgrounds (requires `membrane` feature).
   #[cfg(feature = "membrane")]
   pub bg_corner_radius: u8,
+  /// Border color in dark mode (requires `membrane` feature).
+  #[cfg(feature = "membrane")]
+  pub stroke_dark: Color32,
+  /// Border color in light mode (requires `membrane` feature).
+  #[cfg(feature = "membrane")]
+  pub stroke_light: Color32,
+  /// Border width in points. A code block uses `CodeBlockStyle::stroke_width`, and an inline span
+  /// is the same surface, so both take one value (requires `membrane` feature).
+  #[cfg(feature = "membrane")]
+  pub stroke_width: f32,
 }
 
 impl Default for InlineCodeStyle {
@@ -177,10 +187,17 @@ impl Default for InlineCodeStyle {
       background_dark: Color32::from_gray(50),
       background_light: Color32::from_gray(225),
       expand_bg: 3.0,
+      // A border needs room, so the background clears the glyphs by two points and not by one.
       #[cfg(feature = "membrane")]
-      expand_bg_y: 1.0,
+      expand_bg_y: 2.0,
       #[cfg(feature = "membrane")]
       bg_corner_radius: 3,
+      #[cfg(feature = "membrane")]
+      stroke_dark: Color32::from_gray(60),
+      #[cfg(feature = "membrane")]
+      stroke_light: Color32::from_gray(190),
+      #[cfg(feature = "membrane")]
+      stroke_width: 1.0,
     }
   }
 }
@@ -196,6 +213,9 @@ impl Hash for InlineCodeStyle {
     {
       self.expand_bg_y.to_bits().hash(state);
       self.bg_corner_radius.hash(state);
+      self.stroke_dark.hash(state);
+      self.stroke_light.hash(state);
+      self.stroke_width.to_bits().hash(state);
     }
   }
 }
@@ -217,6 +237,13 @@ impl InlineCodeStyle {
     } else {
       self.background_light
     }
+  }
+
+  /// Resolve the border for the current theme.
+  #[cfg(feature = "membrane")]
+  pub fn stroke(&self, dark_mode: bool) -> Stroke {
+    let color = if dark_mode { self.stroke_dark } else { self.stroke_light };
+    Stroke::new(self.stroke_width, color)
   }
 
   fn ui(&mut self, ui: &mut Ui) {
@@ -250,6 +277,10 @@ impl InlineCodeStyle {
         ui.label("Bg corner radius:");
         ui.add(DragValue::new(&mut self.bg_corner_radius).range(0..=16));
         ui.end_row();
+
+        // `stroke_dark`, `stroke_light` and `stroke_width` get no row. `Theme::refresh_derived`
+        // writes all three from the dim stroke and from `CodeBlockStyle::stroke_width`, so it
+        // would overwrite an edit made here.
       }
     });
   }
