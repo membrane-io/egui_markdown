@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use egui::{Pos2, Rect, Stroke, StrokeKind, Ui};
-use epaint::{Galley, pos2};
+use epaint::{pos2, Galley};
 
 use crate::style::{CodeBlockStyle, HorizontalRuleStyle};
 
