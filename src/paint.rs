@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use egui::{Pos2, Rect, Stroke, StrokeKind, Ui};
-use epaint::{pos2, Galley};
+use epaint::{Galley, pos2};
 
 use crate::style::{CodeBlockStyle, HorizontalRuleStyle};
 
@@ -35,12 +35,16 @@ pub fn compute_code_block_rects(ui: &mut Ui, code_blocks: &[(usize, usize)], gal
 }
 
 /// Paint code block background and border.
+///
+/// The fill is `visuals.code_bg_color`, the same color [`crate::MarkdownLabel`] gives the frame of
+/// a scrolling code block, so both render paths show one code surface.
 pub fn paint_code_block_bg(ui: &Ui, bg_rect: Rect, origin: Pos2, code_style: &CodeBlockStyle) {
   let mut r = bg_rect.translate(origin.to_vec2());
   r.min.x -= code_style.padding[0];
   r.min.y -= code_style.padding[1];
   r.max.x += code_style.padding[2];
   r.max.y += code_style.padding[3];
+  ui.painter().rect_filled(r, code_style.corner_radius, ui.visuals().code_bg_color);
   let stroke = Stroke::new(code_style.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
   ui.painter().rect_stroke(r, code_style.corner_radius, stroke, StrokeKind::Inside);
 }
