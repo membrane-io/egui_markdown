@@ -233,6 +233,17 @@ struct ResolvedWrap {
   max_rows: Option<u32>,
 }
 
+/// What [`MarkdownLabel::show`] returns.
+pub struct MarkdownLabelOutput {
+  /// The union of the responses of the text in the label. A table, a scrolled code block and an image
+  /// have their own responses, which this response does not include.
+  pub response: Response,
+
+  /// True when the user clicked a link in this frame. The label handles that click itself, so a parent
+  /// that reacts to `response.clicked()` must ignore it.
+  pub link_clicked: bool,
+}
+
 /// An interactive markdown-rendered label widget for egui.
 ///
 /// Parses markdown text and renders it with formatting, clickable links,
@@ -483,8 +494,11 @@ impl<'a> MarkdownLabel<'a> {
   }
 
   /// Render the markdown into the UI.
-  pub fn show(self, ui: &mut Ui) {
-    self.render(ui);
+  pub fn show(self, ui: &mut Ui) -> MarkdownLabelOutput {
+    let mut out =
+      MarkdownLabelOutput { response: ui.interact(Rect::NOTHING, self.id, Sense::hover()), link_clicked: false };
+    self.render(ui, &mut out);
+    out
   }
 
   /// Calculate the rendered size without painting.
@@ -553,7 +567,7 @@ impl<'a> MarkdownLabel<'a> {
     (galley_pos, galley, response)
   }
 
-  fn render(self, ui: &mut Ui) {
+  fn render(self, ui: &mut Ui, out: &mut MarkdownLabelOutput) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
     let style = self.style.unwrap_or(context_style.as_ref());
     let color = ui.visuals().text_color();
@@ -579,7 +593,7 @@ impl<'a> MarkdownLabel<'a> {
 
         let Some(layout) = cached.layout.clone() else {
           let md = Markdown { s: text, tokens: (*tokens).clone() };
-          self.render_segmented(ui, &md, &font, color, style, text_hash);
+          self.render_segmented(ui, &md, &font, color, style, text_hash, out);
           return;
         };
 
@@ -595,6 +609,7 @@ impl<'a> MarkdownLabel<'a> {
           color,
           style,
           true,
+          out,
         );
         return;
       }
@@ -610,7 +625,7 @@ impl<'a> MarkdownLabel<'a> {
       ui.data_mut(|d| {
         d.insert_temp(cache_id, CachedMarkdownLayout { text_hash, layout: None, tokens: owned_tokens });
       });
-      self.render_segmented(ui, &md, &font, color, style, text_hash);
+      self.render_segmented(ui, &md, &font, color, style, text_hash, out);
       return;
     }
 
@@ -651,9 +666,11 @@ impl<'a> MarkdownLabel<'a> {
       color,
       style,
       true,
+      out,
     );
   }
 
+  #[allow(clippy::too_many_arguments)]
   fn render_segmented(
     &self,
     ui: &mut Ui,
@@ -662,8 +679,9 @@ impl<'a> MarkdownLabel<'a> {
     color: Color32,
     style: &MarkdownStyle,
     text_hash: u64,
+    out: &mut MarkdownLabelOutput,
   ) {
-    self.render_token_range(ui, md, font, color, 0, md.tokens.len(), style, text_hash);
+    self.render_token_range(ui, md, font, color, 0, md.tokens.len(), style, text_hash, out);
   }
 
   /// Recursively render a range of tokens, handling blockquotes and tables as sub-regions.
@@ -678,6 +696,7 @@ impl<'a> MarkdownLabel<'a> {
     end: usize,
     style: &MarkdownStyle,
     text_hash: u64,
+    out: &mut MarkdownLabelOutput,
   ) {
     let mut text_start = start;
     let mut i = start;
@@ -706,7 +725,7 @@ impl<'a> MarkdownLabel<'a> {
       match &md.tokens[i] {
         Token::Table(data) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, md, font, color, text_start, i, style);
+          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
@@ -733,7 +752,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::CodeBlock { text, language } if self.scroll_code_blocks => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, md, font, color, text_start, i, style);
+          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
@@ -762,7 +781,7 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(feature = "images")]
         Token::Image { url, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, md, font, color, text_start, i, style);
+          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
@@ -781,7 +800,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         #[cfg(not(feature = "images"))]
         Token::Image { alt, url, .. } => {
-          self.flush_text_range(ui, md, font, color, text_start, i, style);
+          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
             i += 1;
@@ -800,14 +819,14 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::Link { text, href, .. } if self.link_handler.is_some_and(|h| h.is_block_widget(href)) => {
-          self.flush_text_range(ui, md, font, color, text_start, i, style);
+          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
           let handler = self.link_handler.unwrap();
           handler.block_widget(ui, text, href);
           i += 1;
           text_start = i;
         }
         Token::BlockquoteStart => {
-          self.flush_text_range(ui, md, font, color, text_start, i, style);
+          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
 
           // Find the matching BlockquoteEnd.
           let bq_start = i + 1;
@@ -836,7 +855,7 @@ impl<'a> MarkdownLabel<'a> {
           child_rect.min.x += indent;
 
           let mut child_ui = ui.new_child(UiBuilder::new().id_salt(self.id.with(("bq", i))).max_rect(child_rect));
-          self.render_token_range(&mut child_ui, md, font, color, bq_content_start, bq_end, style, text_hash);
+          self.render_token_range(&mut child_ui, md, font, color, bq_content_start, bq_end, style, text_hash, out);
 
           let bq_stroke =
             Stroke::new(style.blockquote.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
@@ -854,7 +873,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::BlockquoteEnd => {
-          self.flush_text_range(ui, md, font, color, text_start, i, style);
+          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
           i += 1;
           text_start = i;
         }
@@ -865,7 +884,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     // Flush remaining text.
-    self.flush_text_range(ui, md, font, color, text_start, end, style);
+    self.flush_text_range(ui, md, font, color, text_start, end, style, out);
   }
 
   /// Render a range of non-break tokens as an interactive galley.
@@ -879,6 +898,7 @@ impl<'a> MarkdownLabel<'a> {
     start: usize,
     end: usize,
     style: &MarkdownStyle,
+    out: &mut MarkdownLabelOutput,
   ) {
     if start >= end {
       return;
@@ -933,6 +953,7 @@ impl<'a> MarkdownLabel<'a> {
           color,
           style,
           apply_map_job,
+          out,
         );
         ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
         return;
@@ -972,6 +993,7 @@ impl<'a> MarkdownLabel<'a> {
       color,
       style,
       apply_map_job,
+      out,
     );
     ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
   }
@@ -990,6 +1012,7 @@ impl<'a> MarkdownLabel<'a> {
     color: Color32,
     style: &MarkdownStyle,
     apply_map_job: bool,
+    out: &mut MarkdownLabelOutput,
   ) -> Vec2 {
     let wrap = self.resolve_wrap(ui);
     let mut job = job;
@@ -1012,7 +1035,8 @@ impl<'a> MarkdownLabel<'a> {
     let decoration_width = if self.hug_content { size.x } else { available_width };
 
     if !self.interactable {
-      let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+      let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+      out.response = out.response.union(response);
       paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
       ui.painter().galley(rect.min, galley.clone(), color);
       if let Some(handler) = self.link_handler {
@@ -1043,8 +1067,9 @@ impl<'a> MarkdownLabel<'a> {
       self.handle_hover(ui, tokens, &galley, section_to_token, inline_widget_spans, &response, rect, color);
 
     if self.interactable && response.clicked() {
-      self.handle_click(ui, tokens, section_to_token, hovered_section);
+      out.link_clicked |= self.handle_click(ui, tokens, section_to_token, hovered_section);
     }
+    out.response = out.response.union(response);
     size
   }
 
@@ -1155,20 +1180,27 @@ impl<'a> MarkdownLabel<'a> {
     Some(section_index)
   }
 
-  fn handle_click(&self, ui: &mut Ui, tokens: &[Token<'_>], section_to_token: &[usize], hovered_section: Option<u32>) {
+  /// Open the link under a click. Returns true when the click is on a link.
+  fn handle_click(
+    &self,
+    ui: &mut Ui,
+    tokens: &[Token<'_>],
+    section_to_token: &[usize],
+    hovered_section: Option<u32>,
+  ) -> bool {
     let section_index = match hovered_section {
       Some(s) => s,
-      None => return,
+      None => return false,
     };
     let token_index = section_to_token.get(section_index as usize).copied();
     let token = token_index.and_then(|idx| tokens.get(idx));
 
-    if let Some(Token::Link { text, href, .. }) = token {
-      let handled = if let Some(handler) = self.link_handler { handler.click(text, href, ui) } else { false };
-      if !handled {
-        ui.ctx().open_url(OpenUrl::new_tab(href.to_string()));
-      }
+    let Some(Token::Link { text, href, .. }) = token else { return false };
+    let handled = if let Some(handler) = self.link_handler { handler.click(text, href, ui) } else { false };
+    if !handled {
+      ui.ctx().open_url(OpenUrl::new_tab(href.to_string()));
     }
+    true
   }
 }
 

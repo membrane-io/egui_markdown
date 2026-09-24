@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `build_layout` now takes `max_width: f32` and `break_anywhere: bool`, and no
   longer reads `ui.wrap_mode()` itself. A caller that caches the resulting job must write the
   live wrap values over it before each shape, as `MarkdownLabel` already does.
+- **Breaking:** `MarkdownLabel::show` now returns `MarkdownLabelOutput`. Its `response` is the
+  union of the responses of the text, and `link_clicked` tells a click on a link from a click on
+  other text. A parent widget that reacts to a click uses the two to ignore a link click. A
+  caller that uses `show` as the last expression of a closure that returns `()` must add a `;`.
 
 ### Fixed
 
