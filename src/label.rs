@@ -1160,10 +1160,12 @@ impl<'a> MarkdownLabel<'a> {
           let row_sg = if row_index == sr { Some(sg) } else { row.glyphs.first() };
           let row_eg = if row_index == er { Some(eg) } else { last_non_whitespace_glyph(row) };
           if let Some((sg, eg)) = row_sg.zip(row_eg) {
-            let row_rect =
-              Rect::from_min_max(pos2(sg.pos.x, row.min_y()), pos2(eg.pos.x + eg.advance_width, row.max_y()))
-                .translate(rect.min.to_vec2());
-            ui.painter().line_segment([row_rect.left_bottom(), row_rect.right_bottom()], stroke);
+            // The row is as tall as the markdown line height, which can be taller than the font. So the
+            // underline goes half way into the descent of the font, and not at the bottom of the row.
+            let descent = sg.font_height - sg.font_ascent;
+            let y = ui.painter().round_to_pixel_center(rect.min.y + row.pos.y + sg.pos.y + descent * 0.5);
+            let x = rect.min.x;
+            ui.painter().line_segment([pos2(x + sg.pos.x, y), pos2(x + eg.pos.x + eg.advance_width, y)], stroke);
           }
         }
       }

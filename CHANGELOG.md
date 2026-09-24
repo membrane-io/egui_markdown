@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `TextWrapMode::Truncate` on the surrounding `Ui`, and now on the widget builders, truncates
   the text. It previously behaved as wrap.
+- The label draws the link underline half way into the descent of the font. It previously drew
+  the underline at the bottom of the row, so a tall line height put a gap under the text.
 
 ## [0.1.0] - 2026-03-23
 
