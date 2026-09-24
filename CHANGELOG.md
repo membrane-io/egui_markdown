@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MarkdownLabel::wrap_mode`, `.wrap()`, `.truncate()`, and `.extend()`, which mirror the same
   methods on the egui `Label`. Truncate elides after `max_lines` rows, which defaults to 1, and
   sets `BreakAll`.
+- `LinkHandler::hover_text`, which shows a tooltip while the pointer is on a link. A handler
+  uses it to say where a link goes when the link text does not.
 - `TableStyle::stroke_width` on `MarkdownStyle`. A non-zero width draws separator lines
   between table cells. Default is `0.0` (no stroke).
 - `TableStyle::corner_radius` on the outer table stroke.

@@ -18,6 +18,13 @@ pub trait LinkHandler {
     None
   }
 
+  /// The text of the tooltip that shows while the pointer is on the link, for example where the link goes
+  /// when its text does not say. Return `None` for no tooltip, or for the href when
+  /// [`egui::Style::url_in_tooltip`] is set.
+  fn hover_text(&self, _href: &str) -> Option<String> {
+    None
+  }
+
   /// Handle a link click. Return true if handled, false for default (open URL in browser).
   fn click(&self, _text: &str, _href: &str, _ui: &mut Ui) -> bool {
     false

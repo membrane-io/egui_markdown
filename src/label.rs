@@ -1171,9 +1171,12 @@ impl<'a> MarkdownLabel<'a> {
       }
       ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
 
-      // Show URL in tooltip when url_in_tooltip is enabled (matches egui's Hyperlink behavior)
-      if ui.style().url_in_tooltip {
-        if let Some(Token::Link { href, .. }) = token {
+      // The hover text of the handler comes first. The href shows when url_in_tooltip is set, as egui's
+      // Hyperlink does.
+      if let Some(Token::Link { href, .. }) = token {
+        if let Some(text) = self.link_handler.and_then(|handler| handler.hover_text(href)) {
+          response.clone().on_hover_text_at_pointer(text);
+        } else if ui.style().url_in_tooltip {
           response.clone().on_hover_text_at_pointer(href.as_ref());
         }
       }
