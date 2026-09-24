@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MarkdownLabel::wrap_mode`, `.wrap()`, `.truncate()`, and `.extend()`, which mirror the same
   methods on the egui `Label`. Truncate elides after `max_lines` rows, which defaults to 1, and
   sets `BreakAll`.
+- `LinkHandler::hover_text`, which shows a tooltip while the pointer is on a link. A handler
+  uses it to say where a link goes when the link text does not.
 - `TableStyle::stroke_width` on `MarkdownStyle`. A non-zero width draws separator lines
   between table cells. Default is `0.0` (no stroke).
 - `TableStyle::corner_radius` on the outer table stroke.
@@ -26,11 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `build_layout` now takes `max_width: f32` and `break_anywhere: bool`, and no
   longer reads `ui.wrap_mode()` itself. A caller that caches the resulting job must write the
   live wrap values over it before each shape, as `MarkdownLabel` already does.
+- **Breaking:** `MarkdownLabel::show` now returns `MarkdownLabelOutput`. Its `response` is the
+  union of the responses of the text, and `link_clicked` tells a click on a link from a click on
+  other text. A parent widget that reacts to a click uses the two to ignore a link click. A
+  caller that uses `show` as the last expression of a closure that returns `()` must add a `;`.
 
 ### Fixed
 
 - `TextWrapMode::Truncate` on the surrounding `Ui`, and now on the widget builders, truncates
   the text. It previously behaved as wrap.
+- The label draws the link underline half way into the descent of the font. It previously drew
+  the underline at the bottom of the row, so a tall line height put a gap under the text.
 
 ## [0.1.0] - 2026-03-23
 
