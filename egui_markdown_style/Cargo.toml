@@ -13,7 +13,7 @@ keywords = ["egui", "markdown", "style"]
 include = ["**/*.rs", "Cargo.toml"]
 
 [dependencies]
-egui = { version = "0.34", default-features = false }
+egui = { version = "0.36", default-features = false }
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 
 [features]
