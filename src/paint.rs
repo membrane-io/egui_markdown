@@ -16,7 +16,7 @@ pub fn compute_code_block_rects(ui: &mut Ui, code_blocks: &[(usize, usize)], gal
     let mut start_row = None;
     let mut offset = 0;
     for (row_index, row) in galley.rows.iter().enumerate() {
-      let row_range = offset..=offset + row.char_count_including_newline();
+      let row_range = offset..=offset + row.char_count_including_newline().0;
       if row_range.contains(&start) {
         start_row = Some(row_index);
       }
@@ -28,7 +28,7 @@ pub fn compute_code_block_rects(ui: &mut Ui, code_blocks: &[(usize, usize)], gal
           break;
         }
       }
-      offset += row.char_count_including_newline();
+      offset += row.char_count_including_newline().0;
     }
   }
   code_block_rects
@@ -65,7 +65,7 @@ pub fn paint_horizontal_rules(
   for &hr_char in hr_positions {
     let mut offset = 0;
     for row in &galley.rows {
-      let row_end = offset + row.char_count_including_newline();
+      let row_end = offset + row.char_count_including_newline().0;
       if hr_char >= offset && hr_char < row_end {
         let y = origin.y + (row.min_y() + row.max_y()) / 2.0;
         ui.painter().line_segment([pos2(origin.x, y), pos2(origin.x + available_width, y)], stroke);
