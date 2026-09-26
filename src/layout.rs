@@ -4,6 +4,8 @@ use egui::{
   text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,
 };
 
+use epaint::text::ByteRangeExt as _;
+
 use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, MarkdownStyle};
 use crate::types::Token;
@@ -46,7 +48,7 @@ pub struct LayoutResult {
 pub fn section_for_char(job: &LayoutJob, char_index: u32) -> Option<u32> {
   let mut offset = 0u32;
   for (section_idx, section) in job.sections.iter().enumerate() {
-    let section_text = &job.text[section.byte_range.clone()];
+    let section_text = &job.text[section.byte_range.as_usize()];
     let char_count = section_text.chars().count() as u32;
     if char_index < offset + char_count {
       return Some(section_idx as u32);
@@ -383,7 +385,7 @@ pub fn build_layout(
             let mut line_index = 0usize;
             let mut at_line_start = true;
             for section in highlighted_job.sections {
-              let section_text = &highlighted_job.text[section.byte_range.clone()];
+              let section_text = &highlighted_job.text[section.byte_range.as_usize()];
               for part in section_text.split_inclusive('\n') {
                 if at_line_start {
                   let indent = line_indents.get(line_index).copied().unwrap_or(0.0);
@@ -403,7 +405,7 @@ pub fn build_layout(
           }
           #[cfg(not(feature = "membrane"))]
           for section in highlighted_job.sections {
-            let section_text = &highlighted_job.text[section.byte_range.clone()];
+            let section_text = &highlighted_job.text[section.byte_range.as_usize()];
             job.append(section_text, 0.0, section.format);
             section_to_token.push(token_index);
           }
@@ -627,7 +629,7 @@ mod syntect_code {
     mut byte_offset: usize,
     code_font_size: f32,
   ) {
-    use egui::text::{LayoutSection, TextFormat as TF};
+    use egui::text::{ByteIndex, LayoutSection, TextFormat as TF};
 
     for (syn_style, range) in ranges {
       let byte_start = byte_offset;
@@ -636,7 +638,7 @@ mod syntect_code {
       #[allow(clippy::useless_conversion)]
       job.sections.push(LayoutSection {
         leading_space: 0.0_f32.into(),
-        byte_range: byte_start..byte_end,
+        byte_range: ByteIndex(byte_start)..ByteIndex(byte_end),
         format: TF {
           font_id: FontId::monospace(code_font_size),
           color: Color32::from_rgb(fg.r, fg.g, fg.b),
@@ -648,14 +650,14 @@ mod syntect_code {
   }
 
   fn append_plain_padded_line(job: &mut LayoutJob, padded_line: &str, code_font_size: f32) {
-    use egui::text::{LayoutSection, TextFormat as TF};
+    use egui::text::{ByteIndex, LayoutSection, TextFormat as TF};
 
     let byte_start = job.text.len();
     job.text.push_str(padded_line);
     #[allow(clippy::useless_conversion)]
     job.sections.push(LayoutSection {
       leading_space: 0.0_f32.into(),
-      byte_range: byte_start..job.text.len(),
+      byte_range: ByteIndex(byte_start)..ByteIndex(job.text.len()),
       format: TF { font_id: FontId::monospace(code_font_size), ..Default::default() },
     });
   }

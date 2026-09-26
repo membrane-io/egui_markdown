@@ -9,8 +9,10 @@ use egui::{
 };
 use epaint::{
   pos2,
-  text::{cursor::CCursor, Galley, Glyph, Row},
+  text::{cursor::CCursor, CharIndex, Galley, Glyph, Row},
 };
+
+use epaint::text::ByteRangeExt as _;
 
 #[cfg(not(feature = "syntax_highlighting"))]
 use crate::layout::highlight_code;
@@ -1025,7 +1027,7 @@ impl<'a> MarkdownLabel<'a> {
     let mut built = Vec::new();
     if apply_map_job {
       if let Some(map_job) = &self.map_job {
-        built = job.sections.iter().map(|section| (section.byte_range.clone(), section.format.color)).collect();
+        built = job.sections.iter().map(|section| (section.byte_range.as_usize(), section.format.color)).collect();
         job = map_job(ui.ctx(), job);
         mapped_sections = Some(tokens_of_sections(&built, section_to_token, &job.sections));
       }
@@ -1159,13 +1161,13 @@ impl<'a> MarkdownLabel<'a> {
         // Find the char range for this section.
         let mut sec_start_char = 0u32;
         for s in &galley.job.sections[..sec_idx] {
-          sec_start_char += galley.job.text[s.byte_range.clone()].chars().count() as u32;
+          sec_start_char += galley.job.text[s.byte_range.as_usize()].chars().count() as u32;
         }
         let sec_char_count = galley.job.sections[sec_idx]
           .byte_range
-          .clone()
+          .as_usize()
           .len()
-          .min(galley.job.text[galley.job.sections[sec_idx].byte_range.clone()].chars().count());
+          .min(galley.job.text[galley.job.sections[sec_idx].byte_range.as_usize()].chars().count());
         let sec_end_char = sec_start_char + sec_char_count as u32;
         if sec_end_char <= sec_start_char {
           continue;
@@ -1246,7 +1248,7 @@ fn tokens_of_sections(
   sections
     .iter()
     .map(|section| {
-      let start = section.byte_range.start;
+      let start = section.byte_range.start.0;
       let index = built.partition_point(|(range, _)| range.end <= start);
       built
         .get(index)
@@ -1263,7 +1265,7 @@ fn tokens_of_sections(
 fn shown_after_map(job: &LayoutJob, built: &[(std::ops::Range<usize>, Color32)], char_index: usize) -> bool {
   let Some(before) = char_index.checked_sub(1) else { return true };
   let Some((byte, _)) = job.text.char_indices().nth(before) else { return true };
-  let mapped_alpha = job.sections.iter().find(|s| s.byte_range.contains(&byte)).map(|s| s.format.color.a());
+  let mapped_alpha = job.sections.iter().find(|s| s.byte_range.as_usize().contains(&byte)).map(|s| s.format.color.a());
   let built_alpha = built.iter().find(|(range, _)| range.contains(&byte)).map(|(_, color)| color.a());
   !(mapped_alpha == Some(0) && built_alpha != Some(0))
 }
@@ -1276,13 +1278,13 @@ fn shown_after_map(job: &LayoutJob, built: &[(std::ops::Range<usize>, Color32)],
 fn shown_height(galley: &Galley, built: &[(std::ops::Range<usize>, Color32)]) -> Option<f32> {
   let job = &galley.job;
   let hidden = job.sections.iter().find(|section| {
-    let start = section.byte_range.start;
+    let start = section.byte_range.start.0;
     let built_alpha = built.iter().find(|(range, _)| range.contains(&start)).map(|(_, color)| color.a());
     !section.byte_range.is_empty() && section.format.color.a() == 0 && built_alpha.is_some_and(|alpha| alpha != 0)
   })?;
-  let first_hidden = job.text[..hidden.byte_range.start].chars().count();
+  let first_hidden = job.text[..hidden.byte_range.start.0].chars().count();
   let Some(last_shown) = first_hidden.checked_sub(1) else { return Some(0.0) };
-  let cursor = CCursor { index: last_shown, prefer_next_row: true };
+  let cursor = CCursor { index: CharIndex(last_shown), prefer_next_row: true };
   Some(galley.pos_from_cursor(cursor).max.y.min(galley.size().y))
 }
 
@@ -1474,7 +1476,7 @@ pub fn cursor_from_pos(galley: &Galley, pos: Pos2) -> Option<u32> {
         return Some(index + column as u32);
       }
     }
-    index += row.char_count_including_newline() as u32;
+    index += row.char_count_including_newline().0 as u32;
   }
   None
 }
@@ -1483,10 +1485,10 @@ pub fn cursor_from_pos(galley: &Galley, pos: Pos2) -> Option<u32> {
 pub fn glyph_at_index(galley: &Galley, index: u32) -> Option<(&Glyph, u32)> {
   let mut offset = 0;
   for (row_index, row) in galley.rows.iter().enumerate() {
-    if index < offset + row.char_count_including_newline() as u32 {
+    if index < offset + row.char_count_including_newline().0 as u32 {
       return row.glyphs.get((index - offset) as usize).map(|glyph| (glyph, row_index as u32));
     }
-    offset += row.char_count_including_newline() as u32;
+    offset += row.char_count_including_newline().0 as u32;
   }
   None
 }
