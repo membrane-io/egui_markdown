@@ -1017,11 +1017,15 @@ impl<'a> MarkdownLabel<'a> {
     let wrap = self.resolve_wrap(ui);
     let mut job = job;
     Self::apply_live_wrap(&wrap, &mut job);
+    let mut mapped_sections = None;
     if apply_map_job {
       if let Some(map_job) = &self.map_job {
+        let built: Vec<_> = job.sections.iter().map(|section| section.byte_range.clone()).collect();
         job = map_job(ui.ctx(), job);
+        mapped_sections = Some(tokens_of_sections(&built, section_to_token, &job.sections));
       }
     }
+    let section_to_token = mapped_sections.as_deref().unwrap_or(section_to_token);
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
     let available_width = ui.available_width();
@@ -1207,6 +1211,30 @@ impl<'a> MarkdownLabel<'a> {
     }
     true
   }
+}
+
+/// The token of each section in `sections`, after a `map_job` rewrote the sections that the layout built.
+///
+/// `section_to_token` holds one token for each section in `built`. A map can split a section, so an index into
+/// `sections` is not an index into `section_to_token`. Each section takes the token of the built section that
+/// holds its first byte. A section that starts after the built text takes `usize::MAX`, which names no token.
+fn tokens_of_sections(
+  built: &[std::ops::Range<usize>],
+  section_to_token: &[usize],
+  sections: &[egui::text::LayoutSection],
+) -> Vec<usize> {
+  sections
+    .iter()
+    .map(|section| {
+      let start = section.byte_range.start;
+      let index = built.partition_point(|range| range.end <= start);
+      built
+        .get(index)
+        .filter(|range| range.start <= start)
+        .and_then(|_| section_to_token.get(index).copied())
+        .unwrap_or(usize::MAX)
+    })
+    .collect()
 }
 
 fn paint_decorations(
