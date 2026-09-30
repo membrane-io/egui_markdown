@@ -1190,6 +1190,8 @@ impl<'a> MarkdownLabel<'a> {
   }
 
   /// Open the link under a click. Returns true when the click is on a link.
+  ///
+  /// A healed link has an empty href until its URL arrives, and a click on it opens nothing.
   fn handle_click(
     &self,
     ui: &mut Ui,
@@ -1205,6 +1207,9 @@ impl<'a> MarkdownLabel<'a> {
     let token = token_index.and_then(|idx| tokens.get(idx));
 
     let Some(Token::Link { text, href, .. }) = token else { return false };
+    if href.is_empty() {
+      return true;
+    }
     let handled = if let Some(handler) = self.link_handler { handler.click(text, href, ui) } else { false };
     if !handled {
       ui.ctx().open_url(OpenUrl::new_tab(href.to_string()));

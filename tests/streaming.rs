@@ -83,7 +83,12 @@ fn a_streamed_prefix_does_not_take_back_what_it_showed() {
     let prefixes: Vec<String> = (1..=deltas.len()).map(|n| deltas[..n].concat()).collect();
     for (n, pair) in prefixes.windows(2).enumerate() {
       if let Some(defect) = defect(&Visible::of(&pair[0]), &Visible::of(&pair[1])) {
-        failures.push(format!("{name}, n = {}: {defect}\n  prefix n:     {:?}\n  prefix n + 1: {:?}", n + 1, pair[0], pair[1]));
+        failures.push(format!(
+          "{name}, n = {}: {defect}\n  prefix n:     {:?}\n  prefix n + 1: {:?}",
+          n + 1,
+          pair[0],
+          pair[1]
+        ));
       }
     }
   }
