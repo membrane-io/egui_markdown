@@ -1018,15 +1018,22 @@ impl<'a> MarkdownLabel<'a> {
     let mut job = job;
     Self::apply_live_wrap(&wrap, &mut job);
     let mut mapped_sections = None;
+    let mut built_colors = Vec::new();
     if apply_map_job {
       if let Some(map_job) = &self.map_job {
         let built: Vec<_> = job.sections.iter().map(|section| section.byte_range.clone()).collect();
+        built_colors = job.sections.iter().map(|section| (section.byte_range.clone(), section.format.color)).collect();
         job = map_job(ui.ctx(), job);
         mapped_sections = Some(tokens_of_sections(&built, section_to_token, &job.sections));
       }
     }
     let section_to_token = mapped_sections.as_deref().unwrap_or(section_to_token);
     let galley = ui.fonts_mut(|f| f.layout_job(job));
+    // A rule or an inline widget paints over the galley, so it shows only after the text before it shows.
+    let shown = |char_index: usize| built_colors.is_empty() || shown_after_map(&galley.job, &built_colors, char_index);
+    let hr_positions: Vec<usize> = hr_positions.iter().copied().filter(|&at| shown(at)).collect();
+    let hr_positions = hr_positions.as_slice();
+    let painted_widget_spans: Vec<_> = inline_widget_spans.iter().copied().filter(|&(at, ..)| shown(at)).collect();
     let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
     let available_width = ui.available_width();
     // Decorations (code block backgrounds, horizontal rules) span the allocated width, so a
@@ -1044,7 +1051,7 @@ impl<'a> MarkdownLabel<'a> {
       paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
       ui.painter().galley(rect.min, galley.clone(), color);
       if let Some(handler) = self.link_handler {
-        paint_inline_widgets(ui, handler, tokens, inline_widget_spans, &galley, rect.min);
+        paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, rect.min);
       }
       return size;
     }
@@ -1064,7 +1071,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     if let Some(handler) = self.link_handler {
-      paint_inline_widgets(ui, handler, tokens, inline_widget_spans, &galley, response.rect.min);
+      paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, response.rect.min);
     }
 
     let hovered_section =
@@ -1240,6 +1247,17 @@ fn tokens_of_sections(
         .unwrap_or(usize::MAX)
     })
     .collect()
+}
+
+/// Whether the character before `char_index` shows after a `map_job`. The map hides a character when it sets
+/// the color alpha to 0 and the built job gave that character a color that shows. A placeholder at character 0
+/// has no character before it, so it shows.
+fn shown_after_map(job: &LayoutJob, built_colors: &[(std::ops::Range<usize>, Color32)], char_index: usize) -> bool {
+  let Some(before) = char_index.checked_sub(1) else { return true };
+  let Some((byte, _)) = job.text.char_indices().nth(before) else { return true };
+  let mapped = job.sections.iter().find(|section| section.byte_range.contains(&byte)).map(|s| s.format.color.a());
+  let built = built_colors.iter().find(|(range, _)| range.contains(&byte)).map(|(_, color)| color.a());
+  !(mapped == Some(0) && built != Some(0))
 }
 
 fn paint_decorations(
