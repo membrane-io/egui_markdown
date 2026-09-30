@@ -1128,6 +1128,7 @@ dependencies = [
  "log",
  "memoffset",
  "profiling",
+ "web-sys",
  "winit",
 ]
 
@@ -1143,6 +1144,7 @@ dependencies = [
  "env_logger",
  "epaint",
  "pulldown-cmark",
+ "serde_json",
  "syntect",
 ]
 
