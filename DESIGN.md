@@ -191,7 +191,15 @@ returns `Cow::Borrowed` when the text needs no repair, which is the common case 
 complete markdown, and this avoids an allocation. Only incomplete input produces a
 `Cow::Owned` with a new string.
 
-**Files:** `parser.rs` (heal, heal_inline, heal_table)
+A marker at the end of the text has no kind until more text arrives. `**` can open bold, or
+heal to `****`, which is a rule. A `-` under a line can be a list item or a setext underline,
+which makes the line above it a heading. So `heal()` removes a last line that holds only block
+markers and a run of inline markers at the end. The next delta then adds text, and it does not
+change what already shows. For the same reason, `heal()` removes the URL of an open link. Each
+delta of a URL makes a different link, and a partial URL can parse as a valid link to the
+wrong target.
+
+**Files:** `parser.rs` (heal, heal_inline, heal_table, without_marker_line, without_marker_run)
 
 ## Token size constraint
 

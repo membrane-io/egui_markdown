@@ -32,8 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   union of the responses of the text, and `link_clicked` tells a click on a link from a click on
   other text. A parent widget that reacts to a click uses the two to ignore a link click. A
   caller that uses `show` as the last expression of a closure that returns `()` must add a `;`.
+- `heal()` removes a last line that holds only block markers, such as `-` or `1.`, and a run of
+  inline markers at the end, such as `**`. It also removes the URL of an open link, so the link
+  has an empty href until its `)` arrives. A click on a link with an empty href opens no URL.
 
 ### Fixed
+
+- A streamed `**` at the end of the text healed to `****` and showed as a rule for one delta.
+  A streamed `-` under a line made the line a heading for one delta.
+- A `map_job` that hides text, such as a reveal, now also hides a rule or an inline widget after
+  that text. The label previously painted them before the text above them showed.
 
 - `TextWrapMode::Truncate` on the surrounding `Ui`, and now on the widget builders, truncates
   the text. It previously behaved as wrap.
