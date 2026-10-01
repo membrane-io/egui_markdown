@@ -47,11 +47,7 @@ impl AdvancedApp {
       selectable: true,
       interactable: true,
       render_times: VecDeque::with_capacity(120),
-      markdown_style: {
-        let mut s = MarkdownStyle::default();
-        s.code_font_size = 12.0;
-        s
-      },
+      markdown_style: MarkdownStyle { code_font_size: 12.0, ..Default::default() },
       simulate_stream: false,
       stream_pos: 0,
       stream_source: DEFAULT_MARKDOWN.to_string(),
