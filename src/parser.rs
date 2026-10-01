@@ -33,7 +33,9 @@ fn trim_end_newlines<'s>(s: CowStr<'s>) -> CowStr<'s> {
 /// end. It also removes the URL of an open link, because a partial URL is a different
 /// link.
 ///
-/// Returns `Cow::Borrowed` when the text needs no repair, which costs no allocation.
+/// Returns `Cow::Borrowed` when the text needs no closer, which costs no allocation. Text that
+/// ends with a closer, such as `**bold**`, loses the closer to the trailing marker run and gets
+/// it back, so it returns `Cow::Owned`.
 ///
 /// ```
 /// use egui_markdown::heal;
@@ -79,12 +81,7 @@ pub fn heal(s: &str) -> Cow<'_, str> {
   healed.push_str(rest);
   healed.push_str(&table_suffix);
   healed.push_str(&inline_suffix);
-  // A closed construct at the end, such as `**bold**`, loses its closer and gets it back.
-  if healed == s {
-    Cow::Borrowed(s)
-  } else {
-    Cow::Owned(healed)
-  }
+  Cow::Owned(healed)
 }
 
 /// `s` without its last line when that line holds only block markers.
@@ -140,48 +137,14 @@ fn strip_list_marker(body: &str) -> Option<&str> {
 /// `s` without the run of inline markers at its end.
 ///
 /// A marker with no content after it heals to a pair of markers. The pair can parse as a rule,
-/// as in `****`, or show as literal text. In an open inline code span, a marker is text, so the
-/// run starts at the first backtick after the text that it keeps.
+/// as in `****`, or show as literal text. A run at the end of an inline code span is text, and
+/// it shows when the next character arrives.
 fn without_marker_run(s: &str) -> &str {
   let last_line = s[s.rfind('\n').map_or(0, |newline| newline + 1)..].trim_start();
   if last_line.starts_with("```") || last_line.starts_with("~~~") {
     return s;
   }
-  let kept = s.trim_end_matches(['*', '_', '~', '`', '[', ']', '\\']);
-  if !ends_in_inline_code(kept) {
-    return kept;
-  }
-  match s[kept.len()..].find('`') {
-    Some(backtick) => &s[..kept.len() + backtick],
-    None => s,
-  }
-}
-
-/// Whether `s` ends inside an inline code span, with the backtick rules of `heal_inline`.
-fn ends_in_inline_code(s: &str) -> bool {
-  let mut in_fence = false;
-  let mut in_code = false;
-  for line in s.lines() {
-    let trimmed = line.trim();
-    if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-      in_fence = !in_fence;
-      continue;
-    }
-    if in_fence {
-      continue;
-    }
-    let bytes = line.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-      match bytes[i] {
-        b'\\' if i + 1 < bytes.len() => i += 1,
-        b'`' => in_code = !in_code,
-        _ => {}
-      }
-      i += 1;
-    }
-  }
-  in_code
+  s.trim_end_matches(['*', '_', '~', '`', '[', ']', '\\'])
 }
 
 /// The input to keep, and the closers to append to it.
@@ -1315,16 +1278,9 @@ mod tests {
   }
 
   #[test]
-  fn heal_keeps_a_marker_run_in_inline_code() {
-    assert_eq!(super::heal("`a **"), "`a **`");
-    assert_eq!(super::heal("`a*`**"), "`a*`");
-    assert!(matches!(super::heal("`**not bold**`"), std::borrow::Cow::Borrowed(_)));
-  }
-
-  #[test]
   fn heal_keeps_a_closed_construct_at_the_end() {
     for input in ["**bold**", "_it_", "`code`", "~~s~~", "***both***", "```\ncode\n```", "~~~\ncode\n~~~"] {
-      assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)), "{input:?}");
+      assert_eq!(super::heal(input), input);
     }
   }
 
@@ -1502,14 +1458,15 @@ mod tests {
   #[test]
   fn heal_closed_underscores_no_change() {
     let input = "__bold__ and _italic_";
-    assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
+    assert_eq!(super::heal(input), input);
   }
 
   #[test]
   fn heal_inline_code_contains_stars() {
-    // Stars inside inline code should not trigger emphasis healing.
-    let input = "`**not bold**`";
-    assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
+    // Stars inside inline code do not trigger emphasis healing. The stars at the end of the code
+    // are a trailing marker run, so they show when the next character arrives.
+    assert!(matches!(super::heal("`**not bold**` x"), std::borrow::Cow::Borrowed(_)));
+    assert_eq!(super::heal("`**not bold**`"), "`**not bold`");
   }
 
   #[test]
