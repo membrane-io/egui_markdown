@@ -84,7 +84,8 @@ pub fn heal(s: &str) -> Cow<'_, str> {
   Cow::Owned(healed)
 }
 
-/// `s` without its last line when that line holds only block markers.
+/// `s` without its last line when that line holds only block markers, or when that line is a
+/// table row that does not render as a row yet.
 ///
 /// Such a line has no kind until the line is complete. `-` can become a list item, a setext
 /// underline or a rule, and a setext underline changes the kind of the line above it.
@@ -93,11 +94,26 @@ fn without_marker_line(s: &str) -> &str {
     return s;
   }
   let start = s.rfind('\n').map_or(0, |newline| newline + 1);
-  if is_marker_line(&s[start..]) {
+  if is_marker_line(&s[start..]) || is_partial_table_line(&s[..start], &s[start..]) {
     &s[..start]
   } else {
     s
   }
+}
+
+/// An incomplete line that starts with `|`, where `before` is the text above the line.
+///
+/// Above the separator, the line is a header or a separator, and the parser makes a table only
+/// from a complete header and separator. Below the separator, the parser makes a row only after a
+/// cell starts.
+fn is_partial_table_line(before: &str, line: &str) -> bool {
+  let body = line.trim();
+  if !body.starts_with('|') {
+    return false;
+  }
+  let below_separator =
+    before.lines().rev().take_while(|line| !line.trim().is_empty()).any(|line| is_full_separator(line.trim()));
+  !below_separator || body == "|"
 }
 
 /// A line with a maximum indent of 3 spaces that holds only block markers: a rule or setext
@@ -382,24 +398,8 @@ fn heal_table(s: &str) -> String {
     }
     let cols = count_table_columns(last);
     if cols >= 2 {
-      return format!("\n|{}", "---|".repeat(cols));
-    }
-  }
-
-  // Case 2: Last line is a partial separator, previous line is a header.
-  if is_separator_like(last) && last.contains('-') && last_idx > 0 {
-    let header = lines[last_idx - 1].trim();
-    if is_table_row(header) && !is_separator_like(header) {
-      let header_pipes = header.matches('|').count();
-      let sep_pipes = last.matches('|').count();
-      if sep_pipes < header_pipes {
-        let missing = header_pipes - sep_pipes;
-        return if last.ends_with('|') {
-          "---|".repeat(missing)
-        } else {
-          format!("|{}", "---|".repeat(missing.saturating_sub(1)))
-        };
-      }
+      let newline = if s.ends_with('\n') { "" } else { "\n" };
+      return format!("{newline}|{}", "---|".repeat(cols));
     }
   }
 
@@ -1327,11 +1327,26 @@ mod tests {
 
   #[test]
   fn heal_table_header_gets_separator() {
-    let input = "| A | B | C |";
+    let input = "| A | B | C |\n";
     let healed = super::heal(input);
-    assert!(healed.contains("|---|---|---|"), "Expected separator, got: {healed}");
+    assert_eq!(healed, "| A | B | C |\n|---|---|---|");
     let md = parse(&healed);
     assert!(md.tokens.iter().any(|t| matches!(t, Token::Table(_))));
+  }
+
+  #[test]
+  fn heal_removes_an_incomplete_table_line_above_the_separator() {
+    assert_eq!(super::heal("Intro\n\n|"), "Intro\n\n");
+    assert_eq!(super::heal("Intro\n\n| A | B |"), "Intro\n\n");
+    assert_eq!(super::heal("| A | B |\n|"), "| A | B |\n|---|---|");
+    assert_eq!(super::heal("| A | B |\n|---|-"), "| A | B |\n|---|---|");
+  }
+
+  #[test]
+  fn heal_removes_a_body_row_that_holds_only_its_first_pipe() {
+    assert_eq!(super::heal("| A | B |\n|---|---|\n|"), "| A | B |\n|---|---|\n");
+    let input = "| A | B |\n|---|---|\n| 1";
+    assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
   }
 
   #[test]

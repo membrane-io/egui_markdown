@@ -14,6 +14,8 @@ struct Visible {
   links: Vec<(usize, String)>,
   /// The heading level of each character in `text`.
   headings: Vec<Option<u8>>,
+  /// The character offset in `text` and the column count of each table.
+  tables: Vec<(usize, usize)>,
 }
 
 impl Visible {
@@ -21,21 +23,31 @@ impl Visible {
     let healed = heal(prefix);
     let md = parse(&healed);
     let mut visible = Visible::default();
-    for token in &md.tokens {
+    visible.extend(&md.tokens);
+    visible
+  }
+
+  fn extend(&mut self, tokens: &[Token]) {
+    for token in tokens {
       match token {
-        Token::Text { text, style } => visible.push(text, style.heading),
-        Token::CodeBlock { text, .. } => visible.push(text, None),
-        Token::ListMarker { marker, .. } => visible.push(marker, None),
-        Token::Newline => visible.push("\n", None),
+        Token::Text { text, style } => self.push(text, style.heading),
+        Token::CodeBlock { text, .. } => self.push(text, None),
+        Token::ListMarker { marker, .. } => self.push(marker, None),
+        Token::Newline => self.push("\n", None),
         Token::Link { text, href, .. } => {
-          visible.links.push((visible.len(), href.to_string()));
-          visible.push(text, None);
+          self.links.push((self.len(), href.to_string()));
+          self.push(text, None);
         }
-        Token::HorizontalRule => visible.rules.push(visible.len()),
+        Token::HorizontalRule => self.rules.push(self.len()),
+        Token::Table(table) => {
+          self.tables.push((self.len(), table.headers.len()));
+          for cell in table.headers.iter().chain(table.rows.iter().flatten()) {
+            self.extend(cell);
+          }
+        }
         _ => {}
       }
     }
-    visible
   }
 
   fn len(&self) -> usize {
@@ -61,6 +73,11 @@ fn defect(before: &Visible, after: &Visible) -> Option<String> {
   for (offset, href) in before.links.iter().filter(|(_, href)| !href.is_empty()) {
     if !after.links.iter().any(|(at, next)| at == offset && next == href) {
       return Some(format!("the link at offset {offset} with href {href:?} changed"));
+    }
+  }
+  for table in &before.tables {
+    if !after.tables.contains(table) {
+      return Some(format!("the table at offset {} with {} columns changed", table.0, table.1));
     }
   }
   for (offset, level) in before.headings.iter().enumerate() {
