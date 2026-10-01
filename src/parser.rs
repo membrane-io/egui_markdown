@@ -28,7 +28,14 @@ fn trim_end_newlines<'s>(s: CowStr<'s>) -> CowStr<'s> {
 /// This function detects unclosed code fences, bold, italic, strikethrough, inline
 /// code, and links, and appends the necessary closing markers.
 ///
-/// Returns `Cow::Borrowed` when the text needs no repair, which costs no allocation.
+/// A marker at the end of the input has no kind until more text arrives. This function
+/// removes a last line that holds only block markers, and a run of inline markers at the
+/// end. It also removes the URL of an open link, because a partial URL is a different
+/// link.
+///
+/// Returns `Cow::Borrowed` when the text needs no closer, which costs no allocation. Text that
+/// ends with a closer, such as `**bold**`, loses the closer to the trailing marker run and gets
+/// it back, so it returns `Cow::Owned`.
 ///
 /// ```
 /// use egui_markdown::heal;
@@ -39,6 +46,8 @@ fn trim_end_newlines<'s>(s: CowStr<'s>) -> CowStr<'s> {
 /// assert_eq!(heal("**bold text"), "**bold text**");
 /// assert_eq!(heal("_italic"), "_italic_");
 /// assert_eq!(heal("[link text"), "[link text]()");
+/// assert_eq!(heal("[link](https://exa"), "[link]()");
+/// assert_eq!(heal("Intro\n\n-"), "Intro\n\n");
 /// assert_eq!(heal("\\*escaped"), "\\*escaped");
 /// ```
 pub fn heal(s: &str) -> Cow<'_, str> {
@@ -59,23 +68,106 @@ pub fn heal(s: &str) -> Cow<'_, str> {
     return Cow::Owned(healed);
   }
 
-  let table_suffix = heal_table(s);
+  let rest = without_marker_run(without_marker_line(s));
+  let table_suffix = heal_table(rest);
   // Skip inline healing when a table suffix was generated; the inline scanner
   // doesn't understand table structure and can produce conflicting closings.
-  let inline_suffix = if table_suffix.is_empty() { heal_inline(s) } else { String::new() };
+  let (rest, inline_suffix) = if table_suffix.is_empty() { heal_inline(rest) } else { (rest, String::new()) };
 
   if table_suffix.is_empty() && inline_suffix.is_empty() {
-    Cow::Borrowed(s)
+    return Cow::Borrowed(rest);
+  }
+  let mut healed = String::with_capacity(rest.len() + table_suffix.len() + inline_suffix.len());
+  healed.push_str(rest);
+  healed.push_str(&table_suffix);
+  healed.push_str(&inline_suffix);
+  Cow::Owned(healed)
+}
+
+/// `s` without its last line when that line holds only block markers, or when that line is a
+/// table row that does not render as a row yet.
+///
+/// Such a line has no kind until the line is complete. `-` can become a list item, a setext
+/// underline or a rule, and a setext underline changes the kind of the line above it.
+fn without_marker_line(s: &str) -> &str {
+  if s.ends_with('\n') {
+    return s;
+  }
+  let start = s.rfind('\n').map_or(0, |newline| newline + 1);
+  if is_marker_line(&s[start..]) || is_partial_table_line(&s[..start], &s[start..]) {
+    &s[..start]
   } else {
-    let mut healed = String::with_capacity(s.len() + table_suffix.len() + inline_suffix.len());
-    healed.push_str(s);
-    healed.push_str(&table_suffix);
-    healed.push_str(&inline_suffix);
-    Cow::Owned(healed)
+    s
   }
 }
 
-fn heal_inline(s: &str) -> String {
+/// An incomplete line that starts with `|`, where `before` is the text above the line.
+///
+/// Above the separator, the line is a header or a separator, and the parser makes a table only
+/// from a complete header and separator. Below the separator, the parser makes a row only after a
+/// cell starts.
+fn is_partial_table_line(before: &str, line: &str) -> bool {
+  let body = line.trim();
+  if !body.starts_with('|') {
+    return false;
+  }
+  let below_separator =
+    before.lines().rev().take_while(|line| !line.trim().is_empty()).any(|line| is_full_separator(line.trim()));
+  !below_separator || body == "|"
+}
+
+/// A line with a maximum indent of 3 spaces that holds only block markers: a rule or setext
+/// underline, a heading marker, a quote marker, or a list marker with an optional empty task box.
+fn is_marker_line(line: &str) -> bool {
+  let body = line.trim_start_matches(' ');
+  if line.len() - body.len() > 3 {
+    return false;
+  }
+  let body = body.trim_end_matches(' ');
+  if body.is_empty() {
+    return false;
+  }
+  if body.chars().all(|c| matches!(c, '-' | '=' | '*' | '_' | '+' | ' '))
+    || body.chars().all(|c| c == '#')
+    || body.chars().all(|c| matches!(c, '>' | ' '))
+  {
+    return true;
+  }
+  let Some(rest) = strip_list_marker(body) else { return false };
+  matches!(rest.trim_start_matches(' '), "" | "[" | "[x" | "[X" | "[ ]" | "[x]" | "[X]")
+}
+
+/// `body` after a bullet, or after 1 to 9 digits and an optional `.` or `)`.
+fn strip_list_marker(body: &str) -> Option<&str> {
+  if let Some(rest) = body.strip_prefix(['-', '*', '+']) {
+    return Some(rest);
+  }
+  let digits = body.len() - body.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+  if !(1..=9).contains(&digits) {
+    return None;
+  }
+  let rest = &body[digits..];
+  Some(rest.strip_prefix(['.', ')']).unwrap_or(rest))
+}
+
+/// `s` without the run of inline markers at its end.
+///
+/// A marker with no content after it heals to a pair of markers. The pair can parse as a rule,
+/// as in `****`, or show as literal text. A run at the end of an inline code span is text, and
+/// it shows when the next character arrives.
+fn without_marker_run(s: &str) -> &str {
+  let last_line = s[s.rfind('\n').map_or(0, |newline| newline + 1)..].trim_start();
+  if last_line.starts_with("```") || last_line.starts_with("~~~") {
+    return s;
+  }
+  s.trim_end_matches(['*', '_', '~', '`', '[', ']', '\\'])
+}
+
+/// The input to keep, and the closers to append to it.
+///
+/// When the input ends inside a link URL, the input to keep ends before the `(`. The closers
+/// then start with `()`, so the link has an empty href until its `)` arrives.
+fn heal_inline(s: &str) -> (&str, String) {
   let mut in_fence = false;
   let mut in_inline_code = false;
   let mut open_star_bold = false;
@@ -87,8 +179,13 @@ fn heal_inline(s: &str) -> String {
   let mut in_link_url = false;
   let mut in_link_title = false;
   let mut link_paren_depth: u32 = 0;
+  let mut url_start = 0;
+  let mut line_start = 0;
 
-  for line in s.lines() {
+  for raw in s.split_inclusive('\n') {
+    let line_offset = line_start;
+    line_start += raw.len();
+    let line = raw.strip_suffix('\n').map_or(raw, |line| line.strip_suffix('\r').unwrap_or(line));
     let trimmed = line.trim();
     if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
       in_fence = !in_fence;
@@ -229,6 +326,7 @@ fn heal_inline(s: &str) -> String {
           in_link_text = false;
           in_link_url = true;
           link_paren_depth = 0;
+          url_start = line_offset + i + 1;
           i += 2;
           continue;
         }
@@ -242,14 +340,15 @@ fn heal_inline(s: &str) -> String {
   }
 
   let mut suffix = String::new();
+  let mut kept = s;
+  if in_link_url {
+    // A backtick in the URL opened this inline code, and the cut removes the backtick.
+    in_inline_code = false;
+    kept = &s[..url_start];
+    suffix.push_str("()");
+  }
   if in_inline_code {
     suffix.push('`');
-  }
-  if in_link_url {
-    if in_link_title {
-      suffix.push('"');
-    }
-    suffix.push(')');
   }
   if in_link_text {
     suffix.push_str("]()");
@@ -269,7 +368,7 @@ fn heal_inline(s: &str) -> String {
   if open_strike {
     suffix.push_str("~~");
   }
-  suffix
+  (kept, suffix)
 }
 
 fn heal_table(s: &str) -> String {
@@ -299,24 +398,8 @@ fn heal_table(s: &str) -> String {
     }
     let cols = count_table_columns(last);
     if cols >= 2 {
-      return format!("\n|{}", "---|".repeat(cols));
-    }
-  }
-
-  // Case 2: Last line is a partial separator, previous line is a header.
-  if is_separator_like(last) && last.contains('-') && last_idx > 0 {
-    let header = lines[last_idx - 1].trim();
-    if is_table_row(header) && !is_separator_like(header) {
-      let header_pipes = header.matches('|').count();
-      let sep_pipes = last.matches('|').count();
-      if sep_pipes < header_pipes {
-        let missing = header_pipes - sep_pipes;
-        return if last.ends_with('|') {
-          "---|".repeat(missing)
-        } else {
-          format!("|{}", "---|".repeat(missing.saturating_sub(1)))
-        };
-      }
+      let newline = if s.ends_with('\n') { "" } else { "\n" };
+      return format!("{newline}|{}", "---|".repeat(cols));
     }
   }
 
@@ -1164,12 +1247,61 @@ mod tests {
   #[test]
   fn heal_unclosed_link_url() {
     let healed = super::heal("[text](https://example.com");
-    assert_eq!(&*healed, "[text](https://example.com)");
+    assert_eq!(&*healed, "[text]()");
     let md = parse(&healed);
-    if let Some(Token::Link { href, .. }) = md.tokens.iter().find(|t| matches!(t, Token::Link { .. })) {
-      assert_eq!(href.as_ref(), "https://example.com");
+    if let Some(Token::Link { text, href, .. }) = md.tokens.iter().find(|t| matches!(t, Token::Link { .. })) {
+      assert_eq!(text.as_ref(), "text");
+      assert_eq!(href.as_ref(), "");
     } else {
       panic!("Expected Link token");
+    }
+  }
+
+  #[test]
+  fn heal_removes_a_partial_url() {
+    assert_eq!(super::heal("See [app](program:/my"), "See [app]()");
+    assert_eq!(super::heal("See [app]("), "See [app]()");
+    assert_eq!(super::heal("[r](github:repos.one(owner:\"a\""), "[r]()");
+    assert_eq!(super::heal("**See [app](program:/my"), "**See [app]()**");
+    assert_eq!(super::heal("[a](x`y"), "[a]()");
+    assert_eq!(super::heal("line\n[a](x"), "line\n[a]()");
+  }
+
+  #[test]
+  fn heal_removes_a_trailing_marker_run() {
+    assert_eq!(super::heal("Done.\n\n**"), "Done.\n\n");
+    assert_eq!(super::heal("**Summary*"), "**Summary**");
+    assert_eq!(super::heal("See [app]"), "See [app]()");
+    assert_eq!(super::heal("See ["), "See ");
+    assert_eq!(super::heal("my_"), "my");
+    assert_eq!(super::heal("end\\"), "end");
+  }
+
+  #[test]
+  fn heal_keeps_a_closed_construct_at_the_end() {
+    for input in ["**bold**", "_it_", "`code`", "~~s~~", "***both***", "```\ncode\n```", "~~~\ncode\n~~~"] {
+      assert_eq!(super::heal(input), input);
+    }
+  }
+
+  #[test]
+  fn heal_removes_an_incomplete_block_marker_line() {
+    assert_eq!(super::heal("Intro line\n-"), "Intro line\n");
+    assert_eq!(super::heal("Intro\n\n---"), "Intro\n\n");
+    assert_eq!(super::heal("Intro\n\n---\n"), "Intro\n\n---\n");
+    assert_eq!(super::heal("- a\n- "), "- a\n");
+    assert_eq!(super::heal("Intro\n1."), "Intro\n");
+    assert_eq!(super::heal("Title\n==="), "Title\n");
+    assert_eq!(super::heal("Intro\n\n##"), "Intro\n\n");
+    assert_eq!(super::heal("Intro\n\n> "), "Intro\n\n");
+    assert_eq!(super::heal("- [ ]"), "");
+    assert_eq!(super::heal("- a\n  - "), "- a\n");
+  }
+
+  #[test]
+  fn heal_keeps_a_line_with_content() {
+    for input in ["- a", "1. a", "# Title", "> quote", "- [ ] task", "    - ", "a - b"] {
+      assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)), "{input:?}");
     }
   }
 
@@ -1195,11 +1327,26 @@ mod tests {
 
   #[test]
   fn heal_table_header_gets_separator() {
-    let input = "| A | B | C |";
+    let input = "| A | B | C |\n";
     let healed = super::heal(input);
-    assert!(healed.contains("|---|---|---|"), "Expected separator, got: {healed}");
+    assert_eq!(healed, "| A | B | C |\n|---|---|---|");
     let md = parse(&healed);
     assert!(md.tokens.iter().any(|t| matches!(t, Token::Table(_))));
+  }
+
+  #[test]
+  fn heal_removes_an_incomplete_table_line_above_the_separator() {
+    assert_eq!(super::heal("Intro\n\n|"), "Intro\n\n");
+    assert_eq!(super::heal("Intro\n\n| A | B |"), "Intro\n\n");
+    assert_eq!(super::heal("| A | B |\n|"), "| A | B |\n|---|---|");
+    assert_eq!(super::heal("| A | B |\n|---|-"), "| A | B |\n|---|---|");
+  }
+
+  #[test]
+  fn heal_removes_a_body_row_that_holds_only_its_first_pipe() {
+    assert_eq!(super::heal("| A | B |\n|---|---|\n|"), "| A | B |\n|---|---|\n");
+    let input = "| A | B |\n|---|---|\n| 1";
+    assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
   }
 
   #[test]
@@ -1288,17 +1435,10 @@ mod tests {
 
   #[test]
   fn heal_link_url_with_parens() {
-    // URL with balanced parens like Wikipedia links.
-    let input = "[wiki](https://en.wikipedia.org/wiki/Foo_(bar)";
-    let healed = super::heal(input);
-    // The inner () should be tracked, only the outer ) closes the link.
-    assert_eq!(&*healed, "[wiki](https://en.wikipedia.org/wiki/Foo_(bar))");
-    let md = parse(&healed);
-    if let Some(Token::Link { href, .. }) = md.tokens.iter().find(|t| matches!(t, Token::Link { .. })) {
-      assert_eq!(href.as_ref(), "https://en.wikipedia.org/wiki/Foo_(bar)");
-    } else {
-      panic!("Expected Link token");
-    }
+    // URL with balanced parens like Wikipedia links. The inner () does not close the link.
+    assert_eq!(super::heal("[wiki](https://en.wikipedia.org/wiki/Foo_(bar)"), "[wiki]()");
+    let input = "[wiki](https://en.wikipedia.org/wiki/Foo_(bar)) and **more";
+    assert_eq!(super::heal(input), "[wiki](https://en.wikipedia.org/wiki/Foo_(bar)) and **more**");
   }
 
   #[test]
@@ -1320,7 +1460,7 @@ mod tests {
   fn heal_image_unclosed_url() {
     let input = "![alt text](https://example.com/img.png";
     let healed = super::heal(input);
-    assert_eq!(&*healed, "![alt text](https://example.com/img.png)");
+    assert_eq!(&*healed, "![alt text]()");
   }
 
   #[test]
@@ -1333,14 +1473,15 @@ mod tests {
   #[test]
   fn heal_closed_underscores_no_change() {
     let input = "__bold__ and _italic_";
-    assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
+    assert_eq!(super::heal(input), input);
   }
 
   #[test]
   fn heal_inline_code_contains_stars() {
-    // Stars inside inline code should not trigger emphasis healing.
-    let input = "`**not bold**`";
-    assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
+    // Stars inside inline code do not trigger emphasis healing. The stars at the end of the code
+    // are a trailing marker run, so they show when the next character arrives.
+    assert!(matches!(super::heal("`**not bold**` x"), std::borrow::Cow::Borrowed(_)));
+    assert_eq!(super::heal("`**not bold**`"), "`**not bold`");
   }
 
   #[test]
