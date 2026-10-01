@@ -199,7 +199,13 @@ change what already shows. For the same reason, `heal()` removes the URL of an o
 delta of a URL makes a different link, and a partial URL can parse as a valid link to the
 wrong target.
 
-**Files:** `parser.rs` (heal, heal_inline, heal_table, without_marker_line, without_marker_run)
+A table line has the same problem. The parser makes a table only from a complete header and a
+complete separator, and it makes a body row only after a cell starts. So `heal()` removes an
+incomplete line that starts with `|` above the separator, and a body row that holds only its
+first `|`. When the header is complete, `heal_table` adds the separator.
+
+**Files:** `parser.rs` (heal, heal_inline, heal_table, without_marker_line, without_marker_run,
+is_partial_table_line)
 
 ## Token size constraint
 

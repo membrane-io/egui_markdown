@@ -42,7 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A streamed `-` under a line made the line a heading for one delta.
 - A `map_job` that hides text, such as a reveal, now also hides a rule or an inline widget after
   that text. The label previously painted them before the text above them showed.
-
+- A streamed table header showed as raw text, then as a table, and then as raw text again.
+  `heal()` now removes an incomplete table line above the separator, and a body row that holds
+  only its first `|`. A complete header gets its separator without a blank line between them.
 - `TextWrapMode::Truncate` on the surrounding `Ui`, and now on the widget builders, truncates
   the text. It previously behaved as wrap.
 - The label draws the link underline half way into the descent of the font. It previously drew
