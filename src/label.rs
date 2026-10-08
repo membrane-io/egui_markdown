@@ -206,16 +206,14 @@ fn token_to_owned(t: &Token<'_>) -> Token<'static> {
 /// whether the box wraps, truncates, or extends. This enum selects what happens when one
 /// run of characters still does not fit.
 ///
-/// The variants are close to the CSS `overflow-wrap` and `word-break` properties. A
-/// `BreakWord` variant, which would wrap at a space and split a token only when that
-/// token alone is wider than the box, needs support from the text engine. This crate
-/// does not declare that variant until the support exists.
+/// The variants are close to the CSS `overflow-wrap` and `word-break` properties.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum OverflowWrap {
-  /// Prefer a word boundary, and overrun the box when a token has none.
+  /// Break at a word boundary, a dash or a punctuation mark. A row that has none of these
+  /// breaks between two characters, so the text does not overrun the box.
   ///
-  /// This matches CSS `overflow-wrap: normal`.
+  /// This is close to CSS `overflow-wrap: break-word`.
   #[default]
   Normal,
   /// Break between any two characters when the row reaches `max_width`.

@@ -74,14 +74,10 @@ Patch `emath` and `ecolor` even when you do not depend on them directly. Without
 entries the build has two incompatible copies of the types that egui shares between crates.
 Add `eframe` as well when you use it.
 
-Three things render differently without the feature. An inline code background has square
+Two things render differently without the feature. An inline code background has square
 corners, and its padding expands by the same amount horizontally and vertically rather than
 by separate amounts. A row that soft-wraps inside a list, or inside another indented block,
-returns to the left margin. It does not keep the indentation of the line it continues. A
-long run of text with no spaces breaks between two glyphs, and does not overrun the
-available width.
-[`OverflowWrap`](https://docs.rs/egui_markdown/latest/egui_markdown/enum.OverflowWrap.html)
-selects between those two behaviors explicitly.
+returns to the left margin. It does not keep the indentation of the line it continues.
 
 The parse, the selection, the links, the tables, and the syntax highlighting are the same
 with the feature and without it.

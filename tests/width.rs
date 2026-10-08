@@ -97,14 +97,14 @@ fn unbroken_string_breaks_with_break_all() {
   );
 }
 
-/// Requires the `membrane` feature: upstream epaint falls back to breaking between any two
-/// glyphs when it finds no word boundary, so it wraps this instead of overrunning.
-#[cfg(feature = "membrane")]
+/// Upstream epaint and the membrane fork both break between two glyphs when a row has no
+/// other break.
 #[test]
-fn unbroken_string_overruns_with_normal() {
+fn unbroken_string_breaks_with_normal() {
   let width = 120.0;
-  let (allocated_w, _) = unbroken_layout(OverflowWrap::Normal, width);
-  assert!(allocated_w > width + 1.0, "Normal should overrun on an unbroken string, got {allocated_w} for {width}");
+  let (allocated_w, painted_right) = unbroken_layout(OverflowWrap::Normal, width);
+  assert!(allocated_w <= width + 1.0, "Normal should allocate within width, got {allocated_w} for {width}");
+  assert!(painted_right <= width + 1.0, "Normal should paint within width, got right edge {painted_right} for {width}");
 }
 
 const SENTENCE: &str = "hello world this is a fairly long sentence that should wrap at spaces";
