@@ -9,7 +9,7 @@ use egui::{
 };
 use epaint::{
   pos2,
-  text::{Galley, Glyph, Row},
+  text::{cursor::CCursor, Galley, Glyph, Row},
 };
 
 #[cfg(not(feature = "syntax_highlighting"))]
@@ -427,6 +427,10 @@ impl<'a> MarkdownLabel<'a> {
   ///
   /// The parse/layout cache is unchanged; only the painted job is rewritten. Pass `None` to
   /// leave the job as built.
+  ///
+  /// A map that hides the end of the text (alpha 0, as a reveal does) makes the label allocate only
+  /// the rows that show. The hidden rows stay in the layout below the allocation, so the caller must
+  /// draw nothing below the label until all of its text shows.
   pub fn map_job<F>(self, f: Option<F>) -> Self
   where
     F: for<'c> Fn(&'c Context, LayoutJob) -> LayoutJob + 'a,
@@ -1039,6 +1043,11 @@ impl<'a> MarkdownLabel<'a> {
     // filling widget must claim the leftover space — otherwise they paint outside the rect.
     // Popovers that hug content skip that expand and paint decorations at the galley width.
     let mut size = galley.size();
+    // The hidden text stays in the layout, so a line does not reflow when the next glyph shows. The allocation
+    // stops at the last row that shows. A scroll that follows the bottom then moves only for text that shows.
+    if let Some(height) = shown_height(&galley, &built) {
+      size.y = height;
+    }
     if !self.hug_content && wrap.mode != TextWrapMode::Extend {
       size.x = size.x.max(available_width);
     }
@@ -1257,6 +1266,24 @@ fn shown_after_map(job: &LayoutJob, built: &[(std::ops::Range<usize>, Color32)],
   let mapped_alpha = job.sections.iter().find(|s| s.byte_range.contains(&byte)).map(|s| s.format.color.a());
   let built_alpha = built.iter().find(|(range, _)| range.contains(&byte)).map(|(_, color)| color.a());
   !(mapped_alpha == Some(0) && built_alpha != Some(0))
+}
+
+/// The height down to the bottom of the row that holds the last character that shows, when a `map_job` hides
+/// the end of the text. `None` when every character shows.
+///
+/// A reveal hides a suffix, so the first hidden character ends what shows. A map that hides text in the middle
+/// would get a height that is too small.
+fn shown_height(galley: &Galley, built: &[(std::ops::Range<usize>, Color32)]) -> Option<f32> {
+  let job = &galley.job;
+  let hidden = job.sections.iter().find(|section| {
+    let start = section.byte_range.start;
+    let built_alpha = built.iter().find(|(range, _)| range.contains(&start)).map(|(_, color)| color.a());
+    !section.byte_range.is_empty() && section.format.color.a() == 0 && built_alpha.is_some_and(|alpha| alpha != 0)
+  })?;
+  let first_hidden = job.text[..hidden.byte_range.start].chars().count();
+  let Some(last_shown) = first_hidden.checked_sub(1) else { return Some(0.0) };
+  let cursor = CCursor { index: last_shown, prefer_next_row: true };
+  Some(galley.pos_from_cursor(cursor).max.y.min(galley.size().y))
 }
 
 fn paint_decorations(
