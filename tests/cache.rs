@@ -8,10 +8,11 @@ fn painted_text(ctx: &Context, text: &str) -> Vec<String> {
 
 fn painted_text_with(ctx: &Context, text: &str, scroll_code_blocks: bool) -> Vec<String> {
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(500.0, 2000.0));
-  let output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-    MarkdownLabel::new(Id::new("test"), text).scroll_code_blocks(scroll_code_blocks).show(&mut child);
+    MarkdownLabel::new(Id::NULL.with("test"), text).scroll_code_blocks(scroll_code_blocks).show(&mut child);
   });
+  output.textures_delta.clear();
 
   let mut out = Vec::new();
   for clipped in &output.shapes {
@@ -122,7 +123,7 @@ fn needs_segmentation_matches_build_layout() {
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(500.0, 2000.0));
   let style = MarkdownStyle::default();
 
-  let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     for doc in docs {
       for scroll_code_blocks in [false, true] {
         let md = egui_markdown::parse(doc);
@@ -148,4 +149,5 @@ fn needs_segmentation_matches_build_layout() {
       }
     }
   });
+  output.textures_delta.clear();
 }

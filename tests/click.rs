@@ -1,4 +1,4 @@
-use egui::text::{LayoutJob, LayoutSection};
+use egui::text::{ByteIndex, LayoutJob, LayoutSection};
 use egui::{pos2, vec2, Context, Event, Id, Modifiers, OutputCommand, PointerButton, Pos2, RawInput, Rect, UiBuilder};
 use egui_markdown::MarkdownLabel;
 
@@ -23,14 +23,15 @@ fn click_label(text: &str, split: Option<usize>, heal: bool, at: impl Fn(Rect) -
   let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
   let frame = |events: Vec<Event>| {
     let mut result = None;
-    let output = ctx.run_ui(RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
+    let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
       let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-      let out = MarkdownLabel::new(Id::new("click"), text)
+      let out = MarkdownLabel::new(Id::NULL.with("click"), text)
         .hug_content(true)
         .selectable(false)
         .heal(heal)
         .map_job(split.map(|at| {
           move |_: &Context, mut job: LayoutJob| {
+            let at = ByteIndex(at);
             let mut sections = Vec::new();
             for section in std::mem::take(&mut job.sections) {
               let range = section.byte_range.clone();
@@ -48,6 +49,7 @@ fn click_label(text: &str, split: Option<usize>, heal: bool, at: impl Fn(Rect) -
         .show(&mut child);
       result = Some((out.response.rect, out.response.clicked(), out.link_clicked));
     });
+    output.textures_delta.clear();
     let urls = output
       .platform_output
       .commands

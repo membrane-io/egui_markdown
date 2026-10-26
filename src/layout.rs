@@ -4,6 +4,8 @@ use egui::{
   text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,
 };
 
+use epaint::text::ByteRangeExt as _;
+
 use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, MarkdownStyle};
 use crate::types::Token;
@@ -46,7 +48,7 @@ pub struct LayoutResult {
 pub fn section_for_char(job: &LayoutJob, char_index: u32) -> Option<u32> {
   let mut offset = 0u32;
   for (section_idx, section) in job.sections.iter().enumerate() {
-    let section_text = &job.text[section.byte_range.clone()];
+    let section_text = &job.text[section.byte_range.as_usize()];
     let char_count = section_text.chars().count() as u32;
     if char_index < offset + char_count {
       return Some(section_idx as u32);
@@ -134,7 +136,7 @@ pub fn append_link_to_job(
           line_height: Some(widget_size.y),
           ..base_format.clone()
         };
-        job.append(text, 0.0, format);
+        push_section(job, text, 0.0, format);
         1
       };
       let end_char = job.text.chars().count();
@@ -154,12 +156,25 @@ pub fn append_link_to_job(
     }
     let color = handler.link_style(href).and_then(|s| s.color).unwrap_or(link_color);
     let format = TextFormat { font_id: font_id.clone(), color, ..base_format.clone() };
-    job.append(text, 0.0, format);
+    push_section(job, text, 0.0, format);
     return LinkAppend { is_block_widget: false, inline_widget_span: None, sections_added: 1 };
   }
   let format = TextFormat { font_id: font_id.clone(), color: link_color, ..base_format.clone() };
-  job.append(text, 0.0, format);
+  push_section(job, text, 0.0, format);
   LinkAppend { is_block_widget: false, inline_widget_span: None, sections_added: 1 }
+}
+
+/// Append `text` to `job` as a new section. `LayoutJob::append` merges the text into the last section when the
+/// formats are equal, and each section must stay separate so that it maps to one token.
+fn push_section(job: &mut LayoutJob, text: &str, leading_space: f32, format: TextFormat) {
+  let start = job.text.len();
+  job.text.push_str(text);
+  #[allow(clippy::useless_conversion)]
+  job.sections.push(egui::text::LayoutSection {
+    leading_space: leading_space.into(),
+    byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(job.text.len()),
+    format,
+  });
 }
 
 /// Render a single link inline in a [`Ui`], dispatching through an optional [`LinkHandler`].
@@ -319,7 +334,7 @@ pub fn build_layout(
   for (token_index, token) in tokens.iter().enumerate() {
     match token {
       Token::Newline => {
-        job.append("\n", 0.0, base_format.clone());
+        push_section(&mut job, "\n", 0.0, base_format.clone());
         section_to_token.push(token_index);
       }
       Token::Text { text, style } => {
@@ -339,11 +354,11 @@ pub fn build_layout(
         }
         if style.inline_code {
           apply_inline_code_bg(&mut format, ui.visuals().dark_mode, &style_ref.inline_code);
-          job.append(" ", 0.0, transparent_format.clone());
+          push_section(&mut job, " ", 0.0, transparent_format.clone());
           section_to_token.push(token_index);
-          job.append(text.as_ref(), 0.0, format);
+          push_section(&mut job, text.as_ref(), 0.0, format);
           section_to_token.push(token_index);
-          job.append(" ", 0.0, transparent_format.clone());
+          push_section(&mut job, " ", 0.0, transparent_format.clone());
           section_to_token.push(token_index);
           continue;
         }
@@ -354,7 +369,7 @@ pub fn build_layout(
           format.font_id.size *= style_ref.heading.scales[idx];
         }
 
-        job.append(text.as_ref(), 0.0, format);
+        push_section(&mut job, text.as_ref(), 0.0, format);
         section_to_token.push(token_index);
       }
       Token::CodeBlock { text, language } => {
@@ -383,7 +398,7 @@ pub fn build_layout(
             let mut line_index = 0usize;
             let mut at_line_start = true;
             for section in highlighted_job.sections {
-              let section_text = &highlighted_job.text[section.byte_range.clone()];
+              let section_text = &highlighted_job.text[section.byte_range.as_usize()];
               for part in section_text.split_inclusive('\n') {
                 if at_line_start {
                   let indent = line_indents.get(line_index).copied().unwrap_or(0.0);
@@ -396,15 +411,15 @@ pub fn build_layout(
                 if at_line_start {
                   line_index += 1;
                 }
-                job.append(part, 0.0, section.format.clone());
+                push_section(&mut job, part, 0.0, section.format.clone());
                 section_to_token.push(token_index);
               }
             }
           }
           #[cfg(not(feature = "membrane"))]
           for section in highlighted_job.sections {
-            let section_text = &highlighted_job.text[section.byte_range.clone()];
-            job.append(section_text, 0.0, section.format);
+            let section_text = &highlighted_job.text[section.byte_range.as_usize()];
+            push_section(&mut job, section_text, 0.0, section.format);
             section_to_token.push(token_index);
           }
           let end_char = job.text.chars().count();
@@ -453,15 +468,15 @@ pub fn build_layout(
         #[cfg(not(feature = "membrane"))]
         {
           // Upstream egui only supports first-row leading space; wrapped rows return to column 0.
-          job.append("", leading, base_format.clone());
+          push_section(&mut job, "", leading, base_format.clone());
           section_to_token.push(token_index);
         }
 
-        job.append(marker.as_ref(), 0.0, marker_format);
+        push_section(&mut job, marker.as_ref(), 0.0, marker_format);
         section_to_token.push(token_index);
 
         if trailing > 0.0 {
-          job.append("", trailing, base_format.clone());
+          push_section(&mut job, "", trailing, base_format.clone());
           section_to_token.push(token_index);
         }
       }
@@ -492,34 +507,34 @@ pub fn build_layout(
       }
       Token::HorizontalRule => {
         // Newline, short transparent spacer row for the painted rule, then newline.
-        job.append("\n", 0.0, base_format.clone());
+        push_section(&mut job, "\n", 0.0, base_format.clone());
         section_to_token.push(token_index);
         let hr_char_pos = job.text.chars().count();
         let mut hr_format = transparent_format.clone();
         hr_format.line_height = Some(style_ref.horizontal_rule.height);
-        job.append(" ", 0.0, hr_format);
+        push_section(&mut job, " ", 0.0, hr_format);
         section_to_token.push(token_index);
         hr_positions.push(hr_char_pos);
-        job.append("\n", 0.0, base_format.clone());
+        push_section(&mut job, "\n", 0.0, base_format.clone());
         section_to_token.push(token_index);
       }
       Token::TaskListMarker { checked, .. } => {
         let marker_char = if *checked { "☑ " } else { "☐ " };
-        job.append(marker_char, 0.0, base_format.clone());
+        push_section(&mut job, marker_char, 0.0, base_format.clone());
         section_to_token.push(token_index);
       }
       Token::FootnoteRef { label } => {
         let mut format = TextFormat { color: hyperlink_color, valign: Align::TOP, ..base_format.clone() };
         format.font_id.size *= 0.75;
         let ref_text = label.to_string();
-        job.append(&ref_text, 0.0, format);
+        push_section(&mut job, &ref_text, 0.0, format);
         section_to_token.push(token_index);
       }
       Token::FootnoteDef { label } => {
         let mut format = base_format.clone();
         apply_bold(&mut format, ui, bold_available);
         let def_text = format!("{label}. ");
-        job.append(&def_text, 0.0, format);
+        push_section(&mut job, &def_text, 0.0, format);
         section_to_token.push(token_index);
       }
     }
@@ -627,7 +642,7 @@ mod syntect_code {
     mut byte_offset: usize,
     code_font_size: f32,
   ) {
-    use egui::text::{LayoutSection, TextFormat as TF};
+    use egui::text::{ByteIndex, LayoutSection, TextFormat as TF};
 
     for (syn_style, range) in ranges {
       let byte_start = byte_offset;
@@ -636,7 +651,7 @@ mod syntect_code {
       #[allow(clippy::useless_conversion)]
       job.sections.push(LayoutSection {
         leading_space: 0.0_f32.into(),
-        byte_range: byte_start..byte_end,
+        byte_range: ByteIndex(byte_start)..ByteIndex(byte_end),
         format: TF {
           font_id: FontId::monospace(code_font_size),
           color: Color32::from_rgb(fg.r, fg.g, fg.b),
@@ -648,14 +663,14 @@ mod syntect_code {
   }
 
   fn append_plain_padded_line(job: &mut LayoutJob, padded_line: &str, code_font_size: f32) {
-    use egui::text::{LayoutSection, TextFormat as TF};
+    use egui::text::{ByteIndex, LayoutSection, TextFormat as TF};
 
     let byte_start = job.text.len();
     job.text.push_str(padded_line);
     #[allow(clippy::useless_conversion)]
     job.sections.push(LayoutSection {
       leading_space: 0.0_f32.into(),
-      byte_range: byte_start..job.text.len(),
+      byte_range: ByteIndex(byte_start)..ByteIndex(job.text.len()),
       format: TF { font_id: FontId::monospace(code_font_size), ..Default::default() },
     });
   }
@@ -931,7 +946,7 @@ mod syntect_code {
     fn frozen_len_advances_on_complete_lines() {
       let ctx = Context::default();
       let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 400.0));
-      let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
         let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
         let c1 = scrolling_code_galley(&mut child, "fn main() {\n    let x", "rust", 12.0, 1, None, None);
         assert_eq!(c1.frozen_len, "fn main() {\n".len());
@@ -942,13 +957,14 @@ mod syntect_code {
         assert_eq!(c2.frozen_len, "fn main() {\n    let x = 1;\n".len());
         assert_eq!(c2.source.as_ref(), "fn main() {\n    let x = 1;\n    let y");
       });
+      output.textures_delta.clear();
     }
 
     #[test]
     fn append_reuses_frozen_prefix_bytes() {
       let ctx = Context::default();
       let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 400.0));
-      let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
         let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
         let a = growing_body(20);
         let c1 = scrolling_code_galley(&mut child, &a, "rust", 12.0, 1, None, None);
@@ -962,6 +978,7 @@ mod syntect_code {
         assert_eq!(c2.frozen_len, b.len());
         assert_eq!(c2.source.as_ref(), b);
       });
+      output.textures_delta.clear();
     }
   }
 }
@@ -982,4 +999,37 @@ pub fn highlight_code(
   let mut job = LayoutJob::default();
   job.append(body, 0.0, TextFormat { font_id: FontId::monospace(code_font_size), ..Default::default() });
   job
+}
+
+#[cfg(test)]
+mod section_tests {
+  use super::*;
+
+  /// Each section of the job maps to the token that wrote it, so a hover on the text after a link
+  /// does not find an earlier link.
+  #[test]
+  fn each_section_maps_to_the_token_that_wrote_it() {
+    let markdown = crate::parse("First [one](a:/one). Text.\n\nYour [two](b:/two) is empty.\n\nLast line.");
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let style = MarkdownStyle::default();
+      let font = FontId::proportional(14.0);
+      let color = ui.visuals().text_color();
+      let layout =
+        build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+
+      assert_eq!(layout.section_to_token.len(), layout.job.sections.len(), "one token for each section");
+      for (section, &token) in layout.job.sections.iter().zip(&layout.section_to_token) {
+        let text = &layout.job.text[section.byte_range.as_usize()];
+        let expected = match &markdown.tokens[token] {
+          Token::Text { text, .. } | Token::Link { text, .. } => text.as_ref(),
+          Token::Newline => "\n",
+          other => panic!("the markdown has no {other:?}"),
+        };
+        assert_eq!(text, expected, "the text of a section is the text of its token");
+      }
+      checked = true;
+    });
+    assert!(checked);
+  }
 }

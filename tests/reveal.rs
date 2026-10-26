@@ -1,5 +1,5 @@
 use egui::epaint::Shape;
-use egui::text::{LayoutJob, LayoutSection};
+use egui::text::{ByteIndex, LayoutJob, LayoutSection};
 use egui::{pos2, vec2, Color32, Context, Id, RawInput, Rect, UiBuilder};
 use egui_markdown::MarkdownLabel;
 
@@ -13,11 +13,12 @@ fn render(text: &str, width: f32, hide_after: Option<usize>) -> (Vec<egui::epain
   let ctx = Context::default();
   let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 400.0));
   let mut height = 0.0;
-  let output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-    let label = MarkdownLabel::new(Id::new("reveal"), text)
+    let label = MarkdownLabel::new(Id::NULL.with("reveal"), text)
       .map_job(hide_after.map(|at| {
         move |_: &Context, mut job: LayoutJob| {
+          let at = ByteIndex(at);
           let mut sections = Vec::new();
           for section in std::mem::take(&mut job.sections) {
             let range = section.byte_range.clone();
@@ -39,6 +40,7 @@ fn render(text: &str, width: f32, hide_after: Option<usize>) -> (Vec<egui::epain
       .show(&mut child);
     height = label.response.rect.height();
   });
+  output.textures_delta.clear();
   (output.shapes, height)
 }
 
