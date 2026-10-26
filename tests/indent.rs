@@ -29,9 +29,10 @@ fn rows_styled(md: &str, width: f32, style: &MarkdownStyle) -> Vec<Row> {
   let ctx = Context::default();
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(width, 600.0));
   let mut rows = Vec::new();
-  let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-    let (_pos, galley, _response) = MarkdownLabel::new(Id::new("indent"), md).style(style).layout_in_ui(&mut child);
+    let (_pos, galley, _response) =
+      MarkdownLabel::new(Id::NULL.with("indent"), md).style(style).layout_in_ui(&mut child);
     rows = galley
       .rows
       .iter()
@@ -41,6 +42,7 @@ fn rows_styled(md: &str, width: f32, style: &MarkdownStyle) -> Vec<Row> {
       })
       .collect();
   });
+  output.textures_delta.clear();
   rows
 }
 

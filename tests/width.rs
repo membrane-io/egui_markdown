@@ -8,11 +8,12 @@ fn render(scroll_code_blocks: bool, width: f32) -> (Rect, Rect) {
   let ctx = Context::default();
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(width, 600.0));
   let mut allocated = Rect::NOTHING;
-  let output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-    MarkdownLabel::new(Id::new("test"), MARKDOWN).scroll_code_blocks(scroll_code_blocks).show(&mut child);
+    MarkdownLabel::new(Id::NULL.with("test"), MARKDOWN).scroll_code_blocks(scroll_code_blocks).show(&mut child);
     allocated = child.min_rect();
   });
+  output.textures_delta.clear();
 
   let mut painted = Rect::NOTHING;
   for clipped in &output.shapes {
@@ -43,11 +44,12 @@ fn hug_content_allocates_galley_width() {
   let ctx = Context::default();
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(available, 600.0));
   let mut allocated = 0.0;
-  let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-    MarkdownLabel::new(Id::new("hug"), "short").hug_content(true).show(&mut child);
+    MarkdownLabel::new(Id::NULL.with("hug"), "short").hug_content(true).show(&mut child);
     allocated = child.min_rect().width();
   });
+  output.textures_delta.clear();
   assert!(allocated < available / 2.0, "hug_content should size to the galley, got {allocated} in {available}");
 }
 
@@ -72,11 +74,12 @@ fn unbroken_layout(overflow: OverflowWrap, width: f32) -> (f32, f32) {
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(width, 600.0));
   let mut allocated_w = 0.0_f32;
   let mut painted_right = 0.0_f32;
-  let output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-    MarkdownLabel::new(Id::new("unbroken"), UNBROKEN).overflow_wrap(overflow).show(&mut child);
+    MarkdownLabel::new(Id::NULL.with("unbroken"), UNBROKEN).overflow_wrap(overflow).show(&mut child);
     allocated_w = child.min_rect().width();
   });
+  output.textures_delta.clear();
   for clipped in &output.shapes {
     let bounds = clipped.shape.visual_bounding_rect();
     if bounds.is_finite() && bounds.is_positive() {
@@ -114,14 +117,15 @@ fn sentence_words(overflow: OverflowWrap, width: f32) -> Vec<String> {
   let ctx = Context::default();
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(width, 600.0));
   let mut words = Vec::new();
-  let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
     let (_pos, galley, _) =
-      MarkdownLabel::new(Id::new("sentence"), SENTENCE).overflow_wrap(overflow).layout_in_ui(&mut child);
+      MarkdownLabel::new(Id::NULL.with("sentence"), SENTENCE).overflow_wrap(overflow).layout_in_ui(&mut child);
     assert!(galley.rows.len() > 1, "sentence should not fit on one {width}px row");
     words =
       galley.rows.iter().flat_map(|r| r.row.text().split_whitespace().map(str::to_owned).collect::<Vec<_>>()).collect();
   });
+  output.textures_delta.clear();
   words
 }
 

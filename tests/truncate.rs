@@ -8,14 +8,15 @@ fn layout(md: &str, width: f32, configure: impl FnOnce(MarkdownLabel<'_>) -> Mar
   let mut elided = false;
   let mut width_out = 0.0;
   let mut configure = Some(configure);
-  let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-    let label = configure.take().unwrap()(MarkdownLabel::new(Id::new("truncate"), md));
+    let label = configure.take().unwrap()(MarkdownLabel::new(Id::NULL.with("truncate"), md));
     let (_pos, galley, _) = label.layout_in_ui(&mut child);
     rows = galley.rows.len();
     elided = galley.elided;
     width_out = galley.size().x;
   });
+  output.textures_delta.clear();
   (rows, elided, width_out)
 }
 
