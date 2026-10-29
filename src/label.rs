@@ -1021,6 +1021,7 @@ impl<'a> MarkdownLabel<'a> {
     let wrap = self.resolve_wrap(ui);
     let mut job = job;
     Self::apply_live_wrap(&wrap, &mut job);
+    let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
     let mut mapped_sections = None;
     let mut built = Vec::new();
     if apply_map_job {
@@ -1059,7 +1060,7 @@ impl<'a> MarkdownLabel<'a> {
       paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
       ui.painter().galley(rect.min, galley.clone(), color);
       if let Some(handler) = self.link_handler {
-        paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, rect.min);
+        paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, &font, rect.min);
       }
       return size;
     }
@@ -1079,7 +1080,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     if let Some(handler) = self.link_handler {
-      paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, response.rect.min);
+      paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, &font, response.rect.min);
     }
 
     let hovered_section =
@@ -1329,6 +1330,7 @@ fn paint_inline_widgets(
   tokens: &[Token<'_>],
   spans: &[(usize, usize, usize)],
   galley: &Arc<Galley>,
+  font: &FontId,
   origin: Pos2,
 ) {
   for &(start_char, end_char, token_index) in spans {
@@ -1348,7 +1350,7 @@ fn paint_inline_widgets(
         let row_rect = Rect::from_min_max(pos2(sg.pos.x, row.min_y()), pos2(eg.pos.x + eg.advance_width, row.max_y()))
           .translate(origin.to_vec2());
         ui.push_id(token_index, |ui| {
-          handler.paint_inline_widget(ui, text, href, row_rect);
+          handler.paint_inline_widget(ui, text, href, font, row_rect);
         });
       }
     }

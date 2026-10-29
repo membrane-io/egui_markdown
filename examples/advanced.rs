@@ -115,7 +115,7 @@ impl LinkHandler for DemoLinkHandler {
     }
   }
 
-  fn paint_inline_widget(&self, ui: &mut Ui, text: &str, href: &str, rect: Rect) {
+  fn paint_inline_widget(&self, ui: &mut Ui, text: &str, href: &str, _font: &FontId, rect: Rect) {
     if !href.starts_with("badge://") {
       return;
     }

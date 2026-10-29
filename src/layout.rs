@@ -212,7 +212,7 @@ pub fn render_link_in_ui(
   if is_inline_widget {
     if let Some(handler) = link_handler {
       ui.push_id(("link_widget", href), |ui| {
-        handler.paint_inline_widget(ui, text, href, rect);
+        handler.paint_inline_widget(ui, text, href, font_id, rect);
       });
     }
   }

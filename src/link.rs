@@ -60,8 +60,8 @@ pub trait LinkHandler {
   /// Paint a widget over the placeholder space reserved by [`Self::inline_widget_size`].
   ///
   /// Called after galley positioning, once per row the placeholder spans.
-  /// `rect` is in screen-space coordinates.
-  fn paint_inline_widget(&self, _ui: &mut Ui, _text: &str, _href: &str, _rect: Rect) {}
+  /// `font` is the font of the text of the label. `rect` is in screen coordinates.
+  fn paint_inline_widget(&self, _ui: &mut Ui, _text: &str, _href: &str, _font: &FontId, _rect: Rect) {}
 
   /// Should this link render as a standalone block-level widget?
   /// When true, the link becomes a segment break and [`Self::block_widget`]
