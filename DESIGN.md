@@ -151,19 +151,52 @@ width out.
 
 This reduces the layout and paint work per frame from O(document) to O(visible area).
 
-Each text segment's cache entry also holds a cheap key: the hash of the whole document with the
-segment's range. While the document is unchanged, a matching key gives the segment's content
-hash without hashing its tokens again. A block's cached height is keyed by the hash of its own
-token, so a table above a reply that streams in stays culled while the text below it changes.
+A culled segment or block must still know that its cached size is valid, and a hash of its
+tokens on every frame would cost O(document). So each cache entry records the parse generation
+it was last used in, from the incremental parse below. An entry is valid without a hash when no
+parse ran since, or when the new parse kept the entry's tokens from the parse it was last used
+in. A frame key, a hash of the style, the link handler, the font, the color and the theme,
+guards against a change that is not in the text. When neither holds, the label hashes the
+tokens and compares, as before.
 
-A frame with unchanged text therefore hashes the text once and walks the token list, and does
-no other work for the segments it culls. A frame with changed text parses the whole document
-again, because pulldown-cmark has no incremental parse. On a 37 KB document the parse takes
-about 400us of an 800us streamed frame. Parsing only the changed tail would remove most of
-that.
+A frame with unchanged text therefore hashes the text once and walks the token list. A frame
+of a streamed reply also parses only the end of the text, and hashes only the segments in it.
 
-**Files:** `label.rs` (flush_text_range size cache, flush_fast_key, render_token_range block size
-caches, BlockHeight, hash_block)
+**Files:** `label.rs` (flush_text_range size cache, Revision, frame_key, render_token_range block
+size caches, BlockHeight, hash_block)
+
+## Incremental parse
+
+**Problem:** A streamed reply changes on every frame, and a parse of the whole document costs
+O(document). On a 37 KB document, the parse took about 400us of an 800us frame.
+
+**Solution:** A document can be cut at a resume point, where the parse can start again with no
+state from the text before it. A resume point is a line that starts in the first column, after
+a blank line, outside a code fence, and that starts neither a list item nor a quote. Every block
+before it is closed there, because a list or a quote does not continue past a blank line into
+an unindented line. And no text after it changes a token before it.
+
+`ParseState` holds the owned tokens of a parse, the last resume point, the index of its first
+token, and the text up to the end of its line. When the next text starts with that text, the
+parse keeps the tokens before the index and parses only from the resume point. The last two
+kept tokens seed the token list, because they decide the breaks before the next block. The
+label takes the cache entry out of egui memory before the parse, so its tokens have one owner
+and the parse truncates and extends them without a copy.
+
+Two kinds of line can change text before them, and a text that holds either one is parsed
+whole. A link reference definition, such as `[a]: url`, makes a `[a]` anywhere into a link. An
+HTML block that starts with `<!--` or `<pre` runs past blank lines. The scan treats every line
+that starts with `[` and holds `]:`, and every line that starts with `<`, as one of these.
+
+Heal uses the same point. Heal changes only the text after the last blank line outside a fence,
+so the text before a resume point heals to itself, and a frame heals only the end of the text.
+
+`an_incremental_parse_matches_a_full_parse_at_every_prefix` streams the example documents, the
+streaming fixtures, and a document of edge cases one character at a time, with heal on and off,
+and checks every prefix against a full heal and parse.
+
+**Files:** `parser.rs` (ParseState, parse_tail, last_resume_point, starts_a_resumable_block),
+`label.rs` (render)
 
 ## Segmented rendering
 

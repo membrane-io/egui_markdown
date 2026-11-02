@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A link shows its title, such as `"Docs"` in `[text](url "Docs")`, as a tooltip when the
   `LinkHandler` gives no hover text.
 - `LinkStyle` derives `Clone`, `Copy`, `Debug`, `PartialEq` and `Eq`.
-- `render_steady_state_long` and `render_streaming_long` benchmarks, on a document of 500 sections.
+- `render_steady_state_long`, `render_streaming_long` and `render_streaming_long_healed` benchmarks, on a
+  document of 500 sections.
 
 ### Changed
 
@@ -93,6 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sections, a steady frame costs about 89us, down from 162us.
 - A block's cached height is now keyed by the block itself, so a block outside the view stays culled
   while text streams in elsewhere in the document.
+- A streamed reply is parsed and healed incrementally. When the new text starts with the text of the
+  last parse up to its last resume point, the label keeps the tokens before that point and parses and
+  heals only the text after it. Cached segments and blocks in the kept tokens skip their hash. On a
+  document of 500 sections, a streamed frame costs about 220us, down from 810us, or 945us with heal on.
 - `MarkdownLabel::calculate_size` now heals the text when `heal` is on, and counts tables,
   blockquotes, images and scrolling code blocks. It measures by running the render of `show` in an
   invisible child `Ui`. Its width is still the width of the content.

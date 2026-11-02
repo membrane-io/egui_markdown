@@ -24,28 +24,32 @@ use crate::paint;
 use crate::parser;
 use crate::style::MarkdownStyle;
 use crate::table;
-use crate::types::Token;
+use crate::types::{tokens_to_owned, Token};
 
 #[cfg(feature = "syntax_highlighting")]
 pub use crate::theme::default_code_theme;
 
 /// Cached parse + layout result stored in egui temp memory.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct CachedMarkdownLayout {
   text_hash: u64,
   /// `None` when the document takes the segmented render path, which lays out each flush
   /// range separately and so has no use for a whole-document layout.
   layout: Option<Arc<LayoutResult>>,
-  /// Owned copy of the tokens for rendering (needed for hover/click after cache hit).
-  tokens: Arc<Vec<Token<'static>>>,
+  /// The owned tokens for rendering (needed for hover/click after cache hit), and where the parse of
+  /// the next text, such as the next delta of a streamed reply, can start.
+  parse: parser::ParseState,
 }
 
 /// Cached layout result for a single flush range (used by segmented render path).
 #[derive(Clone)]
 struct CachedFlushRange {
-  /// [`flush_fast_key`] of the frame that last used this entry. While the document is the same, the range
-  /// is the same, so a matching key skips hashing the tokens of the range.
-  fast_key: u64,
+  /// The parse generation and the frame key of the frame that last used this entry, and the end of the
+  /// range then. While [`Revision::unchanged`] holds, the range holds the same tokens, so the label skips
+  /// hashing them.
+  generation: u64,
+  frame_key: u64,
+  end: usize,
   ctx_hash: u64,
   layout: Arc<LayoutResult>,
   tokens: Arc<Vec<Token<'static>>>,
@@ -97,13 +101,40 @@ fn hash_flush_context(
   hasher.finish()
 }
 
-/// A cheap key for a flush range: the hash of the whole document, which already covers the style and the
-/// link handler, with the range and the inputs that the document hash leaves out. Equal keys mean equal
-/// ranges, so a match skips [`hash_flush_context`], which hashes every token of the range.
-#[inline]
-fn flush_fast_key(text_hash: u64, start: usize, end: usize, font: &FontId, color: Color32, dark_mode: bool) -> u64 {
+/// What a cached entry for a range of tokens needs to know to skip hashing them.
+#[derive(Clone, Copy)]
+struct Revision {
+  /// [`parser::ParseState::generation`] of the tokens in this frame.
+  generation: u64,
+  /// [`parser::ParseState::kept_from`] of the tokens in this frame.
+  kept_from: Option<(u64, usize)>,
+  /// [`frame_key`] of this frame.
+  frame_key: u64,
+}
+
+impl Revision {
+  /// Whether an entry for the tokens before `end`, last used in `generation` with `frame_key`, still
+  /// holds the same tokens and inputs. It does when nothing was parsed since, or when this parse kept
+  /// those tokens from the parse that the entry was last used in.
+  fn unchanged(&self, generation: u64, frame_key: u64, end: usize) -> bool {
+    frame_key == self.frame_key
+      && (generation == self.generation
+        || self.kept_from.is_some_and(|(kept_generation, kept)| generation == kept_generation && end <= kept))
+  }
+}
+
+/// The inputs other than the tokens that a cached layout or height depends on: the style, the link
+/// handler, the font, the color and the theme. It costs the same on every frame, whatever the length of
+/// the document.
+fn frame_key(
+  style: &MarkdownStyle,
+  handler: Option<&dyn LinkHandler>,
+  font: &FontId,
+  color: Color32,
+  dark_mode: bool,
+) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
-  (text_hash, start, end, font, color, dark_mode).hash(&mut hasher);
+  (style, handler.map(|h| h.id()), font, color, dark_mode).hash(&mut hasher);
   hasher.finish()
 }
 
@@ -161,31 +192,45 @@ fn hash_code_block_context(
 /// The measured height of a block, and the keys it is valid for.
 #[derive(Clone, Copy)]
 struct BlockHeight {
-  /// The hash of the document when the block was last measured or culled. A match skips `block_hash`.
-  text_hash: u64,
-  /// [`hash_block`] of the block. A match keeps the height valid while text elsewhere changes, as it does
-  /// on every delta of a streamed reply.
+  /// The parse generation and the frame key when the block was last measured or culled. While
+  /// [`Revision::unchanged`] holds, the block is the same, and the label skips `block_hash`.
+  generation: u64,
+  frame_key: u64,
+  /// [`hash_block`] of the block, for a frame where the revision cannot vouch for it.
   block_hash: u64,
   height: f32,
 }
 
-/// The cached height of the block at `block_sz_id`, when it is still valid.
-fn cached_block_height(ui: &Ui, block_sz_id: Id, text_hash: u64, block_hash: impl FnOnce() -> u64) -> Option<f32> {
+/// The cached height of the block at token `index`, when it is still valid.
+fn cached_block_height(
+  ui: &Ui,
+  block_sz_id: Id,
+  revision: Revision,
+  index: usize,
+  block_hash: impl FnOnce() -> u64,
+) -> Option<f32> {
   let cached = ui.data(|d| d.get_temp::<BlockHeight>(block_sz_id))?;
-  if cached.text_hash == text_hash {
-    return Some(cached.height);
+  let valid = revision.unchanged(cached.generation, cached.frame_key, index + 1)
+    || (cached.frame_key == revision.frame_key && cached.block_hash == block_hash());
+  if !valid {
+    return None;
   }
-  let block_hash = block_hash();
-  (cached.block_hash == block_hash).then(|| {
-    ui.data_mut(|d| d.insert_temp(block_sz_id, BlockHeight { text_hash, ..cached }));
-    cached.height
-  })
+  if cached.generation != revision.generation {
+    ui.data_mut(|d| d.insert_temp(block_sz_id, BlockHeight { generation: revision.generation, ..cached }));
+  }
+  Some(cached.height)
 }
 
 /// Reserve space for an off-screen block using cached height and current available width.
 /// Width is not cached so a panel shrink cannot leave a stale wider min-size.
-fn try_cull_block(ui: &mut Ui, block_sz_id: Id, text_hash: u64, block_hash: impl FnOnce() -> u64) -> bool {
-  let Some(cached_height) = cached_block_height(ui, block_sz_id, text_hash, block_hash) else {
+fn try_cull_block(
+  ui: &mut Ui,
+  block_sz_id: Id,
+  revision: Revision,
+  index: usize,
+  block_hash: impl FnOnce() -> u64,
+) -> bool {
+  let Some(cached_height) = cached_block_height(ui, block_sz_id, revision, index, block_hash) else {
     return false;
   };
   let size = Vec2::new(ui.available_width(), cached_height);
@@ -197,60 +242,24 @@ fn try_cull_block(ui: &mut Ui, block_sz_id: Id, text_hash: u64, block_hash: impl
   true
 }
 
-fn cache_block_height(ui: &mut Ui, block_sz_id: Id, text_hash: u64, block_hash: impl FnOnce() -> u64, before_y: f32) {
+fn cache_block_height(
+  ui: &mut Ui,
+  block_sz_id: Id,
+  revision: Revision,
+  index: usize,
+  block_hash: impl FnOnce() -> u64,
+  before_y: f32,
+) {
   let height = ui.min_rect().bottom() - before_y;
   let cached = ui.data(|d| d.get_temp::<BlockHeight>(block_sz_id));
   let block_hash = match cached {
-    Some(cached) if cached.text_hash == text_hash => cached.block_hash,
+    Some(cached) if revision.unchanged(cached.generation, cached.frame_key, index + 1) => cached.block_hash,
     _ => block_hash(),
   };
-  ui.data_mut(|d| d.insert_temp(block_sz_id, BlockHeight { text_hash, block_hash, height }));
-}
-
-/// Convert borrowed tokens to owned ('static) by converting CowStr::Borrowed to Boxed.
-fn tokens_to_owned(tokens: &[Token<'_>]) -> Vec<Token<'static>> {
-  tokens.iter().map(|t| token_to_owned(t)).collect()
-}
-
-fn cowstr_to_owned(s: &pulldown_cmark::CowStr<'_>) -> pulldown_cmark::CowStr<'static> {
-  pulldown_cmark::CowStr::Boxed(s.to_string().into_boxed_str())
-}
-
-fn token_to_owned(t: &Token<'_>) -> Token<'static> {
-  match t {
-    Token::Newline => Token::Newline,
-    Token::Text { text, style } => Token::Text { text: cowstr_to_owned(text), style: style.clone() },
-    Token::CodeBlock { text, language } => {
-      Token::CodeBlock { text: cowstr_to_owned(text), language: language.as_ref().map(|l| cowstr_to_owned(l)) }
-    }
-    Token::Link { text, href, title, style } => Token::Link {
-      text: cowstr_to_owned(text),
-      href: cowstr_to_owned(href),
-      title: title.as_ref().map(|t| cowstr_to_owned(t)),
-      style: style.clone(),
-    },
-    Token::ListMarker { marker, indent_level } => {
-      Token::ListMarker { marker: cowstr_to_owned(marker), indent_level: *indent_level }
-    }
-    Token::Image { alt, url, title } => Token::Image {
-      alt: cowstr_to_owned(alt),
-      url: cowstr_to_owned(url),
-      title: title.as_ref().map(|t| cowstr_to_owned(t)),
-    },
-    Token::Table(data) => Token::Table(crate::types::TableData {
-      alignments: data.alignments.clone(),
-      headers: data.headers.iter().map(|row| tokens_to_owned(row)).collect(),
-      rows: data.rows.iter().map(|row| row.iter().map(|cell| tokens_to_owned(cell)).collect()).collect(),
-    }),
-    Token::HorizontalRule => Token::HorizontalRule,
-    Token::BlockquoteStart => Token::BlockquoteStart,
-    Token::BlockquoteEnd => Token::BlockquoteEnd,
-    Token::TaskListMarker { checked, indent_level } => {
-      Token::TaskListMarker { checked: *checked, indent_level: *indent_level }
-    }
-    Token::FootnoteRef { label } => Token::FootnoteRef { label: cowstr_to_owned(label) },
-    Token::FootnoteDef { label } => Token::FootnoteDef { label: cowstr_to_owned(label) },
-  }
+  let frame_key = revision.frame_key;
+  ui.data_mut(|d| {
+    d.insert_temp(block_sz_id, BlockHeight { generation: revision.generation, frame_key, block_hash, height })
+  });
 }
 
 /// What the layout does with a token that is wider than the available width.
@@ -630,26 +639,35 @@ impl<'a> MarkdownLabel<'a> {
     let color = ui.visuals().text_color();
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
 
+    let cache_id = self.id.with("md_cache");
+    // Check if we have a cached layout for this text.
+    let cached: Option<CachedMarkdownLayout> = ui.data(|d| d.get_temp(cache_id));
+
+    // The text before the last resume point of the previous parse heals to itself, so a streamed reply
+    // heals only its end.
     let healed;
     let text = if self.heal {
-      healed = parser::heal(self.text);
+      healed = match &cached {
+        Some(cached) => cached.parse.heal(self.text),
+        None => parser::heal(self.text),
+      };
       &*healed
     } else {
       self.text
     };
 
     let text_hash = hash_text(text, style, self.link_handler);
-    let cache_id = self.id.with("md_cache");
-
-    // Check if we have a cached layout for this text.
-    let cached: Option<CachedMarkdownLayout> = ui.data(|d| d.get_temp(cache_id));
+    let frame_key = frame_key(style, self.link_handler, &font, color, ui.visuals().dark_mode);
+    let revision =
+      |parse: &parser::ParseState| Revision { generation: parse.generation, kept_from: parse.kept_from, frame_key };
 
     if let Some(ref cached) = cached {
       if cached.text_hash == text_hash {
-        let tokens = Arc::clone(&cached.tokens);
+        let tokens = Arc::clone(&cached.parse.tokens);
+        let revision = revision(&cached.parse);
 
         let Some(layout) = cached.layout.clone() else {
-          self.render_segmented(ui, &tokens, &font, color, style, text_hash, out);
+          self.render_segmented(ui, &tokens, &font, color, style, revision, out);
           return;
         };
 
@@ -671,17 +689,19 @@ impl<'a> MarkdownLabel<'a> {
       }
     }
 
-    // Cache miss - parse and build layout.
-    let md = parser::parse(text);
-    let owned_tokens = Arc::new(tokens_to_owned(&md.tokens));
+    // Cache miss. Take the cached entry out of the map, so that its tokens have no other owner and the
+    // parse can keep them up to its resume point without a copy.
+    drop(cached);
+    let previous = ui.data_mut(|d| d.remove_temp::<CachedMarkdownLayout>(cache_id)).map(|cached| cached.parse);
+    let parse = parser::ParseState::parse(text, previous);
+    let tokens = Arc::clone(&parse.tokens);
+    let revision = revision(&parse);
 
     // Decide the render path before laying anything out: a whole-document layout is useless
     // to the segmented path, and building one per keystroke doubles the cost of every edit.
-    if needs_segmentation(&md.tokens, self.scroll_code_blocks, self.link_handler) {
-      ui.data_mut(|d| {
-        d.insert_temp(cache_id, CachedMarkdownLayout { text_hash, layout: None, tokens: owned_tokens });
-      });
-      self.render_segmented(ui, &md.tokens, &font, color, style, text_hash, out);
+    if needs_segmentation(&tokens, self.scroll_code_blocks, self.link_handler) {
+      ui.data_mut(|d| d.insert_temp(cache_id, CachedMarkdownLayout { text_hash, layout: None, parse }));
+      self.render_segmented(ui, &tokens, &font, color, style, revision, out);
       return;
     }
 
@@ -689,7 +709,7 @@ impl<'a> MarkdownLabel<'a> {
     let wrap = self.resolve_wrap(ui);
     let layout = build_layout(
       ui,
-      &md.tokens,
+      &tokens,
       font.clone(),
       color,
       wrap.max_rows,
@@ -704,15 +724,12 @@ impl<'a> MarkdownLabel<'a> {
     let layout = Arc::new(layout);
 
     ui.data_mut(|d| {
-      d.insert_temp(
-        cache_id,
-        CachedMarkdownLayout { text_hash, layout: Some(Arc::clone(&layout)), tokens: owned_tokens },
-      );
+      d.insert_temp(cache_id, CachedMarkdownLayout { text_hash, layout: Some(Arc::clone(&layout)), parse });
     });
 
     self.render_galley(
       ui,
-      &md.tokens,
+      &tokens,
       layout.job.clone(),
       &layout.section_to_token,
       &layout.code_block_spans,
@@ -734,10 +751,10 @@ impl<'a> MarkdownLabel<'a> {
     font: &FontId,
     color: Color32,
     style: &MarkdownStyle,
-    text_hash: u64,
+    revision: Revision,
     out: &mut MarkdownLabelOutput,
   ) {
-    self.render_token_range(ui, tokens, font, color, 0, tokens.len(), style, text_hash, out);
+    self.render_token_range(ui, tokens, font, color, 0, tokens.len(), style, revision, out);
   }
 
   /// Recursively render a range of tokens, handling blockquotes and tables as sub-regions.
@@ -751,7 +768,7 @@ impl<'a> MarkdownLabel<'a> {
     start: usize,
     end: usize,
     style: &MarkdownStyle,
-    text_hash: u64,
+    revision: Revision,
     out: &mut MarkdownLabelOutput,
   ) {
     let mut text_start = start;
@@ -781,10 +798,10 @@ impl<'a> MarkdownLabel<'a> {
       match &tokens[i] {
         Token::Table(data) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font)) {
+          if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -801,17 +818,17 @@ impl<'a> MarkdownLabel<'a> {
             &style.table,
             self.link_handler,
           );
-          cache_block_height(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font), before_y);
+          cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::CodeBlock { text, language } if self.scroll_code_blocks => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font)) {
+          if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -829,7 +846,7 @@ impl<'a> MarkdownLabel<'a> {
             style,
             self.code_theme_arg(),
           );
-          cache_block_height(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font), before_y);
+          cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
@@ -837,10 +854,10 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(feature = "images")]
         Token::Image { url, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font)) {
+          if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -849,7 +866,7 @@ impl<'a> MarkdownLabel<'a> {
           let before_y = ui.available_rect_before_wrap().min.y;
           let image = egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true);
           ui.add(image);
-          cache_block_height(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font), before_y);
+          cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
@@ -857,10 +874,10 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(not(feature = "images"))]
         Token::Image { alt, url, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font)) {
+          if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -871,14 +888,14 @@ impl<'a> MarkdownLabel<'a> {
           if ui.link(text).clicked() {
             ui.ctx().open_url(OpenUrl::new_tab(url.to_string()));
           }
-          cache_block_height(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font), before_y);
+          cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::Link { text, href, .. } if self.link_handler.is_some_and(|h| h.is_block_widget(href)) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let handler = self.link_handler.unwrap();
           handler.block_widget(ui, text, href);
@@ -888,7 +905,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::BlockquoteStart => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
 
           // Find the matching BlockquoteEnd.
@@ -918,7 +935,7 @@ impl<'a> MarkdownLabel<'a> {
           child_rect.min.x += indent;
 
           let mut child_ui = ui.new_child(UiBuilder::new().id_salt(self.id.with(("bq", i))).max_rect(child_rect));
-          self.render_token_range(&mut child_ui, tokens, font, color, bq_content_start, bq_end, style, text_hash, out);
+          self.render_token_range(&mut child_ui, tokens, font, color, bq_content_start, bq_end, style, revision, out);
 
           let bq_stroke =
             Stroke::new(style.blockquote.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
@@ -936,7 +953,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::BlockquoteEnd => {
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           i += 1;
           text_start = i;
         }
@@ -947,7 +964,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     // Flush remaining text.
-    self.flush_text_range(ui, tokens, font, color, text_start, end, style, text_hash, out);
+    self.flush_text_range(ui, tokens, font, color, text_start, end, style, revision, out);
   }
 
   /// Render a range of non-break tokens as an interactive galley.
@@ -961,7 +978,7 @@ impl<'a> MarkdownLabel<'a> {
     start: usize,
     end: usize,
     style: &MarkdownStyle,
-    text_hash: u64,
+    revision: Revision,
     out: &mut MarkdownLabelOutput,
   ) {
     if start >= end {
@@ -988,14 +1005,16 @@ impl<'a> MarkdownLabel<'a> {
     let dark_mode = ui.visuals().dark_mode;
     let cache_id = self.id.with(("flush", start));
     let size_cache_id = self.id.with(("flush_sz", start));
-    // While the document is unchanged, the cached entry knows the hash of its tokens, and hashing them
-    // again on every frame would make each frame cost O(document).
-    let fast_key = flush_fast_key(text_hash, start, trimmed_end, font, color, dark_mode);
+    // While the revision vouches for the tokens of the range, the cached entry knows their hash, and
+    // hashing them again on every frame would make each frame cost O(document).
     let cached = ui.data(|d| d.get_temp::<CachedFlushRange>(cache_id));
     let ctx_hash = match &cached {
-      Some(cached) if cached.fast_key == fast_key => cached.ctx_hash,
+      Some(cached) if cached.end == trimmed_end && revision.unchanged(cached.generation, cached.frame_key, end) => {
+        cached.ctx_hash
+      }
       _ => hash_flush_context(token_slice, style, font, color, dark_mode, self.link_handler),
     };
+    let (generation, frame_key) = (revision.generation, revision.frame_key);
 
     // Viewport culling: skip layout+paint for off-screen segments. Unlike the layout, a
     // measured size is only valid at the width it was measured at.
@@ -1011,8 +1030,9 @@ impl<'a> MarkdownLabel<'a> {
 
     if let Some(cached) = cached {
       if cached.ctx_hash == ctx_hash {
-        if cached.fast_key != fast_key {
-          ui.data_mut(|d| d.insert_temp(cache_id, CachedFlushRange { fast_key, ..cached.clone() }));
+        if (cached.generation, cached.frame_key, cached.end) != (generation, frame_key, trimmed_end) {
+          let updated = CachedFlushRange { generation, frame_key, end: trimmed_end, ..cached.clone() };
+          ui.data_mut(|d| d.insert_temp(cache_id, updated));
         }
         let size = self.render_galley(
           ui,
@@ -1054,7 +1074,14 @@ impl<'a> MarkdownLabel<'a> {
     ui.data_mut(|d| {
       d.insert_temp(
         cache_id,
-        CachedFlushRange { fast_key, ctx_hash, layout: Arc::clone(&layout), tokens: Arc::clone(&owned) },
+        CachedFlushRange {
+          generation,
+          frame_key,
+          end: trimmed_end,
+          ctx_hash,
+          layout: Arc::clone(&layout),
+          tokens: Arc::clone(&owned),
+        },
       )
     });
     let size = self.render_galley(
@@ -1567,12 +1594,18 @@ mod tests {
     let mut checked = false;
     egui::__run_test_ui(|ui| {
       let id = Id::NULL.with("block");
-      ui.data_mut(|d| d.insert_temp(id, BlockHeight { text_hash: 1, block_hash: 10, height: 42.0 }));
+      let revision = |generation, kept_from| Revision { generation, kept_from, frame_key: 7 };
+      ui.data_mut(|d| d.insert_temp(id, BlockHeight { generation: 1, frame_key: 7, block_hash: 10, height: 42.0 }));
+      let no_hash = || panic!("the revision vouches for the block");
 
-      assert_eq!(cached_block_height(ui, id, 1, || panic!("a matching document needs no block hash")), Some(42.0));
-      assert_eq!(cached_block_height(ui, id, 2, || 10), Some(42.0), "the block did not change");
-      assert_eq!(cached_block_height(ui, id, 2, || panic!("the entry now records document 2")), Some(42.0));
-      assert_eq!(cached_block_height(ui, id, 3, || 11), None, "the block changed");
+      assert_eq!(cached_block_height(ui, id, revision(1, None), 5, no_hash), Some(42.0), "nothing was parsed");
+      // Parse 2 kept the first 20 tokens of parse 1, and the block is token 5.
+      assert_eq!(cached_block_height(ui, id, revision(2, Some((1, 20))), 5, no_hash), Some(42.0));
+      // Parse 3 kept only 3 tokens, so the label hashes the block, which did not change.
+      assert_eq!(cached_block_height(ui, id, revision(3, Some((2, 3))), 5, || 10), Some(42.0));
+      assert_eq!(cached_block_height(ui, id, revision(4, None), 5, || 11), None, "the block changed");
+      let other_style = Revision { frame_key: 8, ..revision(3, None) };
+      assert_eq!(cached_block_height(ui, id, other_style, 5, || 10), None, "the style changed");
       checked = true;
     });
     assert!(checked);
