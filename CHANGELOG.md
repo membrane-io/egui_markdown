@@ -78,6 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bold text is bold.
 - `LinkStyle::underline` is now read. `false` turns off the hover underline.
 - A blockquote now gets block spacing above it, as it already did below it.
+- Inline code in a table cell had no space between its background and the next word. A cell that
+  holds a link also dropped the inline code background, italics and strikethrough of its other text,
+  and put item spacing between its words.
+- A block widget link now gets block spacing above and below it, and the text after it no longer starts
+  with a space.
+- A nested list starts its marker at the x of the text of the item above it. It was indented by the
+  width of two spaces, which left the nested text close to the parent's text.
 - A horizontal rule had two blank rows above it and two below it, and its own row was a full line
   tall. It now has one blank row on each side, as between two paragraphs, and its row is
   `HorizontalRuleStyle::height` tall.

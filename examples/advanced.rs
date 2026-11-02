@@ -285,7 +285,9 @@ A [styled link](styled://path/to/thing) with custom colors inline.
 
 An inline widget: [passing](badge://ci/passing) rendered as a painted badge over placeholder text.
 
-A [widget link](widget://gref/myprogram/state) rendered as a block-level widget.
+A block-level widget takes rows of its own, so its link reads best as a paragraph of its own:
+
+[widget link](widget://gref/myprogram/state)
 
 Regular [normal link](https://example.com) with default styling.
 

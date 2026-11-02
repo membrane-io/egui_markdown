@@ -829,11 +829,14 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::Link { text, href, .. } if self.link_handler.is_some_and(|h| h.is_block_widget(href)) => {
+          let had_content = text_start < i;
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          before_block(had_content, ui);
           let handler = self.link_handler.unwrap();
           handler.block_widget(ui, text, href);
           i += 1;
           text_start = i;
+          after_block(&mut i, &mut text_start, end, ui);
         }
         Token::BlockquoteStart => {
           let had_content = text_start < i;

@@ -375,6 +375,10 @@ pub fn build_layout(
         section_to_token.push(token_index);
       }
       Token::Text { text, style } => {
+        // Text that starts a row drops its leading spaces. Only a block that splits a paragraph, such as
+        // a block widget or an image, leaves them there, as in the " after" of "before [w](widget) after".
+        let at_row_start = job.text.is_empty() || job.text.ends_with('\n');
+        let text = if at_row_start { text.trim_start() } else { text.as_ref() };
         if text.is_empty() {
           continue;
         }
@@ -385,13 +389,13 @@ pub fn build_layout(
           let spacer = TextFormat { font_id: format.font_id.clone(), ..transparent_format.clone() };
           push_section(&mut job, " ", 0.0, spacer.clone());
           section_to_token.push(token_index);
-          push_section(&mut job, text.as_ref(), 0.0, format);
+          push_section(&mut job, text, 0.0, format);
           section_to_token.push(token_index);
           push_section(&mut job, " ", 0.0, spacer);
           section_to_token.push(token_index);
           continue;
         }
-        push_section(&mut job, text.as_ref(), 0.0, format);
+        push_section(&mut job, text, 0.0, format);
         section_to_token.push(token_index);
       }
       Token::CodeBlock { text, language } => {
@@ -451,14 +455,14 @@ pub fn build_layout(
           marker_format.font_id.size *= list.bullet_scale;
         }
 
-        let indent_width = ui.ctx().fonts_mut(|f| f.glyph_width(&font_id, ' ')) * 2.0;
         let (marker_width, slot_width) = ui.ctx().fonts_mut(|f| {
           let marker_width: f32 = marker.chars().map(|c| f.glyph_width(&marker_format.font_id, c)).sum();
           let slot_width: f32 = MARKER_SLOT_REFERENCE.chars().map(|c| f.glyph_width(&font_id, c)).sum();
           (marker_width, slot_width)
         });
-        // `indent_level` is 1-based, so a top-level item gets no nesting indent.
-        let nesting = (*indent_level as f32 - 1.0).max(0.0) * indent_width
+        // `indent_level` is 1-based, so a top-level item gets no nesting indent. Each level starts its
+        // marker slot at the x of the text of the level above it.
+        let nesting = (*indent_level as f32 - 1.0).max(0.0) * (slot_width + list.gap)
           + blockquote_depth as f32 * style_ref.blockquote.indent_per_depth;
         // Right-align the marker inside a fixed slot so every item at this level starts its text
         // at the same x, whatever its marker. A marker wider than the slot keeps its own width
@@ -1061,6 +1065,30 @@ mod section_tests {
       let added = rule.size().y - paragraphs.size().y;
       assert!((added - (style.horizontal_rule.height + line)).abs() < 0.5, "the rule added {added} points");
 
+      checked = true;
+    });
+    assert!(checked);
+  }
+
+  /// Text that starts a row, such as the text after a block widget that split its paragraph, drops its
+  /// leading spaces. Text in the middle of a row keeps them.
+  #[test]
+  fn text_that_starts_a_row_drops_its_leading_spaces() {
+    let plain = crate::types::TokenStyle::default;
+    let tokens = [
+      Token::Text { text: pulldown_cmark::CowStr::Borrowed(" after"), style: plain() },
+      Token::Text { text: pulldown_cmark::CowStr::Borrowed(" more"), style: plain() },
+      Token::Newline,
+      Token::Text { text: pulldown_cmark::CowStr::Borrowed("  next"), style: plain() },
+    ];
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let style = MarkdownStyle::default();
+      let color = ui.visuals().text_color();
+      let font = FontId::proportional(14.0);
+      let layout = build_layout(ui, &tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+      assert_eq!(layout.job.text, "after more\nnext");
+      assert_eq!(layout.section_to_token, vec![0, 1, 2, 3]);
       checked = true;
     });
     assert!(checked);

@@ -254,7 +254,9 @@ fn render_cell(
     return;
   }
 
-  // Render tokens individually so links are clickable and dispatch through the LinkHandler.
+  // Render tokens individually so links are clickable and dispatch through the LinkHandler. The tokens
+  // hold their own spaces, so the labels sit side by side, as in the job that measured the cell.
+  ui.spacing_mut().item_spacing.x = 0.0;
   for token in tokens {
     match token {
       Token::Link { text, href, .. } => {
@@ -265,7 +267,8 @@ fn render_cell(
       Token::Text { text, style } => {
         let format =
           token_style_to_format(style, font_id, color, strong_color, has_bold, is_header, dark_mode, inline_code_style);
-        let job = LayoutJob::simple_singleline(text.to_string(), format.font_id, format.color);
+        let mut job = LayoutJob::default();
+        append_cell_text(&mut job, text, format, style.inline_code);
         ui.label(job);
       }
       _ => {}
@@ -389,7 +392,7 @@ fn tokens_to_layout_job(
       Token::Text { text, style } => {
         let format =
           token_style_to_format(style, font_id, color, strong_color, has_bold, is_header, dark_mode, inline_code_style);
-        job.append(text.as_ref(), 0.0, format);
+        append_cell_text(&mut job, text, format, style.inline_code);
       }
       Token::Link { text, href, .. } => {
         let (link_font, link_color) = link_font_and_color(font_id, hyperlink_color, strong_color, has_bold, is_header);
@@ -412,6 +415,19 @@ fn tokens_to_layout_job(
     }
   }
   job
+}
+
+/// Append the text of a cell token. Inline code gets a transparent space on each side, as in the label, so
+/// its expanded background stays off the text next to it.
+fn append_cell_text(job: &mut LayoutJob, text: &str, format: TextFormat, inline_code: bool) {
+  if !inline_code {
+    job.append(text, 0.0, format);
+    return;
+  }
+  let spacer = TextFormat { font_id: format.font_id.clone(), color: Color32::TRANSPARENT, ..Default::default() };
+  job.append(" ", 0.0, spacer.clone());
+  job.append(text, 0.0, format);
+  job.append(" ", 0.0, spacer);
 }
 
 #[inline]
@@ -448,4 +464,38 @@ fn token_style_to_format(
     crate::layout::apply_inline_code_bg(&mut format, dark_mode, inline_code_style);
   }
   format
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::types::TokenStyle;
+  use epaint::text::ByteRangeExt as _;
+  use pulldown_cmark::CowStr;
+
+  /// Inline code in a cell gets a transparent space on each side, so its background stays off the next word.
+  #[test]
+  fn inline_code_in_a_cell_has_a_space_on_each_side() {
+    let code = TokenStyle { inline_code: true, ..Default::default() };
+    let tokens = [
+      Token::Text { text: CowStr::Borrowed("Behind the "), style: TokenStyle::default() },
+      Token::Text { text: CowStr::Borrowed("images"), style: code },
+      Token::Text { text: CowStr::Borrowed(" feature"), style: TokenStyle::default() },
+    ];
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let font = FontId::proportional(14.0);
+      let color = ui.visuals().text_color();
+      let style = InlineCodeStyle::default();
+      let job = tokens_to_layout_job(ui, &tokens, &font, color, color, color, false, false, false, &style, None);
+      assert_eq!(job.text, "Behind the  images  feature");
+      let spacers: Vec<_> = job.sections.iter().filter(|s| &job.text[s.byte_range.as_usize()] == " ").collect();
+      assert_eq!(spacers.len(), 2);
+      assert!(spacers
+        .iter()
+        .all(|s| s.format.color == Color32::TRANSPARENT && s.format.background == Color32::TRANSPARENT));
+      checked = true;
+    });
+    assert!(checked);
+  }
 }

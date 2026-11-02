@@ -67,6 +67,9 @@ pub trait LinkHandler {
   /// Should this link render as a standalone block-level widget?
   /// When true, the link becomes a segment break and [`Self::block_widget`]
   /// is called to render it outside the text galley.
+  ///
+  /// The widget takes rows of its own, with block spacing above and below it. A link in the middle of a
+  /// paragraph splits the paragraph there, so a block widget reads best as a paragraph of its own.
   fn is_block_widget(&self, _href: &str) -> bool {
     false
   }
