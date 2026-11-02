@@ -95,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while text streams in elsewhere in the document.
 - `MarkdownLabel::calculate_size` now heals the text when `heal` is on, and counts tables,
   blockquotes, images and scrolling code blocks. It measures by running the render of `show` in an
-  invisible child `Ui`, so its width is the available width unless `hug_content` is on.
+  invisible child `Ui`. Its width is still the width of the content.
 - `MarkdownLabel::layout_in_ui` now heals the text when `heal` is on. Its docs say that the galley holds
   text only.
 - The published package now includes the streaming test fixtures, and `egui_markdown_style` ships

@@ -560,12 +560,14 @@ impl<'a> MarkdownLabel<'a> {
     out
   }
 
-  /// The size that [`Self::show`] would allocate, measured without painting or interaction.
+  /// The size of the rendered markdown, measured without painting or interaction.
   ///
   /// This runs the same render as [`Self::show`] in an invisible child [`Ui`], so it counts tables,
   /// blockquotes, images and scrolling code blocks, and it heals the text when [`Self::heal`] is on.
   /// The two calls share their caches, so a `show` after a `calculate_size` in the same frame costs
-  /// little. Unless [`Self::hug_content`] is on, the width is the available width, as `show` claims it.
+  /// little. The width is the width of the content, as with [`Self::hug_content`], so a caller can size a
+  /// button or a chip to the text. A scrolling code block fills the available width, so a document with
+  /// one measures that wide.
   pub fn calculate_size(&self, ui: &mut Ui) -> Vec2 {
     let measure_id = self.id.with("calculate_size");
     let mut out =
@@ -1119,10 +1121,13 @@ impl<'a> MarkdownLabel<'a> {
     if let Some(height) = shown_height(&galley, &built) {
       size.y = height;
     }
-    if !self.hug_content && wrap.mode != TextWrapMode::Extend {
+    // An invisible Ui, such as the one calculate_size measures in, sizes the text to its content, so the
+    // measured width is the width of the text and not the width the label would claim.
+    let hug_content = self.hug_content || !ui.is_visible();
+    if !hug_content && wrap.mode != TextWrapMode::Extend {
       size.x = size.x.max(available_width);
     }
-    let decoration_width = if self.hug_content { size.x } else { available_width };
+    let decoration_width = if hug_content { size.x } else { available_width };
 
     // An invisible Ui, such as the one calculate_size measures in, gets no hover, click or selection.
     if !self.interactable || !ui.is_visible() {
@@ -1561,7 +1566,7 @@ mod tests {
   fn a_block_height_outlives_changes_elsewhere_in_the_document() {
     let mut checked = false;
     egui::__run_test_ui(|ui| {
-      let id = Id::new("block");
+      let id = Id::NULL.with("block");
       ui.data_mut(|d| d.insert_temp(id, BlockHeight { text_hash: 1, block_hash: 10, height: 42.0 }));
 
       assert_eq!(cached_block_height(ui, id, 1, || panic!("a matching document needs no block hash")), Some(42.0));

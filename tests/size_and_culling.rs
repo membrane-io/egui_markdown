@@ -52,6 +52,23 @@ fn calculate_size_matches_what_show_allocates() {
   assert!(measured.y > text_only.y + 40.0, "the table and the quote must count: {measured:?} vs {text_only:?}");
 }
 
+/// A caller sizes a chip or a button to the text, so the measured width is the width of the text, as it
+/// was before the measure ran the render of `show`.
+#[test]
+fn calculate_size_measures_the_width_of_the_text() {
+  let ctx = Context::default();
+  let mut short = Vec2::ZERO;
+  let mut long = Vec2::ZERO;
+  for _ in 0..2 {
+    frame(&ctx, vec2(500.0, 800.0), |ui| {
+      short = MarkdownLabel::new(Id::NULL.with("short"), "Fix it").calculate_size(ui);
+      long = MarkdownLabel::new(Id::NULL.with("long"), "Fix it, and then fix the next thing").calculate_size(ui);
+    });
+  }
+  assert!(short.x > 0.0 && short.x < 100.0, "a short label measured {short:?}");
+  assert!(long.x > short.x && long.x < 500.0, "a longer label measured {long:?}");
+}
+
 #[test]
 fn calculate_size_paints_nothing() {
   let ctx = Context::default();
