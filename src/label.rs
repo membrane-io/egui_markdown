@@ -415,11 +415,12 @@ impl<'a> MarkdownLabel<'a> {
     Self { code_block_min_width: width, ..self }
   }
 
-  /// Auto-close unclosed code fences before parsing.
+  /// Run [`crate::heal`] on the text before the parse. Default: `false`.
   ///
-  /// Useful for streaming LLM output where text is incomplete. An unclosed
-  /// triple-backtick fence causes all subsequent text to be swallowed as code;
-  /// enabling heal appends a closing fence before parsing.
+  /// Turn this on while the text streams in, for example from an LLM. Heal closes an open code
+  /// fence, emphasis, inline code, link or table, and it holds back a marker at the end of the text
+  /// until the text after it shows what the marker is. Turn it off when the text is complete: a
+  /// complete document that ends in `[x]` heals into a link, because more text could make it one.
   pub fn heal(self, heal: bool) -> Self {
     Self { heal, ..self }
   }

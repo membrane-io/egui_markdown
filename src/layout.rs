@@ -395,14 +395,7 @@ pub fn build_layout(
           segment_breaks.push(token_index);
         } else {
           let lang = language.as_deref().unwrap_or(style_ref.default_code_language.as_str());
-          let mut padded_text = String::with_capacity(text.len() + text.lines().count());
-          for (i, line) in text.lines().enumerate() {
-            if i > 0 {
-              padded_text.push('\n');
-            }
-            padded_text.push(' ');
-            padded_text.push_str(line);
-          }
+          let padded_text = pad_code_body(text);
 
           let highlighted_job = highlight_code(ui, &padded_text, lang, code_font_size, code_theme);
 

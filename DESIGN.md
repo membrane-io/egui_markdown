@@ -9,29 +9,42 @@ documentation, in immediate-mode egui at 60 frames per second.
 domain-specific links as interactive widgets. A documentation viewer can navigate
 internally. The markdown renderer must not hardcode these behaviors.
 
-**Solution:** The `LinkHandler` trait lets consumers customize links at three levels.
-Layout applies them in this order:
+**Solution:** The `LinkHandler` trait lets consumers customize links at four levels.
+Layout applies them in this order, and the first one that applies wins:
 
-1. **`is_widget_link(href)` -> `render_link(ui, text, href)`** - Promote a link to a
+1. **`is_block_widget(href)` -> `block_widget(ui, text, href)`** - Promote a link to a
    standalone widget. The link becomes a segment break. The renderer flushes the text
    before the link as a galley. The handler then draws any egui widget it wants, such as
-   a button, a custom view, or an embedded preview. The text after the link starts a new
-   galley. The handler receives the `Ui` and returns a `Response`.
+   a card or an embedded preview. The text after the link starts a new galley. The
+   handler receives the `Ui` and returns a `Response`.
 
-2. **`layout_link(text, href, job, font, color)`** - Customize inline styling. The
+2. **`inline_widget_size(href, font)` -> `paint_inline_widget(ui, text, href, font, rect)`** -
+   Reserve space inside the text and paint a widget over it, such as a mention or a
+   status badge. The size sets the row height. `layout_link` emits the placeholder text
+   that sets the width, or the renderer emits the link text in a transparent color. After
+   the galley is placed, the renderer calls `paint_inline_widget` once for each row the
+   placeholder spans.
+
+3. **`layout_link(ui, text, href, job, font, color)`** - Customize inline styling. The
    handler appends sections to the `LayoutJob` directly (icons, colored segments,
    backgrounds). The renderer maps every appended section to the token of this link, so
    that hover and click continue to work. Returns true if the handler styled the link.
 
-3. **`link_style(href)`** - Simple color and underline override. Returns `None` for
-   default hyperlink styling.
+4. **`link_style(href)`** - A color override, and whether the link shows an underline on
+   hover. Returns `None` for default hyperlink styling.
+
+A link takes the size, weight and slant of the text around it, so a link inside a heading
+has the size of the heading.
 
 At interaction time:
 
-- **Hover:** `link_style()` gives the underline color. The cursor changes to a pointing hand.
-- **Click:** `on_click(text, href, ui)` is called. Return true if the handler used the
-  click, false to open the URL in the browser.
-- **Cache:** `cache_key()` returns a u64 that the layout hash includes. When the behavior
+- **Hover:** the cursor changes to a pointing hand, and the link gets an underline in the
+  `link_style()` color unless `link_style()` turns the underline off. The tooltip is
+  `hover_text(href)`, then the link title, then the href when `url_in_tooltip` is set.
+- **Click:** `click(text, href, ui)` is called. Return true if the handler used the
+  click, false to open the URL in the browser. A link with an empty href, which heal
+  produces until the URL arrives, opens nothing.
+- **Cache:** `id()` returns a u64 that the layout hash includes. When the behavior
   of the handler changes, for example in a different app context, change the key to
   invalidate the cached layouts.
 
@@ -56,7 +69,7 @@ unchanged content. Scrolling code blocks also add syntect highlighting.
 1. **Full-document cache** (`CachedMarkdownLayout`): Holds the parse and layout result
    for the whole markdown string. The key is a hash of the text content, the style, and
    the cache key of the link handler. On a cache hit, the widget parses nothing and lays
-   out nothing. The segmented path handles tables, scrolling code blocks, blockquotes,
+   out nothing, and it borrows the cached tokens rather than copying them. The segmented path handles tables, scrolling code blocks, blockquotes,
    and similar elements. When the document needs that path, the entry holds `None` in
    its `layout` field and keeps only the tokens.
 
@@ -136,7 +149,10 @@ cache therefore stores the width it measured at together with the hash, and a hi
 both values to match. This is the counterpart to the layout keys above, which leave the
 width out.
 
-This reduces the work per frame from O(document) to O(visible area).
+This reduces the layout and paint work per frame from O(document) to O(visible area).
+Two costs remain O(document). Each frame hashes the tokens of every text segment, including
+the segments it culls, to find its cache entry. And a block's cached height is keyed by the
+hash of the whole document, so while text streams in, no block is culled.
 
 **Files:** `label.rs` (flush_text_range size cache, render_token_range block size caches)
 
@@ -187,6 +203,10 @@ or link makes pulldown-cmark treat all the text that follows as part of that con
 The renderer must close these constructs before it parses the text.
 
 **Solution:** `heal()` finds the unclosed constructs and appends the closing markers. It
+reads them as CommonMark does where that matters. A fence closes only with a run of its own
+character that is at least as long. An emphasis run opens only before a non-space character
+and closes only after one, so a `* ` bullet opens nothing. A blank line closes every inline
+construct. It
 returns `Cow::Borrowed` when the text needs no repair, which is the common case for
 complete markdown, and this avoids an allocation. Only incomplete input produces a
 `Cow::Owned` with a new string.

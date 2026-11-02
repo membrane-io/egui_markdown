@@ -1,6 +1,6 @@
 # Markdown rendering in the Rust / egui ecosystem
 
-A brief survey of related crates, as of early 2025.
+A brief survey of related crates.
 
 `egui_markdown` renders markdown into one egui galley, which is a styled text layout. It
 draws the block elements as separate widgets, and those elements are tables, code blocks,
@@ -19,7 +19,7 @@ every visual style configurable.
 | Crate | Description |
 |-------|-------------|
 | [`egui_commonmark`](https://crates.io/crates/egui_commonmark) | CommonMark + GFM viewer for egui. Macro variant available. Widely used. |
-| [`egui_markdown`](https://crates.io/crates/egui_markdown) | This crate. Stateless widget with streaming heal, custom link handlers, style API. |
+| [`egui_markdown`](https://crates.io/crates/egui_markdown) | This crate. One widget call per document, with caches in egui memory, streaming heal, custom link handlers, and a style API. |
 
 ## Rust markdown parsers
 
