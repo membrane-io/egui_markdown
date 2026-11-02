@@ -693,6 +693,8 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
       Event::Rule => {
         ensure_double_newline(&mut tokens);
         tokens.push(Token::HorizontalRule);
+        // The rule ends its row, so text after it, such as an HTML block, starts a row of its own.
+        tokens.push(Token::Newline);
       }
 
       Event::TaskListMarker(checked) => {
@@ -1714,6 +1716,17 @@ mod tests {
     assert_eq!(styles.len(), 2);
     assert!(styles.iter().all(|style| style.heading == Some(2)));
     assert!(!styles[0].italic && styles[1].italic);
+  }
+
+  #[test]
+  fn a_rule_ends_its_row() {
+    // An HTML block adds no break of its own, so the newline after the rule keeps it off the row.
+    let md = parse("---\n<div>x</div>");
+    assert!(
+      matches!(md.tokens.as_slice(), [Token::HorizontalRule, Token::Newline, Token::Text { .. }, ..]),
+      "{:?}",
+      md.tokens
+    );
   }
 
   #[test]

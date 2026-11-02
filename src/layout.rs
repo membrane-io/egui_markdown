@@ -356,6 +356,7 @@ pub fn build_layout(
   // Pre-build common formats to avoid repeated font_id.clone().
   let base_format = text_format(font_id.clone(), color);
   let transparent_format = TextFormat { color: Color32::TRANSPARENT, ..base_format.clone() };
+  let hr_format = TextFormat { line_height: Some(style.horizontal_rule.height), ..transparent_format.clone() };
 
   // Disable egui's paragraph-splitting optimization (see egui #5411).
   if let Some(n) = max_rows {
@@ -367,7 +368,10 @@ pub fn build_layout(
   for (token_index, token) in tokens.iter().enumerate() {
     match token {
       Token::Newline => {
-        push_section(&mut job, "\n", 0.0, base_format.clone());
+        // The newline that ends the row of a rule takes the height of the rule, so the row stays short.
+        let after_rule = token_index.checked_sub(1).is_some_and(|i| matches!(tokens[i], Token::HorizontalRule));
+        let format = if after_rule { hr_format.clone() } else { base_format.clone() };
+        push_section(&mut job, "\n", 0.0, format);
         section_to_token.push(token_index);
       }
       Token::Text { text, style } => {
@@ -519,17 +523,12 @@ pub fn build_layout(
         blockquote_depth = blockquote_depth.saturating_sub(1);
       }
       Token::HorizontalRule => {
-        // Newline, short transparent spacer row for the painted rule, then newline.
-        push_section(&mut job, "\n", 0.0, base_format.clone());
-        section_to_token.push(token_index);
+        // A short transparent row that the rule is painted across. The parser puts the rule on a row
+        // of its own, with a blank row above and below it, as between two paragraphs.
         let hr_char_pos = job.text.chars().count();
-        let mut hr_format = transparent_format.clone();
-        hr_format.line_height = Some(style_ref.horizontal_rule.height);
-        push_section(&mut job, " ", 0.0, hr_format);
+        push_section(&mut job, " ", 0.0, hr_format.clone());
         section_to_token.push(token_index);
         hr_positions.push(hr_char_pos);
-        push_section(&mut job, "\n", 0.0, base_format.clone());
-        section_to_token.push(token_index);
       }
       Token::TaskListMarker { checked, .. } => {
         let marker_char = if *checked { "☑ " } else { "☐ " };
@@ -1037,6 +1036,31 @@ mod section_tests {
       assert_eq!(size_of("Title "), heading);
       assert_eq!(size_of("code"), heading);
       assert_eq!(size_of("link"), heading);
+      checked = true;
+    });
+    assert!(checked);
+  }
+
+  /// A rule takes a row of its own, with one blank row above and below it, as between two paragraphs.
+  #[test]
+  fn a_rule_has_one_blank_row_on_each_side() {
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let style = MarkdownStyle::default();
+      let mut galley = |text: &str| {
+        let markdown = crate::parse(text);
+        let font = FontId::proportional(14.0);
+        let color = ui.visuals().text_color();
+        let layout =
+          build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+        ui.fonts_mut(|f| f.layout_job(layout.job))
+      };
+      let paragraphs = galley("Above\n\nBelow");
+      let rule = galley("Above\n\n---\n\nBelow");
+      let line = MARKDOWN_LINE_HEIGHT_POINTS.unwrap();
+      let added = rule.size().y - paragraphs.size().y;
+      assert!((added - (style.horizontal_rule.height + line)).abs() < 0.5, "the rule added {added} points");
+
       checked = true;
     });
     assert!(checked);

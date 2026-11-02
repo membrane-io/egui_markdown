@@ -41,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Holding Shift no longer turns off text selection, so a shift-click extends the selection, as it
   does on `egui::Label`. The selection also stays painted while Shift is down. An app that used
   Shift for something else can pass `.selectable(!ui.input(|i| i.modifiers.shift))`.
+- The default `MarkdownStyle::code_font_size` is `12.0`, the size of egui's default monospace text. It
+  was `10.0`, which was small beside egui's 12.5 point body text. An app that wants the old size sets
+  it.
 - **Breaking:** the crates need Rust 1.95, which egui 0.36 needs. `rust-version` said 1.80.
 - `heal()` removes a last line that holds only block markers, such as `-` or `1.`, and a run of
   inline markers at the end, such as `**`. It also removes the URL of an open link, so the link
@@ -75,6 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bold text is bold.
 - `LinkStyle::underline` is now read. `false` turns off the hover underline.
 - A blockquote now gets block spacing above it, as it already did below it.
+- A horizontal rule had two blank rows above it and two below it, and its own row was a full line
+  tall. It now has one blank row on each side, as between two paragraphs, and its row is
+  `HorizontalRuleStyle::height` tall.
 - The segmented render path no longer copies every token of the document on each cached frame.
 - The published package now includes the streaming test fixtures, and `egui_markdown_style` ships
   its license files.
