@@ -14,10 +14,19 @@ struct ListInfo {
 
 fn trim_end_newlines<'s>(s: CowStr<'s>) -> CowStr<'s> {
   match s {
-    CowStr::Borrowed(s) => CowStr::Borrowed(s.trim_end_matches("\n")),
-    CowStr::Boxed(s) => CowStr::Boxed(s.trim_end_matches("\n").into()),
-    CowStr::Inlined(s) => CowStr::Inlined(s),
+    CowStr::Borrowed(s) => CowStr::Borrowed(s.trim_end_matches('\n')),
+    s if s.ends_with('\n') => CowStr::Boxed(s.trim_end_matches('\n').into()),
+    s => s,
   }
+}
+
+/// Add `text` to the end of the text in `slot`. A link or image holds one string, and pulldown-cmark
+/// gives its text as one event for each styled run, such as `a `, `b` and ` c` for ``[a `b` c](u)``.
+fn append_text<'s>(slot: &mut Option<CowStr<'s>>, text: CowStr<'s>) {
+  *slot = Some(match slot.take() {
+    None => text,
+    Some(before) => CowStr::Boxed(format!("{before}{text}").into_boxed_str()),
+  });
 }
 
 /// Auto-close unclosed markdown constructs for streaming/incomplete input.
@@ -194,6 +203,19 @@ fn heal_inline(s: &str) -> (&str, String) {
     if in_fence {
       continue;
     }
+    // A blank line ends the paragraph, and no inline construct continues past it.
+    if trimmed.is_empty() {
+      open_star_bold = false;
+      open_star_italic = false;
+      open_under_bold = false;
+      open_under_italic = false;
+      open_strike = false;
+      in_inline_code = false;
+      in_link_text = false;
+      in_link_url = false;
+      in_link_title = false;
+      continue;
+    }
 
     let bytes = line.as_bytes();
     let len = bytes.len();
@@ -243,63 +265,35 @@ fn heal_inline(s: &str) -> (&str, String) {
         continue;
       }
 
-      // Asterisk emphasis: ***, **, *.
-      if c == b'*' {
-        if i + 2 < len && bytes[i + 1] == b'*' && bytes[i + 2] == b'*' {
-          open_star_bold = !open_star_bold;
-          open_star_italic = !open_star_italic;
-          i += 3;
-          continue;
-        }
-        if i + 1 < len && bytes[i + 1] == b'*' {
-          open_star_bold = !open_star_bold;
-          i += 2;
-          continue;
-        }
-        open_star_italic = !open_star_italic;
-        i += 1;
-        continue;
-      }
-
-      // Underscore emphasis: ___, __, _.
-      // CommonMark: underscores flanked by alphanumeric on both sides are intra-word and not emphasis.
-      if c == b'_' {
-        let preceded_by_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
-        if i + 2 < len && bytes[i + 1] == b'_' && bytes[i + 2] == b'_' {
-          let followed_by_alnum = i + 3 < len && bytes[i + 3].is_ascii_alphanumeric();
-          if preceded_by_alnum && followed_by_alnum {
-            i += 3;
-            continue;
+      // Emphasis runs. A run opens only when a non-space character follows it, and closes only when a
+      // non-space character comes before it, so a `* ` bullet or the `*` in `2 * 3` opens nothing.
+      if c == b'*' || c == b'_' || c == b'~' {
+        let run = bytes[i..].iter().take_while(|&&b| b == c).count();
+        let before = i.checked_sub(1).map(|at| bytes[at]);
+        let after = bytes.get(i + run).copied();
+        let can_open = after.is_some_and(|b| !b.is_ascii_whitespace());
+        let can_close = before.is_some_and(|b| !b.is_ascii_whitespace());
+        // CommonMark: an underscore run between two alphanumerics is inside a word, and is not emphasis.
+        let intraword =
+          before.is_some_and(|b| b.is_ascii_alphanumeric()) && after.is_some_and(|b| b.is_ascii_alphanumeric());
+        match (c, run) {
+          (b'~', 2) => toggle_emphasis(&mut open_strike, can_open, can_close),
+          (b'~', _) => {}
+          (b'_', _) if intraword => {}
+          (b'*', 1) => toggle_emphasis(&mut open_star_italic, can_open, can_close),
+          (b'*', 2) => toggle_emphasis(&mut open_star_bold, can_open, can_close),
+          (b'*', _) => {
+            toggle_emphasis(&mut open_star_bold, can_open, can_close);
+            toggle_emphasis(&mut open_star_italic, can_open, can_close);
           }
-          open_under_bold = !open_under_bold;
-          open_under_italic = !open_under_italic;
-          i += 3;
-          continue;
-        }
-        if i + 1 < len && bytes[i + 1] == b'_' {
-          let followed_by_alnum = i + 2 < len && bytes[i + 2].is_ascii_alphanumeric();
-          if preceded_by_alnum && followed_by_alnum {
-            i += 2;
-            continue;
+          (_, 1) => toggle_emphasis(&mut open_under_italic, can_open, can_close),
+          (_, 2) => toggle_emphasis(&mut open_under_bold, can_open, can_close),
+          _ => {
+            toggle_emphasis(&mut open_under_bold, can_open, can_close);
+            toggle_emphasis(&mut open_under_italic, can_open, can_close);
           }
-          open_under_bold = !open_under_bold;
-          i += 2;
-          continue;
         }
-        let followed_by_alnum = i + 1 < len && bytes[i + 1].is_ascii_alphanumeric();
-        if preceded_by_alnum && followed_by_alnum {
-          i += 1;
-          continue;
-        }
-        open_under_italic = !open_under_italic;
-        i += 1;
-        continue;
-      }
-
-      // Strikethrough: ~~.
-      if c == b'~' && i + 1 < len && bytes[i + 1] == b'~' {
-        open_strike = !open_strike;
-        i += 2;
+        i += run;
         continue;
       }
 
@@ -369,6 +363,18 @@ fn heal_inline(s: &str) -> (&str, String) {
     suffix.push_str("~~");
   }
   (kept, suffix)
+}
+
+/// Open the emphasis when it is closed and the run can open it, and close it when it is open and the
+/// run can close it.
+fn toggle_emphasis(open: &mut bool, can_open: bool, can_close: bool) {
+  if *open {
+    if can_close {
+      *open = false;
+    }
+  } else if can_open {
+    *open = true;
+  }
 }
 
 fn heal_table(s: &str) -> String {
@@ -451,7 +457,8 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
   let mut image_url = None;
   let mut image_title: Option<CowStr> = None;
   let mut list_stack: Vec<ListInfo> = Vec::new();
-  let mut in_list_item = false;
+  // Items nest, so this counts the open items rather than holding a flag that an inner item would clear.
+  let mut item_depth = 0usize;
 
   // Table collection state.
   let mut in_table = false;
@@ -532,7 +539,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         Event::Text(text) => {
           if in_link {
-            link_text = Some(text.clone());
+            append_text(&mut link_text, text.clone());
           } else {
             current_cell.push(Token::Text { text: text.clone(), style: current_style.clone() });
           }
@@ -540,7 +547,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         Event::Code(text) => {
           if in_link {
-            link_text = Some(text.clone());
+            append_text(&mut link_text, text.clone());
           } else {
             current_cell
               .push(Token::Text { text: text.clone(), style: TokenStyle { inline_code: true, ..Default::default() } });
@@ -572,7 +579,11 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           continue;
         }
         Event::SoftBreak => {
-          current_cell.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
+          if in_link {
+            append_text(&mut link_text, CowStr::Borrowed(" "));
+          } else {
+            current_cell.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
+          }
           continue;
         }
         Event::HardBreak => {
@@ -602,9 +613,9 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
     match event {
       Event::Text(text) => {
         if in_image {
-          image_alt = Some(text);
+          append_text(&mut image_alt, text);
         } else if in_link {
-          link_text = Some(text);
+          append_text(&mut link_text, text);
         } else if in_code_block {
           tokens.push(Token::CodeBlock { text: trim_end_newlines(text), language: current_code_language.clone() });
         } else {
@@ -621,8 +632,10 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
       }
 
       Event::Code(text) => {
-        if in_link {
-          link_text = Some(text);
+        if in_image {
+          append_text(&mut image_alt, text);
+        } else if in_link {
+          append_text(&mut link_text, text);
         } else {
           let code_style = TokenStyle { inline_code: true, ..Default::default() };
           tokens.push(Token::Text { text, style: code_style });
@@ -630,7 +643,13 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
       }
 
       Event::SoftBreak => {
-        tokens.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
+        if in_image {
+          append_text(&mut image_alt, CowStr::Borrowed(" "));
+        } else if in_link {
+          append_text(&mut link_text, CowStr::Borrowed(" "));
+        } else {
+          tokens.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
+        }
       }
       Event::HardBreak => {
         tokens.push(Token::Newline);
@@ -652,6 +671,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
 
       Event::Start(tag) => match tag {
         Tag::Paragraph => {
+          let in_list_item = item_depth > 0;
           let after_header_in_list = in_list_item
             && tokens.last().is_some_and(|token| matches!(token, Token::Text { style, .. } if style.heading.is_some()));
 
@@ -660,19 +680,22 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
             // Don't add newlines right after a list/task marker.
           } else if after_header_in_list {
             ensure_newline(&mut tokens);
-          } else if !in_list_item && !in_footnote_def {
+          } else if in_list_item {
+            // A later paragraph of a loose item starts its own row, at the x of the item text. A marker
+            // with no text sets that x.
+            ensure_double_newline(&mut tokens);
+            tokens.push(Token::ListMarker { marker: CowStr::Borrowed(""), indent_level: list_stack.len() });
+          } else if !in_footnote_def {
             ensure_double_newline(&mut tokens);
           }
         }
         Tag::CodeBlock(code_block_kind) => {
-          let after_header_in_list = in_list_item
-            && tokens.last().is_some_and(|token| matches!(token, Token::Text { style, .. } if style.heading.is_some()));
-
           let last = tokens.last();
           if matches!(last, Some(Token::ListMarker { .. })) {
-          } else if after_header_in_list {
+          } else if item_depth > 0 {
+            // A code block after the text of an item starts on its own row.
             ensure_newline(&mut tokens);
-          } else if !in_list_item {
+          } else {
             ensure_double_newline(&mut tokens);
           }
 
@@ -705,7 +728,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           if !tokens.is_empty() {
             ensure_newline(&mut tokens);
           }
-          in_list_item = true;
+          item_depth += 1;
           let indent_level = list_stack.len();
           let marker: CowStr = if let Some(list_info) = list_stack.last_mut() {
             if list_info.is_ordered {
@@ -722,7 +745,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         Tag::Heading { level, .. } => {
           let after_list_marker = is_last_token_list_marker(&tokens);
-          if !after_list_marker && !in_list_item {
+          if !after_list_marker && item_depth == 0 {
             ensure_double_newline(&mut tokens);
           }
           current_style.heading = Some(level as u8);
@@ -778,7 +801,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         TagEnd::Paragraph => {}
         TagEnd::Item => {
-          in_list_item = false;
+          item_depth = item_depth.saturating_sub(1);
         }
         TagEnd::List(_) => {
           list_stack.pop();
@@ -1529,6 +1552,66 @@ mod tests {
     if let Some(Token::Link { title, .. }) = link {
       assert!(title.is_none());
     }
+  }
+
+  #[test]
+  fn heal_opens_no_emphasis_at_a_star_with_a_space_after_it() {
+    for input in ["* item one", "2 * 3 = 6", "* a\n* b\n* c", "a * b * c"] {
+      assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)), "{input:?}");
+    }
+    assert_eq!(super::heal("* item with *emph"), "* item with *emph*");
+  }
+
+  #[test]
+  fn heal_closes_no_emphasis_after_a_blank_line() {
+    assert_eq!(super::heal("a *b\n\nnew para"), "a *b\n\nnew para");
+    assert_eq!(super::heal("a `b\n\nnew para"), "a `b\n\nnew para");
+    assert_eq!(super::heal("a *b\n\nnew **para"), "a *b\n\nnew **para**");
+  }
+
+  #[test]
+  fn link_text_keeps_every_styled_run() {
+    for (input, expected) in
+      [("[**bold** and more](u)", "bold and more"), ("[a `b` c](u)", "a b c"), ("[two\nlines](u)", "two lines")]
+    {
+      let md = parse(input);
+      let links: Vec<_> = md.tokens.iter().filter(|t| matches!(t, Token::Link { .. })).collect();
+      assert_eq!(links.len(), 1, "{input:?}: {:?}", md.tokens);
+      assert_eq!(links[0].text(), expected, "{input:?}");
+    }
+    let md = parse("| a |\n|---|\n| [x *y* z](u) |");
+    let Some(Token::Table(data)) = md.tokens.first() else { panic!("expected a table") };
+    assert_eq!(data.rows[0][0][0].text(), "x y z");
+  }
+
+  #[test]
+  fn image_alt_keeps_every_styled_run() {
+    let md = parse("![an *emph* alt](u)");
+    assert!(matches!(md.tokens.first(), Some(Token::Image { alt, .. }) if alt.as_ref() == "an emph alt"));
+  }
+
+  #[test]
+  fn a_later_paragraph_of_a_loose_item_starts_its_own_row() {
+    let md = parse("- a\n\n  b\n- c");
+    let a = md.tokens.iter().position(|t| t.text() == "a").unwrap();
+    let b = md.tokens.iter().position(|t| t.text() == "b").unwrap();
+    assert!(md.tokens[a + 1..b].iter().any(Token::is_newline), "{:?}", md.tokens);
+    // The empty marker before `b` sets the x of its row to the x of the item text.
+    assert!(matches!(&md.tokens[b - 1], Token::ListMarker { marker, indent_level: 1 } if marker.is_empty()));
+  }
+
+  #[test]
+  fn a_paragraph_after_a_nested_list_stays_in_its_item() {
+    let md = parse("- a\n  - inner\n\n  after\n- b");
+    let after = md.tokens.iter().position(|t| t.text() == "after").unwrap();
+    assert!(matches!(&md.tokens[after - 1], Token::ListMarker { marker, indent_level: 1 } if marker.is_empty()));
+  }
+
+  #[test]
+  fn a_code_block_in_an_item_starts_its_own_row() {
+    let md = parse("- item\n\n  ```\n  code\n  ```\n- next");
+    let code = md.tokens.iter().position(|t| matches!(t, Token::CodeBlock { .. })).unwrap();
+    assert!(md.tokens[code - 1].is_newline(), "{:?}", md.tokens);
   }
 
   #[test]

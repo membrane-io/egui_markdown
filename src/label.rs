@@ -24,7 +24,7 @@ use crate::paint;
 use crate::parser;
 use crate::style::MarkdownStyle;
 use crate::table;
-use crate::types::{Markdown, Token};
+use crate::types::Token;
 
 #[cfg(feature = "syntax_highlighting")]
 pub use crate::theme::default_code_theme;
@@ -596,8 +596,7 @@ impl<'a> MarkdownLabel<'a> {
         let tokens = Arc::clone(&cached.tokens);
 
         let Some(layout) = cached.layout.clone() else {
-          let md = Markdown { s: text, tokens: (*tokens).clone() };
-          self.render_segmented(ui, &md, &font, color, style, text_hash, out);
+          self.render_segmented(ui, &tokens, &font, color, style, text_hash, out);
           return;
         };
 
@@ -629,7 +628,7 @@ impl<'a> MarkdownLabel<'a> {
       ui.data_mut(|d| {
         d.insert_temp(cache_id, CachedMarkdownLayout { text_hash, layout: None, tokens: owned_tokens });
       });
-      self.render_segmented(ui, &md, &font, color, style, text_hash, out);
+      self.render_segmented(ui, &md.tokens, &font, color, style, text_hash, out);
       return;
     }
 
@@ -678,14 +677,14 @@ impl<'a> MarkdownLabel<'a> {
   fn render_segmented(
     &self,
     ui: &mut Ui,
-    md: &Markdown<'_>,
+    tokens: &[Token<'_>],
     font: &FontId,
     color: Color32,
     style: &MarkdownStyle,
     text_hash: u64,
     out: &mut MarkdownLabelOutput,
   ) {
-    self.render_token_range(ui, md, font, color, 0, md.tokens.len(), style, text_hash, out);
+    self.render_token_range(ui, tokens, font, color, 0, tokens.len(), style, text_hash, out);
   }
 
   /// Recursively render a range of tokens, handling blockquotes and tables as sub-regions.
@@ -693,7 +692,7 @@ impl<'a> MarkdownLabel<'a> {
   fn render_token_range(
     &self,
     ui: &mut Ui,
-    md: &Markdown<'_>,
+    tokens: &[Token<'_>],
     font: &FontId,
     color: Color32,
     start: usize,
@@ -716,7 +715,7 @@ impl<'a> MarkdownLabel<'a> {
     // but only when more content follows, mirroring `before_block`, so a trailing block
     // doesn't leave a spacing gap at the bottom.
     let after_block = |i: &mut usize, text_start: &mut usize, end: usize, ui: &mut Ui| {
-      while *text_start < end && matches!(md.tokens[*text_start], Token::Newline) {
+      while *text_start < end && matches!(tokens[*text_start], Token::Newline) {
         *text_start += 1;
         *i += 1;
       }
@@ -726,10 +725,10 @@ impl<'a> MarkdownLabel<'a> {
     };
 
     while i < end {
-      match &md.tokens[i] {
+      match &tokens[i] {
         Token::Table(data) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
@@ -756,7 +755,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::CodeBlock { text, language } if self.scroll_code_blocks => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
@@ -785,7 +784,7 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(feature = "images")]
         Token::Image { url, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
@@ -804,7 +803,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         #[cfg(not(feature = "images"))]
         Token::Image { alt, url, .. } => {
-          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
             i += 1;
@@ -823,21 +822,21 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::Link { text, href, .. } if self.link_handler.is_some_and(|h| h.is_block_widget(href)) => {
-          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
           let handler = self.link_handler.unwrap();
           handler.block_widget(ui, text, href);
           i += 1;
           text_start = i;
         }
         Token::BlockquoteStart => {
-          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
 
           // Find the matching BlockquoteEnd.
           let bq_start = i + 1;
           let mut depth = 1u32;
           let mut j = bq_start;
           while j < end && depth > 0 {
-            match &md.tokens[j] {
+            match &tokens[j] {
               Token::BlockquoteStart => depth += 1,
               Token::BlockquoteEnd => depth -= 1,
               _ => {}
@@ -850,7 +849,7 @@ impl<'a> MarkdownLabel<'a> {
 
           // Skip leading newlines inside the blockquote.
           let mut bq_content_start = bq_start;
-          while bq_content_start < bq_end && matches!(md.tokens[bq_content_start], Token::Newline) {
+          while bq_content_start < bq_end && matches!(tokens[bq_content_start], Token::Newline) {
             bq_content_start += 1;
           }
 
@@ -859,7 +858,7 @@ impl<'a> MarkdownLabel<'a> {
           child_rect.min.x += indent;
 
           let mut child_ui = ui.new_child(UiBuilder::new().id_salt(self.id.with(("bq", i))).max_rect(child_rect));
-          self.render_token_range(&mut child_ui, md, font, color, bq_content_start, bq_end, style, text_hash, out);
+          self.render_token_range(&mut child_ui, tokens, font, color, bq_content_start, bq_end, style, text_hash, out);
 
           let bq_stroke =
             Stroke::new(style.blockquote.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
@@ -877,7 +876,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::BlockquoteEnd => {
-          self.flush_text_range(ui, md, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
           i += 1;
           text_start = i;
         }
@@ -888,7 +887,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     // Flush remaining text.
-    self.flush_text_range(ui, md, font, color, text_start, end, style, out);
+    self.flush_text_range(ui, tokens, font, color, text_start, end, style, out);
   }
 
   /// Render a range of non-break tokens as an interactive galley.
@@ -896,7 +895,7 @@ impl<'a> MarkdownLabel<'a> {
   fn flush_text_range(
     &self,
     ui: &mut Ui,
-    md: &Markdown<'_>,
+    tokens: &[Token<'_>],
     font: &FontId,
     color: Color32,
     start: usize,
@@ -908,22 +907,21 @@ impl<'a> MarkdownLabel<'a> {
       return;
     }
     // Skip if only newlines.
-    if md.tokens[start..end].iter().all(|t| matches!(t, Token::Newline | Token::BlockquoteStart | Token::BlockquoteEnd))
-    {
+    if tokens[start..end].iter().all(|t| matches!(t, Token::Newline | Token::BlockquoteStart | Token::BlockquoteEnd)) {
       return;
     }
 
     // Trim trailing newlines; spacing between blocks is handled by render_token_range.
     let mut trimmed_end = end;
-    while trimmed_end > start && matches!(md.tokens[trimmed_end - 1], Token::Newline) {
+    while trimmed_end > start && matches!(tokens[trimmed_end - 1], Token::Newline) {
       trimmed_end -= 1;
     }
     if trimmed_end <= start {
       return;
     }
 
-    let token_slice = &md.tokens[start..trimmed_end];
-    let apply_map_job = end == md.tokens.len();
+    let token_slice = &tokens[start..trimmed_end];
+    let apply_map_job = end == tokens.len();
     let wrap = self.resolve_wrap(ui);
     let max_width = wrap.max_width;
     let dark_mode = ui.visuals().dark_mode;
