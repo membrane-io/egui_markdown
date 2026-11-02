@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller that uses `show` as the last expression of a closure that returns `()` must add a `;`.
 - **Breaking:** `Token::Link` has a `style: TokenStyle` field, the inline style around the link. A
   pattern that names every field of `Token::Link` must add `style` or `..`.
+- Holding Shift no longer turns off text selection, so a shift-click extends the selection, as it
+  does on `egui::Label`. The selection also stays painted while Shift is down. An app that used
+  Shift for something else can pass `.selectable(!ui.input(|i| i.modifiers.shift))`.
 - **Breaking:** the crates need Rust 1.95, which egui 0.36 needs. `rust-version` said 1.80.
 - `heal()` removes a last line that holds only block markers, such as `-` or `1.`, and a run of
   inline markers at the end, such as `**`. It also removes the URL of an open link, so the link

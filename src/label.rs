@@ -363,6 +363,9 @@ impl<'a> MarkdownLabel<'a> {
   }
 
   /// Enable or disable text selection. Default: `true`.
+  ///
+  /// As on [`egui::Label`], a shift-click extends the current selection. An app that gives Shift
+  /// another meaning can pass `!ui.input(|i| i.modifiers.shift)` here.
   pub fn selectable(self, selectable: bool) -> Self {
     Self { selectable, ..self }
   }
@@ -1072,8 +1075,7 @@ impl<'a> MarkdownLabel<'a> {
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
     paint_decorations(ui, hr_positions, &galley, &code_block_rects, response.rect.min, decoration_width, style);
 
-    let disable_text_selection = !self.selectable || ui.input(|input| input.modifiers.shift);
-    if !disable_text_selection {
+    if self.selectable {
       LabelSelectionState::label_text_selection(ui, &response, rect.min, galley.clone(), color, Stroke::NONE);
     } else {
       ui.painter().galley(rect.min, galley.clone(), color);
