@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A link shows its title, such as `"Docs"` in `[text](url "Docs")`, as a tooltip when the
   `LinkHandler` gives no hover text.
 - `LinkStyle` derives `Clone`, `Copy`, `Debug`, `PartialEq` and `Eq`.
-- A `render_steady_state_long` benchmark, on a document of 500 sections.
+- `render_steady_state_long` and `render_streaming_long` benchmarks, on a document of 500 sections.
 
 ### Changed
 
@@ -89,6 +89,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tall. It now has one blank row on each side, as between two paragraphs, and its row is
   `HorizontalRuleStyle::height` tall.
 - The segmented render path no longer copies every token of the document on each cached frame.
+- A frame with unchanged text no longer hashes the tokens of every text segment. On a document of 500
+  sections, a steady frame costs about 89us, down from 162us.
+- A block's cached height is now keyed by the block itself, so a block outside the view stays culled
+  while text streams in elsewhere in the document.
+- `MarkdownLabel::calculate_size` now heals the text when `heal` is on, and counts tables,
+  blockquotes, images and scrolling code blocks. It measures by running the render of `show` in an
+  invisible child `Ui`, so its width is the available width unless `hug_content` is on.
+- `MarkdownLabel::layout_in_ui` now heals the text when `heal` is on. Its docs say that the galley holds
+  text only.
 - The published package now includes the streaming test fixtures, and `egui_markdown_style` ships
   its license files.
 

@@ -150,11 +150,20 @@ both values to match. This is the counterpart to the layout keys above, which le
 width out.
 
 This reduces the layout and paint work per frame from O(document) to O(visible area).
-Two costs remain O(document). Each frame hashes the tokens of every text segment, including
-the segments it culls, to find its cache entry. And a block's cached height is keyed by the
-hash of the whole document, so while text streams in, no block is culled.
 
-**Files:** `label.rs` (flush_text_range size cache, render_token_range block size caches)
+Each text segment's cache entry also holds a cheap key: the hash of the whole document with the
+segment's range. While the document is unchanged, a matching key gives the segment's content
+hash without hashing its tokens again. A block's cached height is keyed by the hash of its own
+token, so a table above a reply that streams in stays culled while the text below it changes.
+
+A frame with unchanged text therefore hashes the text once and walks the token list, and does
+no other work for the segments it culls. A frame with changed text parses the whole document
+again, because pulldown-cmark has no incremental parse. On a 37 KB document the parse takes
+about 400us of an 800us streamed frame. Parsing only the changed tail would remove most of
+that.
+
+**Files:** `label.rs` (flush_text_range size cache, flush_fast_key, render_token_range block size
+caches, BlockHeight, hash_block)
 
 ## Segmented rendering
 

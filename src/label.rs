@@ -43,6 +43,9 @@ struct CachedMarkdownLayout {
 /// Cached layout result for a single flush range (used by segmented render path).
 #[derive(Clone)]
 struct CachedFlushRange {
+  /// [`flush_fast_key`] of the frame that last used this entry. While the document is the same, the range
+  /// is the same, so a matching key skips hashing the tokens of the range.
+  fast_key: u64,
   ctx_hash: u64,
   layout: Arc<LayoutResult>,
   tokens: Arc<Vec<Token<'static>>>,
@@ -94,6 +97,27 @@ fn hash_flush_context(
   hasher.finish()
 }
 
+/// A cheap key for a flush range: the hash of the whole document, which already covers the style and the
+/// link handler, with the range and the inputs that the document hash leaves out. Equal keys mean equal
+/// ranges, so a match skips [`hash_flush_context`], which hashes every token of the range.
+#[inline]
+fn flush_fast_key(text_hash: u64, start: usize, end: usize, font: &FontId, color: Color32, dark_mode: bool) -> u64 {
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  (text_hash, start, end, font, color, dark_mode).hash(&mut hasher);
+  hasher.finish()
+}
+
+/// Identity of everything a block's height depends on, except the width: the block token, the style
+/// and the font. It does not change when text elsewhere in the document does.
+#[inline]
+fn hash_block(token: &Token<'_>, style: &MarkdownStyle, font: &FontId) -> u64 {
+  let mut hasher = std::collections::hash_map::DefaultHasher::new();
+  token.hash(&mut hasher);
+  style.hash(&mut hasher);
+  font.hash(&mut hasher);
+  hasher.finish()
+}
+
 /// Identity of everything a scrolling code-block galley depends on except the source text.
 #[cfg(feature = "syntax_highlighting")]
 #[inline]
@@ -134,15 +158,36 @@ fn hash_code_block_context(
   hasher.finish()
 }
 
+/// The measured height of a block, and the keys it is valid for.
+#[derive(Clone, Copy)]
+struct BlockHeight {
+  /// The hash of the document when the block was last measured or culled. A match skips `block_hash`.
+  text_hash: u64,
+  /// [`hash_block`] of the block. A match keeps the height valid while text elsewhere changes, as it does
+  /// on every delta of a streamed reply.
+  block_hash: u64,
+  height: f32,
+}
+
+/// The cached height of the block at `block_sz_id`, when it is still valid.
+fn cached_block_height(ui: &Ui, block_sz_id: Id, text_hash: u64, block_hash: impl FnOnce() -> u64) -> Option<f32> {
+  let cached = ui.data(|d| d.get_temp::<BlockHeight>(block_sz_id))?;
+  if cached.text_hash == text_hash {
+    return Some(cached.height);
+  }
+  let block_hash = block_hash();
+  (cached.block_hash == block_hash).then(|| {
+    ui.data_mut(|d| d.insert_temp(block_sz_id, BlockHeight { text_hash, ..cached }));
+    cached.height
+  })
+}
+
 /// Reserve space for an off-screen block using cached height and current available width.
 /// Width is not cached so a panel shrink cannot leave a stale wider min-size.
-fn try_cull_block(ui: &mut Ui, block_sz_id: Id, text_hash: u64) -> bool {
-  let Some((cached_hash, cached_height)) = ui.data(|d| d.get_temp::<(u64, f32)>(block_sz_id)) else {
+fn try_cull_block(ui: &mut Ui, block_sz_id: Id, text_hash: u64, block_hash: impl FnOnce() -> u64) -> bool {
+  let Some(cached_height) = cached_block_height(ui, block_sz_id, text_hash, block_hash) else {
     return false;
   };
-  if cached_hash != text_hash {
-    return false;
-  }
   let size = Vec2::new(ui.available_width(), cached_height);
   let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, size);
   if ui.is_rect_visible(est_rect) {
@@ -152,9 +197,14 @@ fn try_cull_block(ui: &mut Ui, block_sz_id: Id, text_hash: u64) -> bool {
   true
 }
 
-fn cache_block_height(ui: &mut Ui, block_sz_id: Id, text_hash: u64, before_y: f32) {
+fn cache_block_height(ui: &mut Ui, block_sz_id: Id, text_hash: u64, block_hash: impl FnOnce() -> u64, before_y: f32) {
   let height = ui.min_rect().bottom() - before_y;
-  ui.data_mut(|d| d.insert_temp(block_sz_id, (text_hash, height)));
+  let cached = ui.data(|d| d.get_temp::<BlockHeight>(block_sz_id));
+  let block_hash = match cached {
+    Some(cached) if cached.text_hash == text_hash => cached.block_hash,
+    _ => block_hash(),
+  };
+  ui.data_mut(|d| d.insert_temp(block_sz_id, BlockHeight { text_hash, block_hash, height }));
 }
 
 /// Convert borrowed tokens to owned ('static) by converting CowStr::Borrowed to Boxed.
@@ -510,38 +560,34 @@ impl<'a> MarkdownLabel<'a> {
     out
   }
 
-  /// Calculate the rendered size without painting.
+  /// The size that [`Self::show`] would allocate, measured without painting or interaction.
+  ///
+  /// This runs the same render as [`Self::show`] in an invisible child [`Ui`], so it counts tables,
+  /// blockquotes, images and scrolling code blocks, and it heals the text when [`Self::heal`] is on.
+  /// The two calls share their caches, so a `show` after a `calculate_size` in the same frame costs
+  /// little. Unless [`Self::hug_content`] is on, the width is the available width, as `show` claims it.
   pub fn calculate_size(&self, ui: &mut Ui) -> Vec2 {
-    let context_style = egui_markdown_style::global_style(ui.ctx());
-    let style = self.style.unwrap_or(context_style.as_ref());
-    let color = ui.visuals().text_color();
-    let md = parser::parse(self.text);
-    let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
-    let code_theme = self.code_theme_arg();
-    let wrap = self.resolve_wrap(ui);
-    let result = build_layout(
-      ui,
-      &md.tokens,
-      font,
-      color,
-      wrap.max_rows,
-      wrap.max_width,
-      wrap.break_anywhere,
-      self.link_handler,
-      false,
-      style,
-      code_theme,
-    );
-    let galley = ui.fonts_mut(|f| f.layout_job(result.job));
-    galley.size()
+    let measure_id = self.id.with("calculate_size");
+    let mut out =
+      MarkdownLabelOutput { response: ui.interact(Rect::NOTHING, measure_id, Sense::hover()), link_clicked: false };
+    let builder = UiBuilder::new().id_salt(measure_id).max_rect(ui.available_rect_before_wrap()).invisible();
+    let mut child = ui.new_child(builder);
+    self.render(&mut child, &mut out);
+    child.min_rect().size()
   }
 
-  /// Layout the markdown and return the galley position, galley, and response.
+  /// Lay out the text of the markdown as one galley, allocate its size, and return the galley position,
+  /// the galley, and the response. The caller paints the galley.
+  ///
+  /// The galley holds text only. A table, an image, a block widget and a scrolling code block have no
+  /// text to lay out, so they are left out, and a blockquote shows its text without its bar. Use
+  /// [`Self::show`] to render those. The text is healed when [`Self::heal`] is on.
   pub fn layout_in_ui(self, ui: &mut Ui) -> (Pos2, Arc<Galley>, Response) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
     let style = self.style.unwrap_or(context_style.as_ref());
     let color = ui.visuals().text_color();
-    let md = parser::parse(self.text);
+    let text = if self.heal { parser::heal(self.text) } else { std::borrow::Cow::Borrowed(self.text) };
+    let md = parser::parse(&text);
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
     let code_theme = self.code_theme_arg();
     let wrap = self.resolve_wrap(ui);
@@ -576,7 +622,7 @@ impl<'a> MarkdownLabel<'a> {
     (galley_pos, galley, response)
   }
 
-  fn render(self, ui: &mut Ui, out: &mut MarkdownLabelOutput) {
+  fn render(&self, ui: &mut Ui, out: &mut MarkdownLabelOutput) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
     let style = self.style.unwrap_or(context_style.as_ref());
     let color = ui.visuals().text_color();
@@ -733,10 +779,10 @@ impl<'a> MarkdownLabel<'a> {
       match &tokens[i] {
         Token::Table(data) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, text_hash) {
+          if try_cull_block(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -753,17 +799,17 @@ impl<'a> MarkdownLabel<'a> {
             &style.table,
             self.link_handler,
           );
-          cache_block_height(ui, block_sz_id, text_hash, before_y);
+          cache_block_height(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::CodeBlock { text, language } if self.scroll_code_blocks => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, text_hash) {
+          if try_cull_block(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -781,7 +827,7 @@ impl<'a> MarkdownLabel<'a> {
             style,
             self.code_theme_arg(),
           );
-          cache_block_height(ui, block_sz_id, text_hash, before_y);
+          cache_block_height(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
@@ -789,10 +835,10 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(feature = "images")]
         Token::Image { url, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, text_hash) {
+          if try_cull_block(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -801,7 +847,7 @@ impl<'a> MarkdownLabel<'a> {
           let before_y = ui.available_rect_before_wrap().min.y;
           let image = egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true);
           ui.add(image);
-          cache_block_height(ui, block_sz_id, text_hash, before_y);
+          cache_block_height(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
@@ -809,10 +855,10 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(not(feature = "images"))]
         Token::Image { alt, url, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, text_hash) {
+          if try_cull_block(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -823,14 +869,14 @@ impl<'a> MarkdownLabel<'a> {
           if ui.link(text).clicked() {
             ui.ctx().open_url(OpenUrl::new_tab(url.to_string()));
           }
-          cache_block_height(ui, block_sz_id, text_hash, before_y);
+          cache_block_height(ui, block_sz_id, text_hash, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::Link { text, href, .. } if self.link_handler.is_some_and(|h| h.is_block_widget(href)) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
           before_block(had_content, ui);
           let handler = self.link_handler.unwrap();
           handler.block_widget(ui, text, href);
@@ -840,7 +886,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::BlockquoteStart => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
           before_block(had_content, ui);
 
           // Find the matching BlockquoteEnd.
@@ -888,7 +934,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::BlockquoteEnd => {
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, text_hash, out);
           i += 1;
           text_start = i;
         }
@@ -899,7 +945,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     // Flush remaining text.
-    self.flush_text_range(ui, tokens, font, color, text_start, end, style, out);
+    self.flush_text_range(ui, tokens, font, color, text_start, end, style, text_hash, out);
   }
 
   /// Render a range of non-break tokens as an interactive galley.
@@ -913,6 +959,7 @@ impl<'a> MarkdownLabel<'a> {
     start: usize,
     end: usize,
     style: &MarkdownStyle,
+    text_hash: u64,
     out: &mut MarkdownLabelOutput,
   ) {
     if start >= end {
@@ -937,9 +984,16 @@ impl<'a> MarkdownLabel<'a> {
     let wrap = self.resolve_wrap(ui);
     let max_width = wrap.max_width;
     let dark_mode = ui.visuals().dark_mode;
-    let ctx_hash = hash_flush_context(token_slice, style, font, color, dark_mode, self.link_handler);
     let cache_id = self.id.with(("flush", start));
     let size_cache_id = self.id.with(("flush_sz", start));
+    // While the document is unchanged, the cached entry knows the hash of its tokens, and hashing them
+    // again on every frame would make each frame cost O(document).
+    let fast_key = flush_fast_key(text_hash, start, trimmed_end, font, color, dark_mode);
+    let cached = ui.data(|d| d.get_temp::<CachedFlushRange>(cache_id));
+    let ctx_hash = match &cached {
+      Some(cached) if cached.fast_key == fast_key => cached.ctx_hash,
+      _ => hash_flush_context(token_slice, style, font, color, dark_mode, self.link_handler),
+    };
 
     // Viewport culling: skip layout+paint for off-screen segments. Unlike the layout, a
     // measured size is only valid at the width it was measured at.
@@ -953,8 +1007,11 @@ impl<'a> MarkdownLabel<'a> {
       }
     }
 
-    if let Some(cached) = ui.data(|d| d.get_temp::<CachedFlushRange>(cache_id)) {
+    if let Some(cached) = cached {
       if cached.ctx_hash == ctx_hash {
+        if cached.fast_key != fast_key {
+          ui.data_mut(|d| d.insert_temp(cache_id, CachedFlushRange { fast_key, ..cached.clone() }));
+        }
         let size = self.render_galley(
           ui,
           &cached.tokens,
@@ -993,7 +1050,10 @@ impl<'a> MarkdownLabel<'a> {
     let owned = Arc::new(tokens_to_owned(token_slice));
     let layout = Arc::new(layout);
     ui.data_mut(|d| {
-      d.insert_temp(cache_id, CachedFlushRange { ctx_hash, layout: Arc::clone(&layout), tokens: Arc::clone(&owned) })
+      d.insert_temp(
+        cache_id,
+        CachedFlushRange { fast_key, ctx_hash, layout: Arc::clone(&layout), tokens: Arc::clone(&owned) },
+      )
     });
     let size = self.render_galley(
       ui,
@@ -1064,7 +1124,8 @@ impl<'a> MarkdownLabel<'a> {
     }
     let decoration_width = if self.hug_content { size.x } else { available_width };
 
-    if !self.interactable {
+    // An invisible Ui, such as the one calculate_size measures in, gets no hover, click or selection.
+    if !self.interactable || !ui.is_visible() {
       let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
       out.response = out.response.union(response);
       paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
@@ -1488,4 +1549,27 @@ pub fn glyph_at_index(galley: &Galley, index: u32) -> Option<(&Glyph, u32)> {
 /// Helpful to avoid painting underlines for trailing whitespace.
 pub fn last_non_whitespace_glyph(row: &Row) -> Option<&Glyph> {
   row.glyphs.iter().rfind(|glyph| !glyph.chr.is_whitespace())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// A block's cached height stays valid while text elsewhere in the document changes, as it does on
+  /// every delta of a streamed reply, so the block stays culled. A change to the block itself drops it.
+  #[test]
+  fn a_block_height_outlives_changes_elsewhere_in_the_document() {
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let id = Id::new("block");
+      ui.data_mut(|d| d.insert_temp(id, BlockHeight { text_hash: 1, block_hash: 10, height: 42.0 }));
+
+      assert_eq!(cached_block_height(ui, id, 1, || panic!("a matching document needs no block hash")), Some(42.0));
+      assert_eq!(cached_block_height(ui, id, 2, || 10), Some(42.0), "the block did not change");
+      assert_eq!(cached_block_height(ui, id, 2, || panic!("the entry now records document 2")), Some(42.0));
+      assert_eq!(cached_block_height(ui, id, 3, || 11), None, "the block changed");
+      checked = true;
+    });
+    assert!(checked);
+  }
 }

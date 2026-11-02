@@ -143,6 +143,29 @@ fn bench_render(c: &mut Criterion) {
   }
   c.bench_function("render_steady_state_long", |b| b.iter(|| long_frame(&ctx)));
 
+  // The long document while a reply streams onto its end: the text changes on every frame, and
+  // the blocks above the end do not.
+  let streaming_frame = |ctx: &Context, text: &str| {
+    let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 700.0));
+    let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      MarkdownLabel::new(Id::new("md"), black_box(text)).show(&mut child);
+    });
+  };
+  // The streamed paragraph grows to 200 words and then starts again, so one paragraph does not grow
+  // without bound over the iterations of the benchmark.
+  let ctx = Context::default();
+  let mut words = 0usize;
+  let mut streamed = |ctx: &Context| {
+    words = (words + 1) % 200;
+    let text = format!("{long_doc}{}", "word ".repeat(words));
+    streaming_frame(ctx, &text);
+  };
+  for _ in 0..10 {
+    streamed(&ctx);
+  }
+  c.bench_function("render_streaming_long", |b| b.iter(|| streamed(&ctx)));
+
   let ctx = Context::default();
   let mut width = 600.0f32;
   c.bench_function("render_resizing", |b| {
