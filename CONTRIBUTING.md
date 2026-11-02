@@ -3,12 +3,12 @@
 ## Get started
 
 1. Clone the repository.
-2. Run `cargo check` to verify your setup.
-3. Run `cargo run --example simple` to see the library render a document.
+2. Install Rust 1.95 or later, which egui 0.36 requires (`rustup update stable`).
+3. Run `cargo check` to verify your setup.
+4. Run `cargo run --example simple` to see the library render a document.
 
 ## Code Style
 
-- Follow the conventions in the root `CLAUDE.md`.
 - All inline comments end with a period.
 - Doc comments (`///`) come before `#[allow(...)]` attributes.
 - No comment banners or section headers.
@@ -23,7 +23,9 @@ Run the local CI script:
 ./check.sh
 ```
 
-This runs `cargo fmt --check`, `cargo clippy` across all feature configurations, `cargo test`, and `cargo doc`.
+This runs `cargo fmt --check`, `cargo clippy` across the feature configurations, `cargo test`,
+`cargo doc`, and a wasm check. It covers every feature except `membrane`, which compiles only against
+[the Membrane egui fork](https://github.com/membrane-io/egui). CI checks `membrane` in a separate job.
 
 ## Pull Request Guidelines
 

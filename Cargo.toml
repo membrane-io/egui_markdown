@@ -6,7 +6,7 @@ resolver = "2"
 name = "egui_markdown"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 description = "A markdown parser and renderer for egui"
 repository = "https://github.com/iamseeley/egui_markdown"
@@ -14,7 +14,7 @@ homepage = "https://github.com/iamseeley/egui_markdown"
 documentation = "https://docs.rs/egui_markdown"
 categories = ["gui", "graphics"]
 keywords = ["egui", "markdown", "gui", "commonmark"]
-include = ["**/*.rs", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
+include = ["**/*.rs", "tests/fixtures/*.json", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
 
 [dependencies]
 egui = { version = "0.36", default-features = false }
