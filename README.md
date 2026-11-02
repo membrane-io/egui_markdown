@@ -11,6 +11,11 @@ It parses [CommonMark](https://commonmark.org/) markdown into a token stream. It
 renders that stream as one interactive egui widget, with selectable text, clickable links,
 syntax-highlighted code blocks, tables, images, blockquotes, and lists.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/simple-dark.png">
+  <img alt="The simple example: markdown source on the left, and the rendered output on the right" src="docs/screenshots/simple-light.png">
+</picture>
+
 ## Quick Start
 
 ```rust
@@ -156,6 +161,16 @@ if output.response.clicked() && !output.link_clicked {
 ```
 
 ## Examples
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/lower-dark.png">
+  <img alt="Code blocks, nested blockquotes, headings, a rule, an aligned table, and a footnote" src="docs/screenshots/lower-light.png" width="600">
+</picture>
+
+The `advanced` example adds custom link handlers, an inline badge widget, a block widget, code
+block buttons, and the style editor:
+
+![The advanced example, with its style editor open](docs/screenshots/advanced-dark.png)
 
 | Example | Description |
 |---------|-------------|
