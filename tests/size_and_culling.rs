@@ -77,3 +77,18 @@ fn calculate_size_paints_nothing() {
   });
   assert!(painted.is_empty(), "painted {painted:?}");
 }
+
+/// A caller can measure several labels under one id in a frame, as a row of chips that each measure
+/// their text does. The measures must not share widget ids, which egui reports as a clash.
+#[test]
+fn two_measures_under_one_id_do_not_clash() {
+  let ctx = Context::default();
+  let mut painted = Vec::new();
+  for _ in 0..2 {
+    painted = frame(&ctx, vec2(500.0, 800.0), |ui| {
+      MarkdownLabel::new(Id::NULL, WITH_BLOCKS).calculate_size(ui);
+      MarkdownLabel::new(Id::NULL, "| x | y |\n|---|---|\n| a much longer cell | 2 |").calculate_size(ui);
+    });
+  }
+  assert!(!painted.iter().any(|t| t.contains("🔥")), "egui reported an id clash: {painted:?}");
+}
