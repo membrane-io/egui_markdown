@@ -94,11 +94,10 @@ Ordered list:
 
 ### Task Lists
 
-- [x] Parser extraction
-- [x] Renderer extraction
-- [x] Strikethrough support
-- [ ] Table rendering
-- [ ] Image support
+- [x] Parse CommonMark and GFM
+- [x] Render tables and code blocks
+- [x] Heal streamed text
+- [ ] Render math
 
 ### Code Blocks
 
@@ -141,8 +140,8 @@ Below the rule.
 | Bold | Done | Works well |
 | Italic | Done | Works well |
 | Code blocks | Done | With syntax highlighting |
-| Tables | WIP | Basic support |
-| Images | Planned | Behind feature flag |
+| Tables | Done | With alignment |
+| Images | Done | Behind the `images` feature |
 
 ### Footnotes
 

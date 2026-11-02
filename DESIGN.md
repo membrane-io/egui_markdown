@@ -9,29 +9,42 @@ documentation, in immediate-mode egui at 60 frames per second.
 domain-specific links as interactive widgets. A documentation viewer can navigate
 internally. The markdown renderer must not hardcode these behaviors.
 
-**Solution:** The `LinkHandler` trait lets consumers customize links at three levels.
-Layout applies them in this order:
+**Solution:** The `LinkHandler` trait lets consumers customize links at four levels.
+Layout applies them in this order, and the first one that applies wins:
 
-1. **`is_widget_link(href)` -> `render_link(ui, text, href)`** - Promote a link to a
+1. **`is_block_widget(href)` -> `block_widget(ui, text, href)`** - Promote a link to a
    standalone widget. The link becomes a segment break. The renderer flushes the text
    before the link as a galley. The handler then draws any egui widget it wants, such as
-   a button, a custom view, or an embedded preview. The text after the link starts a new
-   galley. The handler receives the `Ui` and returns a `Response`.
+   a card or an embedded preview. The text after the link starts a new galley. The
+   handler receives the `Ui` and returns a `Response`.
 
-2. **`layout_link(text, href, job, font, color)`** - Customize inline styling. The
+2. **`inline_widget_size(href, font)` -> `paint_inline_widget(ui, text, href, font, rect)`** -
+   Reserve space inside the text and paint a widget over it, such as a mention or a
+   status badge. The size sets the row height. `layout_link` emits the placeholder text
+   that sets the width, or the renderer emits the link text in a transparent color. After
+   the galley is placed, the renderer calls `paint_inline_widget` once for each row the
+   placeholder spans.
+
+3. **`layout_link(ui, text, href, job, font, color)`** - Customize inline styling. The
    handler appends sections to the `LayoutJob` directly (icons, colored segments,
    backgrounds). The renderer maps every appended section to the token of this link, so
    that hover and click continue to work. Returns true if the handler styled the link.
 
-3. **`link_style(href)`** - Simple color and underline override. Returns `None` for
-   default hyperlink styling.
+4. **`link_style(href)`** - A color override, and whether the link shows an underline on
+   hover. Returns `None` for default hyperlink styling.
+
+A link takes the size, weight and slant of the text around it, so a link inside a heading
+has the size of the heading.
 
 At interaction time:
 
-- **Hover:** `link_style()` gives the underline color. The cursor changes to a pointing hand.
-- **Click:** `on_click(text, href, ui)` is called. Return true if the handler used the
-  click, false to open the URL in the browser.
-- **Cache:** `cache_key()` returns a u64 that the layout hash includes. When the behavior
+- **Hover:** the cursor changes to a pointing hand, and the link gets an underline in the
+  `link_style()` color unless `link_style()` turns the underline off. The tooltip is
+  `hover_text(href)`, then the link title, then the href when `url_in_tooltip` is set.
+- **Click:** `click(text, href, ui)` is called. Return true if the handler used the
+  click, false to open the URL in the browser. A link with an empty href, which heal
+  produces until the URL arrives, opens nothing.
+- **Cache:** `id()` returns a u64 that the layout hash includes. When the behavior
   of the handler changes, for example in a different app context, change the key to
   invalidate the cached layouts.
 
@@ -56,7 +69,7 @@ unchanged content. Scrolling code blocks also add syntect highlighting.
 1. **Full-document cache** (`CachedMarkdownLayout`): Holds the parse and layout result
    for the whole markdown string. The key is a hash of the text content, the style, and
    the cache key of the link handler. On a cache hit, the widget parses nothing and lays
-   out nothing. The segmented path handles tables, scrolling code blocks, blockquotes,
+   out nothing, and it borrows the cached tokens rather than copying them. The segmented path handles tables, scrolling code blocks, blockquotes,
    and similar elements. When the document needs that path, the entry holds `None` in
    its `layout` field and keeps only the tokens.
 
@@ -136,9 +149,54 @@ cache therefore stores the width it measured at together with the hash, and a hi
 both values to match. This is the counterpart to the layout keys above, which leave the
 width out.
 
-This reduces the work per frame from O(document) to O(visible area).
+This reduces the layout and paint work per frame from O(document) to O(visible area).
 
-**Files:** `label.rs` (flush_text_range size cache, render_token_range block size caches)
+A culled segment or block must still know that its cached size is valid, and a hash of its
+tokens on every frame would cost O(document). So each cache entry records the parse generation
+it was last used in, from the incremental parse below. An entry is valid without a hash when no
+parse ran since, or when the new parse kept the entry's tokens from the parse it was last used
+in. A frame key, a hash of the style, the link handler, the font, the color and the theme,
+guards against a change that is not in the text. When neither holds, the label hashes the
+tokens and compares, as before.
+
+A frame with unchanged text therefore hashes the text once and walks the token list. A frame
+of a streamed reply also parses only the end of the text, and hashes only the segments in it.
+
+**Files:** `label.rs` (flush_text_range size cache, Revision, frame_key, render_token_range block
+size caches, BlockHeight, hash_block)
+
+## Incremental parse
+
+**Problem:** A streamed reply changes on every frame, and a parse of the whole document costs
+O(document). On a 37 KB document, the parse took about 400us of an 800us frame.
+
+**Solution:** A document can be cut at a resume point, where the parse can start again with no
+state from the text before it. A resume point is a line that starts in the first column, after
+a blank line, outside a code fence, and that starts neither a list item nor a quote. Every block
+before it is closed there, because a list or a quote does not continue past a blank line into
+an unindented line. And no text after it changes a token before it.
+
+`ParseState` holds the owned tokens of a parse, the last resume point, the index of its first
+token, and the text up to the end of its line. When the next text starts with that text, the
+parse keeps the tokens before the index and parses only from the resume point. The last two
+kept tokens seed the token list, because they decide the breaks before the next block. The
+label takes the cache entry out of egui memory before the parse, so its tokens have one owner
+and the parse truncates and extends them without a copy.
+
+Two kinds of line can change text before them, and a text that holds either one is parsed
+whole. A link reference definition, such as `[a]: url`, makes a `[a]` anywhere into a link. An
+HTML block that starts with `<!--` or `<pre` runs past blank lines. The scan treats every line
+that starts with `[` and holds `]:`, and every line that starts with `<`, as one of these.
+
+Heal uses the same point. Heal changes only the text after the last blank line outside a fence,
+so the text before a resume point heals to itself, and a frame heals only the end of the text.
+
+`an_incremental_parse_matches_a_full_parse_at_every_prefix` streams the example documents, the
+streaming fixtures, and a document of edge cases one character at a time, with heal on and off,
+and checks every prefix against a full heal and parse.
+
+**Files:** `parser.rs` (ParseState, parse_tail, last_resume_point, starts_a_resumable_block),
+`label.rs` (render)
 
 ## Segmented rendering
 
@@ -187,6 +245,10 @@ or link makes pulldown-cmark treat all the text that follows as part of that con
 The renderer must close these constructs before it parses the text.
 
 **Solution:** `heal()` finds the unclosed constructs and appends the closing markers. It
+reads them as CommonMark does where that matters. A fence closes only with a run of its own
+character that is at least as long. An emphasis run opens only before a non-space character
+and closes only after one, so a `* ` bullet opens nothing. A blank line closes every inline
+construct. It
 returns `Cow::Borrowed` when the text needs no repair, which is the common case for
 complete markdown, and this avoids an allocation. Only incomplete input produces a
 `Cow::Owned` with a new string.

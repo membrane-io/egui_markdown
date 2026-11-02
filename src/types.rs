@@ -31,6 +31,8 @@ pub enum Token<'s> {
     href: CowStr<'s>,
     /// Optional hover title.
     title: Option<CowStr<'s>>,
+    /// The inline style around the link, such as the heading level of a link inside a heading.
+    style: TokenStyle,
   },
   /// List item bullet or number, such as `"• "` or `"1. "`.
   ListMarker {
@@ -142,10 +144,11 @@ impl<'s> Hash for Token<'s> {
         text.as_ref().hash(state);
         language.as_ref().map(|l| l.as_ref()).hash(state);
       }
-      Token::Link { text, href, title } => {
+      Token::Link { text, href, title, style } => {
         text.as_ref().hash(state);
         href.as_ref().hash(state);
         title.as_ref().map(|t| t.as_ref()).hash(state);
+        style.hash(state);
       }
       Token::ListMarker { marker, indent_level } => {
         marker.as_ref().hash(state);
@@ -210,6 +213,52 @@ impl<'s> Token<'s> {
   /// Returns `true` if this is a `ListMarker` token.
   pub fn is_list_marker(&self) -> bool {
     matches!(self, Token::ListMarker { .. })
+  }
+}
+
+/// Convert borrowed tokens to owned ('static) by converting CowStr::Borrowed to Boxed.
+pub(crate) fn tokens_to_owned(tokens: &[Token<'_>]) -> Vec<Token<'static>> {
+  tokens.iter().map(|t| token_to_owned(t)).collect()
+}
+
+fn cowstr_to_owned(s: &pulldown_cmark::CowStr<'_>) -> pulldown_cmark::CowStr<'static> {
+  pulldown_cmark::CowStr::Boxed(s.to_string().into_boxed_str())
+}
+
+fn token_to_owned(t: &Token<'_>) -> Token<'static> {
+  match t {
+    Token::Newline => Token::Newline,
+    Token::Text { text, style } => Token::Text { text: cowstr_to_owned(text), style: style.clone() },
+    Token::CodeBlock { text, language } => {
+      Token::CodeBlock { text: cowstr_to_owned(text), language: language.as_ref().map(|l| cowstr_to_owned(l)) }
+    }
+    Token::Link { text, href, title, style } => Token::Link {
+      text: cowstr_to_owned(text),
+      href: cowstr_to_owned(href),
+      title: title.as_ref().map(|t| cowstr_to_owned(t)),
+      style: style.clone(),
+    },
+    Token::ListMarker { marker, indent_level } => {
+      Token::ListMarker { marker: cowstr_to_owned(marker), indent_level: *indent_level }
+    }
+    Token::Image { alt, url, title } => Token::Image {
+      alt: cowstr_to_owned(alt),
+      url: cowstr_to_owned(url),
+      title: title.as_ref().map(|t| cowstr_to_owned(t)),
+    },
+    Token::Table(data) => Token::Table(TableData {
+      alignments: data.alignments.clone(),
+      headers: data.headers.iter().map(|row| tokens_to_owned(row)).collect(),
+      rows: data.rows.iter().map(|row| row.iter().map(|cell| tokens_to_owned(cell)).collect()).collect(),
+    }),
+    Token::HorizontalRule => Token::HorizontalRule,
+    Token::BlockquoteStart => Token::BlockquoteStart,
+    Token::BlockquoteEnd => Token::BlockquoteEnd,
+    Token::TaskListMarker { checked, indent_level } => {
+      Token::TaskListMarker { checked: *checked, indent_level: *indent_level }
+    }
+    Token::FootnoteRef { label } => Token::FootnoteRef { label: cowstr_to_owned(label) },
+    Token::FootnoteDef { label } => Token::FootnoteDef { label: cowstr_to_owned(label) },
   }
 }
 

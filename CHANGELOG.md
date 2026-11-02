@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TableStyle::cell_padding` (`[left, top, right, bottom]`) for the inset inside each cell.
 - Overflow chrome on tables: a matching stroke on the visible cut edge, and a
   light inner shadow when the table does not fit horizontally or vertically.
+- A link shows its title, such as `"Docs"` in `[text](url "Docs")`, as a tooltip when the
+  `LinkHandler` gives no hover text.
+- `LinkStyle` derives `Clone`, `Copy`, `Debug`, `PartialEq` and `Eq`.
+- `render_steady_state_long`, `render_streaming_long` and `render_streaming_long_healed` benchmarks, on a
+  document of 500 sections.
 
 ### Changed
 
@@ -32,6 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   union of the responses of the text, and `link_clicked` tells a click on a link from a click on
   other text. A parent widget that reacts to a click uses the two to ignore a link click. A
   caller that uses `show` as the last expression of a closure that returns `()` must add a `;`.
+- **Breaking:** `Token::Link` has a `style: TokenStyle` field, the inline style around the link. A
+  pattern that names every field of `Token::Link` must add `style` or `..`.
+- Holding Shift no longer turns off text selection, so a shift-click extends the selection, as it
+  does on `egui::Label`. The selection also stays painted while Shift is down. An app that used
+  Shift for something else can pass `.selectable(!ui.input(|i| i.modifiers.shift))`.
+- The default `MarkdownStyle::code_font_size` is `12.0`, the size of egui's default monospace text. It
+  was `10.0`, which was small beside egui's 12.5 point body text. An app that wants the old size sets
+  it.
+- **Breaking:** the crates need Rust 1.95, which egui 0.36 needs. `rust-version` said 1.80.
 - `heal()` removes a last line that holds only block markers, such as `-` or `1.`, and a run of
   inline markers at the end, such as `**`. It also removes the URL of an open link, so the link
   has an empty href until its `)` arrives. A click on a link with an empty href opens no URL.
@@ -49,6 +63,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the text. It previously behaved as wrap.
 - The label draws the link underline half way into the descent of the font. It previously drew
   the underline at the bottom of the row, so a tall line height put a gap under the text.
+- `heal()` treated every `*` as emphasis, so a streamed `* item` bullet, or `2 * 3`, showed a stray
+  `*`. An emphasis run now opens only before a non-space character and closes only after one, and a
+  blank line closes every inline construct.
+- `heal()` closed a `~~~` fence with a backtick fence, which showed as a line of code. It now closes
+  a fence with a run of the same character and length, and a backtick run inside a tilde fence stays
+  code.
+- `heal()` no longer cuts the `]` from a footnote reference at the end of the text, counts a table
+  header with an empty cell as one column short, or adds a table separator after a blank line.
+- The text of a link or an image kept only its last styled run, so `[**bold** and more](u)` showed
+  ` and more`. It now keeps every run.
+- A later paragraph of a loose list item ran into the first paragraph, and a code block inside an
+  item started on the row of the item text. Both now start a row of their own.
+- Inline code and links inside a heading now have the size of the heading, and inline code inside
+  bold text is bold.
+- `LinkStyle::underline` is now read. `false` turns off the hover underline.
+- A blockquote now gets block spacing above it, as it already did below it.
+- Inline code in a table cell had no space between its background and the next word. A cell that
+  holds a link also dropped the inline code background, italics and strikethrough of its other text,
+  and put item spacing between its words.
+- A block widget link now gets block spacing above and below it, and the text after it no longer starts
+  with a space.
+- A nested list starts its marker at the x of the text of the item above it. It was indented by the
+  width of two spaces, which left the nested text close to the parent's text.
+- A horizontal rule had two blank rows above it and two below it, and its own row was a full line
+  tall. It now has one blank row on each side, as between two paragraphs, and its row is
+  `HorizontalRuleStyle::height` tall.
+- The segmented render path no longer copies every token of the document on each cached frame.
+- A frame with unchanged text no longer hashes the tokens of every text segment. On a document of 500
+  sections, a steady frame costs about 89us, down from 162us.
+- A block's cached height is now keyed by the block itself, so a block outside the view stays culled
+  while text streams in elsewhere in the document.
+- A streamed reply is parsed and healed incrementally. When the new text starts with the text of the
+  last parse up to its last resume point, the label keeps the tokens before that point and parses and
+  heals only the text after it. Cached segments and blocks in the kept tokens skip their hash. On a
+  document of 500 sections, a streamed frame costs about 220us, down from 810us, or 945us with heal on.
+- `MarkdownLabel::calculate_size` now heals the text when `heal` is on, and counts tables,
+  blockquotes, images and scrolling code blocks. It measures by running the render of `show` in an
+  invisible child `Ui`. Its width is still the width of the content.
+- `MarkdownLabel::layout_in_ui` now heals the text when `heal` is on. Its docs say that the galley holds
+  text only.
+- The published package now includes the streaming test fixtures, and `egui_markdown_style` ships
+  its license files.
 
 ## [0.1.0] - 2026-03-23
 

@@ -14,10 +14,19 @@ struct ListInfo {
 
 fn trim_end_newlines<'s>(s: CowStr<'s>) -> CowStr<'s> {
   match s {
-    CowStr::Borrowed(s) => CowStr::Borrowed(s.trim_end_matches("\n")),
-    CowStr::Boxed(s) => CowStr::Boxed(s.trim_end_matches("\n").into()),
-    CowStr::Inlined(s) => CowStr::Inlined(s),
+    CowStr::Borrowed(s) => CowStr::Borrowed(s.trim_end_matches('\n')),
+    s if s.ends_with('\n') => CowStr::Boxed(s.trim_end_matches('\n').into()),
+    s => s,
   }
+}
+
+/// Add `text` to the end of the text in `slot`. A link or image holds one string, and pulldown-cmark
+/// gives its text as one event for each styled run, such as `a `, `b` and ` c` for ``[a `b` c](u)``.
+fn append_text<'s>(slot: &mut Option<CowStr<'s>>, text: CowStr<'s>) {
+  *slot = Some(match slot.take() {
+    None => text,
+    Some(before) => CowStr::Boxed(format!("{before}{text}").into_boxed_str()),
+  });
 }
 
 /// Auto-close unclosed markdown constructs for streaming/incomplete input.
@@ -42,7 +51,7 @@ fn trim_end_newlines<'s>(s: CowStr<'s>) -> CowStr<'s> {
 ///
 /// assert_eq!(heal("hello"), "hello");
 /// assert_eq!(heal("```rust\nlet x = 1;"), "```rust\nlet x = 1;\n```");
-/// assert_eq!(heal("~~~python\nprint()"), "~~~python\nprint()\n```");
+/// assert_eq!(heal("~~~python\nprint()"), "~~~python\nprint()\n~~~");
 /// assert_eq!(heal("**bold text"), "**bold text**");
 /// assert_eq!(heal("_italic"), "_italic_");
 /// assert_eq!(heal("[link text"), "[link text]()");
@@ -51,20 +60,18 @@ fn trim_end_newlines<'s>(s: CowStr<'s>) -> CowStr<'s> {
 /// assert_eq!(heal("\\*escaped"), "\\*escaped");
 /// ```
 pub fn heal(s: &str) -> Cow<'_, str> {
-  let mut in_fence = false;
+  let mut fence = None;
   for line in s.lines() {
-    let trimmed = line.trim();
-    if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-      in_fence = !in_fence;
-    }
+    fence = next_fence(fence, line);
   }
-  if in_fence {
-    let mut healed = String::with_capacity(s.len() + 4);
+  if let Some(fence) = fence {
+    // Only a run of the same character, at least as long as the opener, closes a fence.
+    let mut healed = String::with_capacity(s.len() + fence.len + 1);
     healed.push_str(s);
     if !s.ends_with('\n') {
       healed.push('\n');
     }
-    healed.push_str("```");
+    healed.extend(std::iter::repeat_n(fence.marker, fence.len));
     return Cow::Owned(healed);
   }
 
@@ -82,6 +89,34 @@ pub fn heal(s: &str) -> Cow<'_, str> {
   healed.push_str(&table_suffix);
   healed.push_str(&inline_suffix);
   Cow::Owned(healed)
+}
+
+/// The opening run of a fenced code block.
+#[derive(Clone, Copy)]
+struct Fence {
+  marker: char,
+  len: usize,
+}
+
+/// The open fence after `line`, given the open fence before it.
+///
+/// A fence opens with a run of 3 or more backticks or tildes, and a backtick fence has no backtick
+/// after its run. It closes with a run of the same character that is at least as long, with nothing
+/// after it. So a backtick run inside a tilde fence, or a short run inside a long fence, is code.
+fn next_fence(open: Option<Fence>, line: &str) -> Option<Fence> {
+  let body = line.trim_start();
+  let Some(marker) = body.chars().next().filter(|c| matches!(c, '`' | '~')) else { return open };
+  let len = body.len() - body.trim_start_matches(marker).len();
+  if len < 3 {
+    return open;
+  }
+  let rest = &body[len..];
+  match open {
+    Some(fence) if fence.marker == marker && len >= fence.len && rest.trim().is_empty() => None,
+    Some(fence) => Some(fence),
+    None if marker == '`' && rest.contains('`') => None,
+    None => Some(Fence { marker, len }),
+  }
 }
 
 /// `s` without its last line when that line holds only block markers, or when that line is a
@@ -157,10 +192,19 @@ fn strip_list_marker(body: &str) -> Option<&str> {
 /// it shows when the next character arrives.
 fn without_marker_run(s: &str) -> &str {
   let last_line = s[s.rfind('\n').map_or(0, |newline| newline + 1)..].trim_start();
-  if last_line.starts_with("```") || last_line.starts_with("~~~") {
+  if last_line.starts_with("```") || last_line.starts_with("~~~") || ends_with_footnote_ref(s) {
     return s;
   }
   s.trim_end_matches(['*', '_', '~', '`', '[', ']', '\\'])
+}
+
+/// Whether `s` ends with a complete footnote reference such as `[^1]`, which no later text changes.
+fn ends_with_footnote_ref(s: &str) -> bool {
+  let Some(body) = s.strip_suffix(']') else { return false };
+  body.rfind("[^").is_some_and(|start| {
+    let label = &body[start + 2..];
+    !label.is_empty() && !label.contains([']', '[']) && !label.contains(char::is_whitespace)
+  })
 }
 
 /// The input to keep, and the closers to append to it.
@@ -168,7 +212,7 @@ fn without_marker_run(s: &str) -> &str {
 /// When the input ends inside a link URL, the input to keep ends before the `(`. The closers
 /// then start with `()`, so the link has an empty href until its `)` arrives.
 fn heal_inline(s: &str) -> (&str, String) {
-  let mut in_fence = false;
+  let mut fence = None;
   let mut in_inline_code = false;
   let mut open_star_bold = false;
   let mut open_star_italic = false;
@@ -187,11 +231,22 @@ fn heal_inline(s: &str) -> (&str, String) {
     line_start += raw.len();
     let line = raw.strip_suffix('\n').map_or(raw, |line| line.strip_suffix('\r').unwrap_or(line));
     let trimmed = line.trim();
-    if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-      in_fence = !in_fence;
+    let was_in_fence = fence.is_some();
+    fence = next_fence(fence, line);
+    if was_in_fence || fence.is_some() {
       continue;
     }
-    if in_fence {
+    // A blank line ends the paragraph, and no inline construct continues past it.
+    if trimmed.is_empty() {
+      open_star_bold = false;
+      open_star_italic = false;
+      open_under_bold = false;
+      open_under_italic = false;
+      open_strike = false;
+      in_inline_code = false;
+      in_link_text = false;
+      in_link_url = false;
+      in_link_title = false;
       continue;
     }
 
@@ -243,63 +298,35 @@ fn heal_inline(s: &str) -> (&str, String) {
         continue;
       }
 
-      // Asterisk emphasis: ***, **, *.
-      if c == b'*' {
-        if i + 2 < len && bytes[i + 1] == b'*' && bytes[i + 2] == b'*' {
-          open_star_bold = !open_star_bold;
-          open_star_italic = !open_star_italic;
-          i += 3;
-          continue;
-        }
-        if i + 1 < len && bytes[i + 1] == b'*' {
-          open_star_bold = !open_star_bold;
-          i += 2;
-          continue;
-        }
-        open_star_italic = !open_star_italic;
-        i += 1;
-        continue;
-      }
-
-      // Underscore emphasis: ___, __, _.
-      // CommonMark: underscores flanked by alphanumeric on both sides are intra-word and not emphasis.
-      if c == b'_' {
-        let preceded_by_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
-        if i + 2 < len && bytes[i + 1] == b'_' && bytes[i + 2] == b'_' {
-          let followed_by_alnum = i + 3 < len && bytes[i + 3].is_ascii_alphanumeric();
-          if preceded_by_alnum && followed_by_alnum {
-            i += 3;
-            continue;
+      // Emphasis runs. A run opens only when a non-space character follows it, and closes only when a
+      // non-space character comes before it, so a `* ` bullet or the `*` in `2 * 3` opens nothing.
+      if c == b'*' || c == b'_' || c == b'~' {
+        let run = bytes[i..].iter().take_while(|&&b| b == c).count();
+        let before = i.checked_sub(1).map(|at| bytes[at]);
+        let after = bytes.get(i + run).copied();
+        let can_open = after.is_some_and(|b| !b.is_ascii_whitespace());
+        let can_close = before.is_some_and(|b| !b.is_ascii_whitespace());
+        // CommonMark: an underscore run between two alphanumerics is inside a word, and is not emphasis.
+        let intraword =
+          before.is_some_and(|b| b.is_ascii_alphanumeric()) && after.is_some_and(|b| b.is_ascii_alphanumeric());
+        match (c, run) {
+          (b'~', 2) => toggle_emphasis(&mut open_strike, can_open, can_close),
+          (b'~', _) => {}
+          (b'_', _) if intraword => {}
+          (b'*', 1) => toggle_emphasis(&mut open_star_italic, can_open, can_close),
+          (b'*', 2) => toggle_emphasis(&mut open_star_bold, can_open, can_close),
+          (b'*', _) => {
+            toggle_emphasis(&mut open_star_bold, can_open, can_close);
+            toggle_emphasis(&mut open_star_italic, can_open, can_close);
           }
-          open_under_bold = !open_under_bold;
-          open_under_italic = !open_under_italic;
-          i += 3;
-          continue;
-        }
-        if i + 1 < len && bytes[i + 1] == b'_' {
-          let followed_by_alnum = i + 2 < len && bytes[i + 2].is_ascii_alphanumeric();
-          if preceded_by_alnum && followed_by_alnum {
-            i += 2;
-            continue;
+          (_, 1) => toggle_emphasis(&mut open_under_italic, can_open, can_close),
+          (_, 2) => toggle_emphasis(&mut open_under_bold, can_open, can_close),
+          _ => {
+            toggle_emphasis(&mut open_under_bold, can_open, can_close);
+            toggle_emphasis(&mut open_under_italic, can_open, can_close);
           }
-          open_under_bold = !open_under_bold;
-          i += 2;
-          continue;
         }
-        let followed_by_alnum = i + 1 < len && bytes[i + 1].is_ascii_alphanumeric();
-        if preceded_by_alnum && followed_by_alnum {
-          i += 1;
-          continue;
-        }
-        open_under_italic = !open_under_italic;
-        i += 1;
-        continue;
-      }
-
-      // Strikethrough: ~~.
-      if c == b'~' && i + 1 < len && bytes[i + 1] == b'~' {
-        open_strike = !open_strike;
-        i += 2;
+        i += run;
         continue;
       }
 
@@ -371,17 +398,26 @@ fn heal_inline(s: &str) -> (&str, String) {
   (kept, suffix)
 }
 
+/// Open the emphasis when it is closed and the run can open it, and close it when it is open and the
+/// run can close it.
+fn toggle_emphasis(open: &mut bool, can_open: bool, can_close: bool) {
+  if *open {
+    if can_close {
+      *open = false;
+    }
+  } else if can_open {
+    *open = true;
+  }
+}
+
 fn heal_table(s: &str) -> String {
   let lines: Vec<&str> = s.lines().collect();
   if lines.is_empty() {
     return String::new();
   }
 
-  // Find last non-empty line.
-  let mut last_idx = lines.len() - 1;
-  while last_idx > 0 && lines[last_idx].trim().is_empty() {
-    last_idx -= 1;
-  }
+  // A blank line after the header ends the block, so a separator after it would show as text.
+  let last_idx = lines.len() - 1;
   let last = lines[last_idx].trim();
 
   // Case 1: Last line is a complete table header row - needs a separator.
@@ -422,8 +458,10 @@ fn is_full_separator(line: &str) -> bool {
   is_separator_like(line) && line.contains('-') && line.matches('|').count() >= 3
 }
 
+/// The cells of a row that starts and ends with `|`, counting empty cells. An escaped `\|` is text
+/// inside a cell.
 fn count_table_columns(row: &str) -> usize {
-  row.split('|').filter(|s| !s.trim().is_empty()).count()
+  row.replace("\\|", "").matches('|').count().saturating_sub(1)
 }
 
 /// Parse a markdown string into a [`Markdown`] token stream.
@@ -431,6 +469,13 @@ fn count_table_columns(row: &str) -> usize {
 /// Supports CommonMark with extensions: tables, strikethrough, footnotes, and task lists.
 pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
   let mut tokens = Vec::new();
+  parse_into(s, &mut tokens);
+  Markdown { s, tokens }
+}
+
+/// Parse `s` and append its tokens to `tokens`. The tokens already there are the tokens of the text
+/// before `s`, and the last two of them set the breaks before the first block of `s`.
+fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
   let mut options = Options::empty();
   options.insert(Options::ENABLE_STRIKETHROUGH);
   options.insert(Options::ENABLE_TABLES);
@@ -451,7 +496,8 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
   let mut image_url = None;
   let mut image_title: Option<CowStr> = None;
   let mut list_stack: Vec<ListInfo> = Vec::new();
-  let mut in_list_item = false;
+  // Items nest, so this counts the open items rather than holding a flag that an inner item would clear.
+  let mut item_depth = 0usize;
 
   // Table collection state.
   let mut in_table = false;
@@ -522,7 +568,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         Event::End(TagEnd::Table) => {
           in_table = false;
-          ensure_double_newline(&mut tokens);
+          ensure_double_newline(tokens);
           tokens.push(Token::Table(TableData {
             alignments: std::mem::take(&mut table_alignments),
             headers: std::mem::take(&mut table_headers),
@@ -532,7 +578,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         Event::Text(text) => {
           if in_link {
-            link_text = Some(text.clone());
+            append_text(&mut link_text, text.clone());
           } else {
             current_cell.push(Token::Text { text: text.clone(), style: current_style.clone() });
           }
@@ -540,10 +586,12 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         Event::Code(text) => {
           if in_link {
-            link_text = Some(text.clone());
+            append_text(&mut link_text, text.clone());
           } else {
-            current_cell
-              .push(Token::Text { text: text.clone(), style: TokenStyle { inline_code: true, ..Default::default() } });
+            current_cell.push(Token::Text {
+              text: text.clone(),
+              style: TokenStyle { inline_code: true, ..current_style.clone() },
+            });
           }
           continue;
         }
@@ -572,7 +620,11 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           continue;
         }
         Event::SoftBreak => {
-          current_cell.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
+          if in_link {
+            append_text(&mut link_text, CowStr::Borrowed(" "));
+          } else {
+            current_cell.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
+          }
           continue;
         }
         Event::HardBreak => {
@@ -589,7 +641,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           in_link = false;
           let text = link_text.take().unwrap_or_else(|| CowStr::Boxed("".into()));
           if let Some(url) = link_href.take() {
-            current_cell.push(Token::Link { text, href: url, title: link_title.take() });
+            current_cell.push(Token::Link { text, href: url, title: link_title.take(), style: current_style.clone() });
           }
           continue;
         }
@@ -602,9 +654,9 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
     match event {
       Event::Text(text) => {
         if in_image {
-          image_alt = Some(text);
+          append_text(&mut image_alt, text);
         } else if in_link {
-          link_text = Some(text);
+          append_text(&mut link_text, text);
         } else if in_code_block {
           tokens.push(Token::CodeBlock { text: trim_end_newlines(text), language: current_code_language.clone() });
         } else {
@@ -621,24 +673,35 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
       }
 
       Event::Code(text) => {
-        if in_link {
-          link_text = Some(text);
+        if in_image {
+          append_text(&mut image_alt, text);
+        } else if in_link {
+          append_text(&mut link_text, text);
         } else {
-          let code_style = TokenStyle { inline_code: true, ..Default::default() };
+          // Inline code keeps the style around it, so code inside a heading has the size of the heading.
+          let code_style = TokenStyle { inline_code: true, ..current_style.clone() };
           tokens.push(Token::Text { text, style: code_style });
         }
       }
 
       Event::SoftBreak => {
-        tokens.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
+        if in_image {
+          append_text(&mut image_alt, CowStr::Borrowed(" "));
+        } else if in_link {
+          append_text(&mut link_text, CowStr::Borrowed(" "));
+        } else {
+          tokens.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
+        }
       }
       Event::HardBreak => {
         tokens.push(Token::Newline);
       }
 
       Event::Rule => {
-        ensure_double_newline(&mut tokens);
+        ensure_double_newline(tokens);
         tokens.push(Token::HorizontalRule);
+        // The rule ends its row, so text after it, such as an HTML block, starts a row of its own.
+        tokens.push(Token::Newline);
       }
 
       Event::TaskListMarker(checked) => {
@@ -652,6 +715,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
 
       Event::Start(tag) => match tag {
         Tag::Paragraph => {
+          let in_list_item = item_depth > 0;
           let after_header_in_list = in_list_item
             && tokens.last().is_some_and(|token| matches!(token, Token::Text { style, .. } if style.heading.is_some()));
 
@@ -659,21 +723,24 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           if matches!(last, Some(Token::ListMarker { .. })) || matches!(last, Some(Token::TaskListMarker { .. })) {
             // Don't add newlines right after a list/task marker.
           } else if after_header_in_list {
-            ensure_newline(&mut tokens);
-          } else if !in_list_item && !in_footnote_def {
-            ensure_double_newline(&mut tokens);
+            ensure_newline(tokens);
+          } else if in_list_item {
+            // A later paragraph of a loose item starts its own row, at the x of the item text. A marker
+            // with no text sets that x.
+            ensure_double_newline(tokens);
+            tokens.push(Token::ListMarker { marker: CowStr::Borrowed(""), indent_level: list_stack.len() });
+          } else if !in_footnote_def {
+            ensure_double_newline(tokens);
           }
         }
         Tag::CodeBlock(code_block_kind) => {
-          let after_header_in_list = in_list_item
-            && tokens.last().is_some_and(|token| matches!(token, Token::Text { style, .. } if style.heading.is_some()));
-
           let last = tokens.last();
           if matches!(last, Some(Token::ListMarker { .. })) {
-          } else if after_header_in_list {
-            ensure_newline(&mut tokens);
-          } else if !in_list_item {
-            ensure_double_newline(&mut tokens);
+          } else if item_depth > 0 {
+            // A code block after the text of an item starts on its own row.
+            ensure_newline(tokens);
+          } else {
+            ensure_double_newline(tokens);
           }
 
           current_code_language = match code_block_kind {
@@ -693,19 +760,19 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           let number = start.unwrap_or(1);
           list_stack.push(ListInfo { is_ordered, number });
 
-          if !is_last_token_list_marker(&tokens) {
+          if !is_last_token_list_marker(tokens) {
             if list_stack.len() == 1 {
-              ensure_double_newline(&mut tokens);
+              ensure_double_newline(tokens);
             } else {
-              ensure_newline(&mut tokens);
+              ensure_newline(tokens);
             }
           }
         }
         Tag::Item => {
           if !tokens.is_empty() {
-            ensure_newline(&mut tokens);
+            ensure_newline(tokens);
           }
-          in_list_item = true;
+          item_depth += 1;
           let indent_level = list_stack.len();
           let marker: CowStr = if let Some(list_info) = list_stack.last_mut() {
             if list_info.is_ordered {
@@ -721,9 +788,9 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           tokens.push(Token::ListMarker { marker, indent_level });
         }
         Tag::Heading { level, .. } => {
-          let after_list_marker = is_last_token_list_marker(&tokens);
-          if !after_list_marker && !in_list_item {
-            ensure_double_newline(&mut tokens);
+          let after_list_marker = is_last_token_list_marker(tokens);
+          if !after_list_marker && item_depth == 0 {
+            ensure_double_newline(tokens);
           }
           current_style.heading = Some(level as u8);
         }
@@ -765,7 +832,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         Tag::FootnoteDefinition(label) => {
           in_footnote_def = true;
-          ensure_double_newline(&mut tokens);
+          ensure_double_newline(tokens);
           tokens.push(Token::FootnoteDef { label });
         }
         _ => {}
@@ -778,7 +845,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         }
         TagEnd::Paragraph => {}
         TagEnd::Item => {
-          in_list_item = false;
+          item_depth = item_depth.saturating_sub(1);
         }
         TagEnd::List(_) => {
           list_stack.pop();
@@ -799,7 +866,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           in_link = false;
           let text = link_text.take().unwrap_or_else(|| CowStr::Boxed("".into()));
           if let Some(url) = link_href.take() {
-            tokens.push(Token::Link { text, href: url, title: link_title.take() });
+            tokens.push(Token::Link { text, href: url, title: link_title.take(), style: current_style.clone() });
           }
         }
         TagEnd::Image => {
@@ -821,8 +888,185 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
       _ => {}
     }
   }
+}
 
-  Markdown { s, tokens }
+/// A line where a parse can start again, with no state from the text before it.
+///
+/// The line starts in the first column, after a blank line, outside a code fence, and it does not
+/// start a list item or a quote. Every block before it is closed there: a list or a quote does not
+/// continue past a blank line into an unindented line. And no text after it can change a token
+/// before it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ResumePoint {
+  /// The byte where the line starts.
+  pub byte: usize,
+  /// The byte after the newline that ends the line. The text up to here makes the line a resume point.
+  pub line_end: usize,
+}
+
+/// The last resume point of `s` at or after the line start `from`, where no fence is open. `Err` when
+/// `s[from..]` holds a line that can change text before it, so that `s` must be parsed whole.
+///
+/// Two kinds of line can change text before them. A link reference definition, such as `[a]: url`,
+/// turns a `[a]` anywhere in the document into a link. And an HTML block that starts with `<!--` or
+/// `<pre` runs past blank lines. Every line that starts with `[` and holds `]:`, and every line that
+/// starts with `<`, counts.
+fn last_resume_point(s: &str, from: usize) -> Result<Option<ResumePoint>, ()> {
+  let mut fence = None;
+  let mut after_blank = false;
+  let mut last = None;
+  let mut at = from;
+  for raw in s[from..].split_inclusive('\n') {
+    let line_start = at;
+    at += raw.len();
+    let line = raw.strip_suffix('\n').unwrap_or(raw);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+    if fence.is_none() {
+      let body = line.trim_start_matches(' ');
+      if body.starts_with('<') || (body.starts_with('[') && body.contains("]:")) {
+        return Err(());
+      }
+      if after_blank && raw.ends_with('\n') && starts_a_resumable_block(line) {
+        last = Some(ResumePoint { byte: line_start, line_end: at });
+      }
+    }
+    let was_in_fence = fence.is_some();
+    fence = next_fence(fence, line);
+    after_blank = !was_in_fence && fence.is_none() && line.trim().is_empty();
+  }
+  Ok(last)
+}
+
+/// A line in the first column that starts neither a list item nor a quote, so it cannot continue a
+/// block from before a blank line.
+fn starts_a_resumable_block(line: &str) -> bool {
+  let Some(first) = line.chars().next() else { return false };
+  if first.is_whitespace() || first == '>' {
+    return false;
+  }
+  let marker_end = |rest: &str| rest.is_empty() || rest.starts_with([' ', '\t']);
+  if let Some(rest) = line.strip_prefix(['-', '*', '+']) {
+    return !marker_end(rest);
+  }
+  let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+  if (1..=9).contains(&digits) {
+    if let Some(rest) = line[digits..].strip_prefix(['.', ')']) {
+      return !marker_end(rest);
+    }
+  }
+  true
+}
+
+/// The tokens of a text after a resume point, and the last resume point in that text with the index of
+/// its first token.
+type ParsedTail<'s> = (Vec<Token<'s>>, Option<(ResumePoint, usize)>);
+
+/// The tokens of `s[from..]`, where `from` is 0 or a [`ResumePoint`] of `s`, and the last resume point
+/// after `from` with the index of its first token in the returned tokens. `before` is the tail of the
+/// tokens of `s[..from]`, at least its last two tokens, which set the breaks before the first block.
+///
+/// `None` when the text after `from` holds a line that can change text before it, so that the caller
+/// must parse `s` whole.
+fn parse_tail<'s>(s: &'s str, from: usize, before: &[Token<'s>]) -> Option<ParsedTail<'s>> {
+  let point = last_resume_point(s, from).ok()?;
+  let mut tokens = before.to_vec();
+  let seed = tokens.len();
+  let resume = match point {
+    Some(point) if point.byte > from => {
+      parse_into(&s[from..point.byte], &mut tokens);
+      let index = tokens.len() - seed;
+      parse_into(&s[point.byte..], &mut tokens);
+      Some((point, index))
+    }
+    _ => {
+      parse_into(&s[from..], &mut tokens);
+      None
+    }
+  };
+  tokens.drain(..seed);
+  Some((tokens, resume))
+}
+
+/// A new [`ParseState::generation`]. Generation 0 belongs to the default state, which holds no tokens.
+fn next_generation() -> u64 {
+  static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+  NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The owned tokens of a parsed text, with what a parse of the next text needs to start from where
+/// this one can.
+#[derive(Clone, Default)]
+pub(crate) struct ParseState {
+  /// The tokens of the text.
+  pub tokens: std::sync::Arc<Vec<Token<'static>>>,
+  /// A number for this parse, unique in the process. A cache keyed by it knows its tokens are unchanged.
+  pub generation: u64,
+  /// The generation of the parse this one started from, and how many of its first tokens this one kept.
+  /// A cache entry for tokens before that count, valid for that generation, is valid for this one.
+  pub kept_from: Option<(u64, usize)>,
+  /// The last resume point of the text, the index of its first token, and the text up to the end of
+  /// its line. A next text that starts with that text keeps the tokens before the index.
+  resume: Option<(ResumePoint, usize, std::sync::Arc<str>)>,
+}
+
+impl ParseState {
+  /// Parse `text`. When `previous` was the parse of a text with the same start, keep its tokens up to
+  /// its last resume point, and parse only the text from there.
+  ///
+  /// A streamed reply grows at its end, so most of its text is in the kept tokens, and a frame parses
+  /// only the end. The tokens are the same as the tokens of [`parse`].
+  pub(crate) fn parse(text: &str, previous: Option<ParseState>) -> ParseState {
+    if let Some(previous) = previous {
+      if let Some((point, index, prefix)) = previous.resume.filter(|(_, _, prefix)| text.starts_with(&**prefix)) {
+        let mut tokens = std::sync::Arc::try_unwrap(previous.tokens).unwrap_or_else(|tokens| (*tokens).clone());
+        tokens.truncate(index);
+        let before = &tokens[index.saturating_sub(2)..];
+        if let Some((tail, resume)) = parse_tail(text, point.byte, before) {
+          tokens.extend(crate::types::tokens_to_owned(&tail));
+          let resume = match resume {
+            Some((next, next_index)) => Some((next, index + next_index, std::sync::Arc::from(&text[..next.line_end]))),
+            None => Some((point, index, prefix)),
+          };
+          return ParseState {
+            tokens: std::sync::Arc::new(tokens),
+            resume,
+            generation: next_generation(),
+            kept_from: Some((previous.generation, index)),
+          };
+        }
+      }
+    }
+    match parse_tail(text, 0, &[]) {
+      Some((tokens, resume)) => ParseState {
+        tokens: std::sync::Arc::new(crate::types::tokens_to_owned(&tokens)),
+        resume: resume.map(|(point, index)| (point, index, std::sync::Arc::from(&text[..point.line_end]))),
+        generation: next_generation(),
+        kept_from: None,
+      },
+      None => ParseState {
+        tokens: std::sync::Arc::new(crate::types::tokens_to_owned(&parse(text).tokens)),
+        resume: None,
+        generation: next_generation(),
+        kept_from: None,
+      },
+    }
+  }
+
+  /// [`heal`] of `raw`, which heals only the text after the last resume point of this state when `raw`
+  /// starts with the text up to that point.
+  ///
+  /// Heal changes only the text after the last blank line outside a fence, so the text before a resume
+  /// point heals to itself.
+  pub(crate) fn heal<'r>(&self, raw: &'r str) -> Cow<'r, str> {
+    let from = match &self.resume {
+      Some((point, _, prefix)) if raw.starts_with(&**prefix) => point.byte,
+      _ => return heal(raw),
+    };
+    match heal(&raw[from..]) {
+      Cow::Borrowed(tail) => Cow::Borrowed(&raw[..from + tail.len()]),
+      Cow::Owned(tail) => Cow::Owned(format!("{}{tail}", &raw[..from])),
+    }
+  }
 }
 
 #[cfg(test)]
@@ -1391,7 +1635,7 @@ mod tests {
   fn heal_tilde_fence() {
     let input = "~~~python\nprint('hi')";
     let healed = super::heal(input);
-    assert!(healed.ends_with("```"));
+    assert!(healed.ends_with("\n~~~"));
     let md = parse(&healed);
     assert!(md.tokens.iter().any(|t| matches!(t, Token::CodeBlock { .. })));
   }
@@ -1515,7 +1759,7 @@ mod tests {
     let md = parse("[click](https://example.com \"Example Title\")");
     let link = md.tokens.iter().find(|t| matches!(t, Token::Link { .. }));
     assert!(link.is_some());
-    if let Some(Token::Link { text, href, title }) = link {
+    if let Some(Token::Link { text, href, title, .. }) = link {
       assert_eq!(text.as_ref(), "click");
       assert_eq!(href.as_ref(), "https://example.com");
       assert_eq!(title.as_deref(), Some("Example Title"));
@@ -1532,6 +1776,234 @@ mod tests {
   }
 
   #[test]
+  fn heal_opens_no_emphasis_at_a_star_with_a_space_after_it() {
+    for input in ["* item one", "2 * 3 = 6", "* a\n* b\n* c", "a * b * c"] {
+      assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)), "{input:?}");
+    }
+    assert_eq!(super::heal("* item with *emph"), "* item with *emph*");
+  }
+
+  #[test]
+  fn heal_closes_no_emphasis_after_a_blank_line() {
+    assert_eq!(super::heal("a *b\n\nnew para"), "a *b\n\nnew para");
+    assert_eq!(super::heal("a `b\n\nnew para"), "a `b\n\nnew para");
+    assert_eq!(super::heal("a *b\n\nnew **para"), "a *b\n\nnew **para**");
+  }
+
+  #[test]
+  fn link_text_keeps_every_styled_run() {
+    for (input, expected) in
+      [("[**bold** and more](u)", "bold and more"), ("[a `b` c](u)", "a b c"), ("[two\nlines](u)", "two lines")]
+    {
+      let md = parse(input);
+      let links: Vec<_> = md.tokens.iter().filter(|t| matches!(t, Token::Link { .. })).collect();
+      assert_eq!(links.len(), 1, "{input:?}: {:?}", md.tokens);
+      assert_eq!(links[0].text(), expected, "{input:?}");
+    }
+    let md = parse("| a |\n|---|\n| [x *y* z](u) |");
+    let Some(Token::Table(data)) = md.tokens.first() else { panic!("expected a table") };
+    assert_eq!(data.rows[0][0][0].text(), "x y z");
+  }
+
+  #[test]
+  fn image_alt_keeps_every_styled_run() {
+    let md = parse("![an *emph* alt](u)");
+    assert!(matches!(md.tokens.first(), Some(Token::Image { alt, .. }) if alt.as_ref() == "an emph alt"));
+  }
+
+  #[test]
+  fn a_later_paragraph_of_a_loose_item_starts_its_own_row() {
+    let md = parse("- a\n\n  b\n- c");
+    let a = md.tokens.iter().position(|t| t.text() == "a").unwrap();
+    let b = md.tokens.iter().position(|t| t.text() == "b").unwrap();
+    assert!(md.tokens[a + 1..b].iter().any(Token::is_newline), "{:?}", md.tokens);
+    // The empty marker before `b` sets the x of its row to the x of the item text.
+    assert!(matches!(&md.tokens[b - 1], Token::ListMarker { marker, indent_level: 1 } if marker.is_empty()));
+  }
+
+  #[test]
+  fn a_paragraph_after_a_nested_list_stays_in_its_item() {
+    let md = parse("- a\n  - inner\n\n  after\n- b");
+    let after = md.tokens.iter().position(|t| t.text() == "after").unwrap();
+    assert!(matches!(&md.tokens[after - 1], Token::ListMarker { marker, indent_level: 1 } if marker.is_empty()));
+  }
+
+  #[test]
+  fn a_code_block_in_an_item_starts_its_own_row() {
+    let md = parse("- item\n\n  ```\n  code\n  ```\n- next");
+    let code = md.tokens.iter().position(|t| matches!(t, Token::CodeBlock { .. })).unwrap();
+    assert!(md.tokens[code - 1].is_newline(), "{:?}", md.tokens);
+  }
+
+  #[test]
+  fn heal_closes_a_fence_with_a_run_like_its_opener() {
+    assert_eq!(super::heal("~~~py\nprint()"), "~~~py\nprint()\n~~~");
+    assert_eq!(super::heal("````md\n```rust\nx\n```"), "````md\n```rust\nx\n```\n````");
+    let healed = super::heal("~~~py\nprint()");
+    let md = parse(&healed);
+    assert!(matches!(md.tokens.first(), Some(Token::CodeBlock { text, .. }) if text.as_ref() == "print()"));
+  }
+
+  #[test]
+  fn heal_keeps_a_backtick_run_inside_a_tilde_fence_as_code() {
+    let input = "~~~\n```\n~~~\n\ntext";
+    assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
+    assert_eq!(super::heal("~~~\n```\n~~~\n\n**bold"), "~~~\n```\n~~~\n\n**bold**");
+  }
+
+  #[test]
+  fn heal_keeps_a_footnote_ref_at_the_end() {
+    assert_eq!(super::heal("See note.[^1]"), "See note.[^1]");
+    assert_eq!(super::heal("See [^1] and **more"), "See [^1] and **more**");
+  }
+
+  #[test]
+  fn heal_table_counts_empty_cells() {
+    assert_eq!(super::heal("| A | | C |\n"), "| A | | C |\n|---|---|---|");
+    let healed = super::heal("| A | | C |\n");
+    let md = parse(&healed);
+    assert!(matches!(md.tokens.first(), Some(Token::Table(data)) if data.headers.len() == 3));
+  }
+
+  #[test]
+  fn heal_table_adds_no_separator_after_a_blank_line() {
+    assert!(matches!(super::heal("| A | B |\n\n"), std::borrow::Cow::Borrowed(_)));
+  }
+
+  #[test]
+  fn inline_code_keeps_the_style_around_it() {
+    let md = parse("# The `foo` fn and **bold `code`**");
+    let code: Vec<_> = md
+      .tokens
+      .iter()
+      .filter_map(|t| match t {
+        Token::Text { style, .. } if style.inline_code => Some(style.clone()),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(code.len(), 2);
+    assert!(code.iter().all(|style| style.heading == Some(1)));
+    assert!(code[1].bold);
+  }
+
+  #[test]
+  fn a_link_keeps_the_style_around_it() {
+    let md = parse("## See [docs](u) and *[more](v)*");
+    let styles: Vec<_> = md
+      .tokens
+      .iter()
+      .filter_map(|t| match t {
+        Token::Link { style, .. } => Some(style.clone()),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(styles.len(), 2);
+    assert!(styles.iter().all(|style| style.heading == Some(2)));
+    assert!(!styles[0].italic && styles[1].italic);
+  }
+
+  #[test]
+  fn a_rule_ends_its_row() {
+    // An HTML block adds no break of its own, so the newline after the rule keeps it off the row.
+    let md = parse("---\n<div>x</div>");
+    assert!(
+      matches!(md.tokens.as_slice(), [Token::HorizontalRule, Token::Newline, Token::Text { .. }, ..]),
+      "{:?}",
+      md.tokens
+    );
+  }
+
+  /// Markdown at the edges of a resume point: blocks that continue past a blank line, and blocks that
+  /// end there.
+  const RESUME_EDGES: &str = "Intro *one*\n\n- tight\n- list\n\n- loose\n\n  second paragraph\n\n  - nested\n\n    deeper\n\nAfter the list.\n\n1. one\n\n2. two\n\n3) three\n\nText\n\n> quote\n>\n> more quote\n\n> another quote\n\nPlain **bold** line.\n\n**Bold start** of a line.\n\n```\ncode\n\nnot a resume point\n```\n\n~~~\n```\n\ninside tilde\n~~~\n\n````md\n```rust\n\nx\n```\n````\n\n    indented code\n\n    more indented\n\nTitle\n=====\n\n---\n\n***\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nAfter the table.\n\n- [x] done\n- [ ] not done\n\nSee [the docs][ref] and a footnote[^1].\n\n* star item\n\n+ plus item\n\nEnd *open emphasis\n\nLast paragraph.\n";
+
+  /// The tokens of a parse, as hashes, which compare text and style whatever the string storage.
+  fn token_hashes(tokens: &[Token<'_>]) -> Vec<u64> {
+    use std::hash::{Hash, Hasher};
+    tokens
+      .iter()
+      .map(|token| {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        token.hash(&mut hasher);
+        hasher.finish()
+      })
+      .collect()
+  }
+
+  /// The markdown of each example and of each streaming fixture.
+  fn stream_documents() -> Vec<String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut docs = vec![
+      RESUME_EDGES.to_string(),
+      format!("{RESUME_EDGES}\n<div>late html</div>\n\nMore."),
+      format!("{RESUME_EDGES}\n[ref]: https://example.com\n"),
+    ];
+    for example in ["examples/simple.rs", "examples/advanced.rs"] {
+      let source = std::fs::read_to_string(root.join(example)).unwrap();
+      let start = source.find("r#\"").unwrap() + 3;
+      let end = source[start..].find("\"#;").unwrap() + start;
+      docs.push(source[start..end].to_string());
+    }
+    for entry in std::fs::read_dir(root.join("tests/fixtures")).unwrap() {
+      let path = entry.unwrap().path();
+      let deltas: Vec<String> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+      docs.push(deltas.concat());
+    }
+    docs
+  }
+
+  /// Stream each document one character at a time, as a label sees a reply arrive. At every prefix the
+  /// incremental heal and parse must give what a full heal and parse give.
+  #[test]
+  fn an_incremental_parse_matches_a_full_parse_at_every_prefix() {
+    let mut resumed = 0;
+    for doc in stream_documents() {
+      for healing in [false, true] {
+        let mut state: Option<ParseState> = None;
+        let ends = doc.char_indices().map(|(at, _)| at).skip(1).chain([doc.len()]);
+        for end in ends {
+          let raw = &doc[..end];
+          let text = match (&state, healing) {
+            (Some(state), true) => state.heal(raw),
+            (None, true) => heal(raw),
+            (_, false) => Cow::Borrowed(raw),
+          };
+          if healing {
+            assert_eq!(text, heal(raw), "incremental heal of {raw:?}");
+          }
+          resumed += usize::from(state.as_ref().is_some_and(|state| state.resume.is_some()));
+          let next = ParseState::parse(&text, state.take());
+          let full = parse(&text);
+          assert_eq!(token_hashes(&next.tokens), token_hashes(&full.tokens), "incremental parse of {text:?}");
+          state = Some(next);
+        }
+      }
+    }
+    assert!(resumed > 1000, "the incremental path ran only {resumed} times");
+  }
+
+  #[test]
+  fn a_late_reference_definition_or_html_line_forces_a_full_parse() {
+    assert!(last_resume_point("a\n\nb\n\nc\n", 0).unwrap().is_some());
+    assert!(last_resume_point("a\n\nb\n\n[x]: https://example.com\n", 0).is_err());
+    assert!(last_resume_point("a\n\nb\n\n<!--\n\ncomment\n-->\n", 0).is_err());
+    // A line in a fence is code, so a `<` there changes nothing.
+    assert!(last_resume_point("a\n\n```\n<b>\n```\n\nc\n", 0).unwrap().is_some());
+  }
+
+  #[test]
+  fn no_resume_point_inside_a_list_a_quote_or_a_fence() {
+    for doc in
+      ["- a\n\n- b\n", "- a\n\n  b\n", "1. a\n\n2. b\n", "> a\n\n> b\n", "```\na\n\nb\n```\n", "    a\n\n    b\n"]
+    {
+      assert_eq!(last_resume_point(doc, 0), Ok(None), "{doc:?}");
+    }
+    assert_eq!(last_resume_point("- a\n\nb\n", 0), Ok(Some(ResumePoint { byte: 5, line_end: 7 })));
+    // The line of a resume point must be complete, so that the text decides what it starts.
+    assert_eq!(last_resume_point("a\n\nb", 0), Ok(None));
+  }
+
+  #[test]
   fn links_in_table() {
     let md = parse("| Col |\n|-----|\n| [link](https://example.com) |");
     let table = md.tokens.iter().find(|t| matches!(t, Token::Table(_)));
@@ -1541,57 +2013,6 @@ mod tests {
       let cell = &data.rows[0][0];
       let has_link = cell.iter().any(|t| matches!(t, Token::Link { .. }));
       assert!(has_link, "Expected a Link token in table cell, got: {cell:?}");
-    }
-  }
-}
-
-#[cfg(test)]
-mod bench_tests {
-  use super::*;
-
-  fn large_markdown() -> String {
-    let mut doc = String::new();
-    for i in 0..100 {
-      doc.push_str(&format!("# Heading {i}\n\nParagraph {i} with **bold** and *italic* and `code`.\n\n"));
-      doc.push_str(&format!("Visit [link {i}](https://example.com/{i}) for info.\n\n"));
-      doc.push_str("```rust\nfn test() { println!(\"hello\"); }\n```\n\n");
-      doc.push_str(&format!("- Item {i}\n  - Nested item\n"));
-      doc.push_str(&format!("1. Ordered {i}\n2. Second\n\n"));
-      doc.push_str("> Blockquote text\n\n");
-      doc.push_str("| A | B |\n|---|---|\n| 1 | 2 |\n\n");
-    }
-    doc
-  }
-
-  #[test]
-  fn bench_parse() {
-    let doc = large_markdown();
-    eprintln!("Document size: {} bytes, {} chars", doc.len(), doc.chars().count());
-
-    // Warmup.
-    for _ in 0..10 {
-      std::hint::black_box(parse(&doc));
-    }
-
-    let iterations = 1000;
-    let start = std::time::Instant::now();
-    for _ in 0..iterations {
-      std::hint::black_box(parse(&doc));
-    }
-    let elapsed = start.elapsed();
-    eprintln!("parse(): {:?} per iter ({iterations} iterations)", elapsed / iterations);
-  }
-}
-
-#[cfg(test)]
-mod debug_tests {
-  use super::*;
-  #[test]
-  fn debug_nested_bq() {
-    let md = "> This is a blockquote.\n>\n> > Nested blockquotes work too.";
-    let parsed = parse(md);
-    for (i, token) in parsed.tokens.iter().enumerate() {
-      eprintln!("{i}: {token:?}");
     }
   }
 }

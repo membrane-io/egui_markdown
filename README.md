@@ -11,6 +11,11 @@ It parses [CommonMark](https://commonmark.org/) markdown into a token stream. It
 renders that stream as one interactive egui widget, with selectable text, clickable links,
 syntax-highlighted code blocks, tables, images, blockquotes, and lists.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/simple-dark.png">
+  <img alt="The simple example: markdown source on the left, and the rendered output on the right" src="docs/screenshots/simple-light.png">
+</picture>
+
 ## Quick Start
 
 ```rust
@@ -100,6 +105,13 @@ MarkdownLabel::new(id, text).style(&style).show(ui);
 `MarkdownStyle` also has a `ui()` method that renders an interactive editor for every
 style field. See the `advanced` example.
 
+To give every label in an app the same style, install it once on the context. A label with no
+`.style()` reads it:
+
+```rust
+egui_markdown::set_style(ctx, MarkdownStyle { code_font_size: 13.0, ..Default::default() });
+```
+
 ### `LinkHandler`
 
 Implement the [`LinkHandler`](https://docs.rs/egui_markdown/latest/egui_markdown/link/trait.LinkHandler.html) trait
@@ -111,15 +123,54 @@ embed or a card.
 ### Code Themes
 
 Pass a custom `syntect::highlighting::Theme` to `.code_theme()` to override the
-built-in base16-ocean theme.
+built-in base16-ocean theme for one label. `set_code_themes(ctx, dark, light)` installs a pair
+of themes for every label in the context, and each label picks the one for the current
+dark-mode setting.
 
 ### Streaming
 
 Enable `.heal(true)` on `MarkdownLabel` to close unclosed code fences and inline constructs
 before the parse. Without this, the parser treats the text that follows an unclosed
-construct as part of that construct. Use it for streaming LLM output.
+construct as part of that construct. Use it for streaming LLM output, and turn it off when the
+reply is complete.
+
+Keep the widget id the same while the text grows. The caches live under that id, so an id
+that changes with the text lays out the whole document again on every delta.
+
+`.map_job()` rewrites the layout just before it is shaped, for example to fade in the newest
+text. A map that hides the end of the text makes the label allocate only the rows that show.
+
+### Wrapping
+
+A label wraps the way the surrounding `Ui` does, and `.wrap()`, `.truncate()` and `.extend()`
+override that, as on `egui::Label`. `.truncate().max_lines(3)` elides after three rows.
+`.overflow_wrap(OverflowWrap::BreakAll)` breaks a run that is wider than the label, such as a
+long URL, between any two characters.
+
+### Clicks
+
+`show()` returns a `MarkdownLabelOutput`. Its `response` covers the text of the label, and
+`link_clicked` is true when the click was on a link, which the label has already handled. A
+parent that reacts to a click on the label checks both:
+
+```rust
+let output = MarkdownLabel::new(id, text).show(ui);
+if output.response.clicked() && !output.link_clicked {
+    select_message();
+}
+```
 
 ## Examples
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/lower-dark.png">
+  <img alt="Code blocks, nested blockquotes, headings, a rule, an aligned table, and a footnote" src="docs/screenshots/lower-light.png" width="600">
+</picture>
+
+The `advanced` example adds custom link handlers, an inline badge widget, a block widget, code
+block buttons, and the style editor:
+
+![The advanced example, with its style editor open](docs/screenshots/advanced-dark.png)
 
 | Example | Description |
 |---------|-------------|

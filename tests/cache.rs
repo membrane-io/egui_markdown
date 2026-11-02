@@ -151,3 +151,36 @@ fn needs_segmentation_matches_build_layout() {
   });
   output.textures_delta.clear();
 }
+
+/// A label that saw a reply stream in, one piece at a time with heal on, keeps tokens from earlier
+/// parses. It must paint what a label that sees only the final text paints.
+#[test]
+fn a_streamed_reply_paints_what_a_fresh_label_paints() {
+  let reply = "# Plan\n\nFirst **step** with `code`.\n\n- one\n- two\n\n  more of two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```rust\nfn main() {}\n\nlet x = 1;\n```\n\n> quoted\n\nDone, with a [link](https://example.com) and *emphasis*.\n";
+  let render = |ctx: &Context, text: &str| {
+    let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(500.0, 2000.0));
+    let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      MarkdownLabel::new(Id::NULL.with("stream"), text).heal(true).show(&mut child);
+    });
+    output.textures_delta.clear();
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+      collect(&clipped.shape, &mut out);
+    }
+    out
+  };
+
+  let streamed = Context::default();
+  let mut end = 0;
+  while end < reply.len() {
+    end = (end + 5).min(reply.len());
+    while !reply.is_char_boundary(end) {
+      end += 1;
+    }
+    render(&streamed, &reply[..end]);
+  }
+  let from_stream = render(&streamed, reply);
+  let fresh = render(&Context::default(), reply);
+  assert_eq!(from_stream, fresh);
+}

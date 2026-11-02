@@ -219,8 +219,9 @@ pub fn render_link_in_ui(
 
   if response.hovered() {
     ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
-    if !is_inline_widget {
-      let underline_color = link_handler.and_then(|h| h.link_style(href).and_then(|s| s.color)).unwrap_or(link_color);
+    let link_style = link_handler.and_then(|h| h.link_style(href));
+    if !is_inline_widget && link_style.as_ref().is_none_or(|style| style.underline) {
+      let underline_color = link_style.and_then(|style| style.color).unwrap_or(link_color);
       ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0_f32, underline_color));
     }
   }
@@ -249,6 +250,38 @@ fn apply_bold(format: &mut TextFormat, ui: &Ui, has_bold: bool) {
   } else {
     format.color = ui.visuals().strong_text_color();
   }
+}
+
+/// The format of text with the inline `style`: bold, italic, strikethrough, the heading size, and the
+/// inline code colors.
+fn styled_format(
+  base_format: &TextFormat,
+  style: &crate::types::TokenStyle,
+  ui: &Ui,
+  bold_available: bool,
+  color: Color32,
+  markdown_style: &MarkdownStyle,
+) -> TextFormat {
+  let mut format = base_format.clone();
+  if style.bold {
+    apply_bold(&mut format, ui, bold_available);
+  }
+  if style.italic {
+    format.italics = true;
+  }
+  if style.strikethrough {
+    format.strikethrough = Stroke::new(1.0_f32, color);
+  }
+  if let Some(level) = style.heading {
+    format.color = ui.visuals().strong_text_color();
+    apply_bold(&mut format, ui, bold_available);
+    let idx = (level as usize).saturating_sub(1).min(5);
+    format.font_id.size *= markdown_style.heading.scales[idx];
+  }
+  if style.inline_code {
+    apply_inline_code_bg(&mut format, ui.visuals().dark_mode, &markdown_style.inline_code);
+  }
+  format
 }
 
 /// Width of each line's leading whitespace, in points, using the code font.
@@ -323,6 +356,7 @@ pub fn build_layout(
   // Pre-build common formats to avoid repeated font_id.clone().
   let base_format = text_format(font_id.clone(), color);
   let transparent_format = TextFormat { color: Color32::TRANSPARENT, ..base_format.clone() };
+  let hr_format = TextFormat { line_height: Some(style.horizontal_rule.height), ..transparent_format.clone() };
 
   // Disable egui's paragraph-splitting optimization (see egui #5411).
   if let Some(n) = max_rows {
@@ -334,42 +368,34 @@ pub fn build_layout(
   for (token_index, token) in tokens.iter().enumerate() {
     match token {
       Token::Newline => {
-        push_section(&mut job, "\n", 0.0, base_format.clone());
+        // The newline that ends the row of a rule takes the height of the rule, so the row stays short.
+        let after_rule = token_index.checked_sub(1).is_some_and(|i| matches!(tokens[i], Token::HorizontalRule));
+        let format = if after_rule { hr_format.clone() } else { base_format.clone() };
+        push_section(&mut job, "\n", 0.0, format);
         section_to_token.push(token_index);
       }
       Token::Text { text, style } => {
+        // Text that starts a row drops its leading spaces. Only a block that splits a paragraph, such as
+        // a block widget or an image, leaves them there, as in the " after" of "before [w](widget) after".
+        let at_row_start = job.text.is_empty() || job.text.ends_with('\n');
+        let text = if at_row_start { text.trim_start() } else { text.as_ref() };
         if text.is_empty() {
           continue;
         }
-        let mut format = base_format.clone();
-
-        if style.bold {
-          apply_bold(&mut format, ui, bold_available);
-        }
-        if style.italic {
-          format.italics = true;
-        }
-        if style.strikethrough {
-          format.strikethrough = Stroke::new(1.0_f32, color);
-        }
+        let format = styled_format(&base_format, style, ui, bold_available, color, style_ref);
         if style.inline_code {
-          apply_inline_code_bg(&mut format, ui.visuals().dark_mode, &style_ref.inline_code);
-          push_section(&mut job, " ", 0.0, transparent_format.clone());
+          // Transparent spaces on both sides keep the expanded background off the next glyph.
+          // The spacer takes only the font of the code, so it is as tall as the code and draws no background.
+          let spacer = TextFormat { font_id: format.font_id.clone(), ..transparent_format.clone() };
+          push_section(&mut job, " ", 0.0, spacer.clone());
           section_to_token.push(token_index);
-          push_section(&mut job, text.as_ref(), 0.0, format);
+          push_section(&mut job, text, 0.0, format);
           section_to_token.push(token_index);
-          push_section(&mut job, " ", 0.0, transparent_format.clone());
+          push_section(&mut job, " ", 0.0, spacer);
           section_to_token.push(token_index);
           continue;
         }
-        if let Some(level) = style.heading {
-          format.color = ui.visuals().strong_text_color();
-          apply_bold(&mut format, ui, bold_available);
-          let idx = (level as usize).saturating_sub(1).min(5);
-          format.font_id.size *= style_ref.heading.scales[idx];
-        }
-
-        push_section(&mut job, text.as_ref(), 0.0, format);
+        push_section(&mut job, text, 0.0, format);
         section_to_token.push(token_index);
       }
       Token::CodeBlock { text, language } => {
@@ -377,14 +403,7 @@ pub fn build_layout(
           segment_breaks.push(token_index);
         } else {
           let lang = language.as_deref().unwrap_or(style_ref.default_code_language.as_str());
-          let mut padded_text = String::with_capacity(text.len() + text.lines().count());
-          for (i, line) in text.lines().enumerate() {
-            if i > 0 {
-              padded_text.push('\n');
-            }
-            padded_text.push(' ');
-            padded_text.push_str(line);
-          }
+          let padded_text = pad_code_body(text);
 
           let highlighted_job = highlight_code(ui, &padded_text, lang, code_font_size, code_theme);
 
@@ -436,14 +455,14 @@ pub fn build_layout(
           marker_format.font_id.size *= list.bullet_scale;
         }
 
-        let indent_width = ui.ctx().fonts_mut(|f| f.glyph_width(&font_id, ' ')) * 2.0;
         let (marker_width, slot_width) = ui.ctx().fonts_mut(|f| {
           let marker_width: f32 = marker.chars().map(|c| f.glyph_width(&marker_format.font_id, c)).sum();
           let slot_width: f32 = MARKER_SLOT_REFERENCE.chars().map(|c| f.glyph_width(&font_id, c)).sum();
           (marker_width, slot_width)
         });
-        // `indent_level` is 1-based, so a top-level item gets no nesting indent.
-        let nesting = (*indent_level as f32 - 1.0).max(0.0) * indent_width
+        // `indent_level` is 1-based, so a top-level item gets no nesting indent. Each level starts its
+        // marker slot at the x of the text of the level above it.
+        let nesting = (*indent_level as f32 - 1.0).max(0.0) * (slot_width + list.gap)
           + blockquote_depth as f32 * style_ref.blockquote.indent_per_depth;
         // Right-align the marker inside a fixed slot so every item at this level starts its text
         // at the same x, whatever its marker. A marker wider than the slot keeps its own width
@@ -480,9 +499,11 @@ pub fn build_layout(
           section_to_token.push(token_index);
         }
       }
-      Token::Link { text, href, .. } => {
-        let link_base = text_format(font_id.clone(), color);
-        let info = append_link_to_job(ui, &mut job, text, href, &font_id, &link_base, hyperlink_color, link_handler);
+      Token::Link { text, href, style, .. } => {
+        // A link takes the size, weight and slant of the text around it, and keeps its own color.
+        let link_base = styled_format(&base_format, style, ui, bold_available, color, style_ref);
+        let link_font = link_base.font_id.clone();
+        let info = append_link_to_job(ui, &mut job, text, href, &link_font, &link_base, hyperlink_color, link_handler);
         if info.is_block_widget {
           segment_breaks.push(token_index);
         } else {
@@ -506,17 +527,12 @@ pub fn build_layout(
         blockquote_depth = blockquote_depth.saturating_sub(1);
       }
       Token::HorizontalRule => {
-        // Newline, short transparent spacer row for the painted rule, then newline.
-        push_section(&mut job, "\n", 0.0, base_format.clone());
-        section_to_token.push(token_index);
+        // A short transparent row that the rule is painted across. The parser puts the rule on a row
+        // of its own, with a blank row above and below it, as between two paragraphs.
         let hr_char_pos = job.text.chars().count();
-        let mut hr_format = transparent_format.clone();
-        hr_format.line_height = Some(style_ref.horizontal_rule.height);
-        push_section(&mut job, " ", 0.0, hr_format);
+        push_section(&mut job, " ", 0.0, hr_format.clone());
         section_to_token.push(token_index);
         hr_positions.push(hr_char_pos);
-        push_section(&mut job, "\n", 0.0, base_format.clone());
-        section_to_token.push(token_index);
       }
       Token::TaskListMarker { checked, .. } => {
         let marker_char = if *checked { "☑ " } else { "☐ " };
@@ -1004,6 +1020,79 @@ pub fn highlight_code(
 #[cfg(test)]
 mod section_tests {
   use super::*;
+
+  /// Code and links inside a heading have the size of the heading.
+  #[test]
+  fn code_and_links_in_a_heading_have_the_heading_size() {
+    let markdown = crate::parse("# Title `code` [link](u)");
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let style = MarkdownStyle::default();
+      let font = FontId::proportional(14.0);
+      let color = ui.visuals().text_color();
+      let layout =
+        build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+      let size_of = |text: &str| {
+        let section = layout.job.sections.iter().find(|s| &layout.job.text[s.byte_range.as_usize()] == text).unwrap();
+        section.format.font_id.size
+      };
+      let heading = 14.0 * style.heading.scales[0];
+      assert_eq!(size_of("Title "), heading);
+      assert_eq!(size_of("code"), heading);
+      assert_eq!(size_of("link"), heading);
+      checked = true;
+    });
+    assert!(checked);
+  }
+
+  /// A rule takes a row of its own, with one blank row above and below it, as between two paragraphs.
+  #[test]
+  fn a_rule_has_one_blank_row_on_each_side() {
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let style = MarkdownStyle::default();
+      let mut galley = |text: &str| {
+        let markdown = crate::parse(text);
+        let font = FontId::proportional(14.0);
+        let color = ui.visuals().text_color();
+        let layout =
+          build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+        ui.fonts_mut(|f| f.layout_job(layout.job))
+      };
+      let paragraphs = galley("Above\n\nBelow");
+      let rule = galley("Above\n\n---\n\nBelow");
+      let line = MARKDOWN_LINE_HEIGHT_POINTS.unwrap();
+      let added = rule.size().y - paragraphs.size().y;
+      assert!((added - (style.horizontal_rule.height + line)).abs() < 0.5, "the rule added {added} points");
+
+      checked = true;
+    });
+    assert!(checked);
+  }
+
+  /// Text that starts a row, such as the text after a block widget that split its paragraph, drops its
+  /// leading spaces. Text in the middle of a row keeps them.
+  #[test]
+  fn text_that_starts_a_row_drops_its_leading_spaces() {
+    let plain = crate::types::TokenStyle::default;
+    let tokens = [
+      Token::Text { text: pulldown_cmark::CowStr::Borrowed(" after"), style: plain() },
+      Token::Text { text: pulldown_cmark::CowStr::Borrowed(" more"), style: plain() },
+      Token::Newline,
+      Token::Text { text: pulldown_cmark::CowStr::Borrowed("  next"), style: plain() },
+    ];
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let style = MarkdownStyle::default();
+      let color = ui.visuals().text_color();
+      let font = FontId::proportional(14.0);
+      let layout = build_layout(ui, &tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+      assert_eq!(layout.job.text, "after more\nnext");
+      assert_eq!(layout.section_to_token, vec![0, 1, 2, 3]);
+      checked = true;
+    });
+    assert!(checked);
+  }
 
   /// Each section of the job maps to the token that wrote it, so a hover on the text after a link
   /// does not find an earlier link.

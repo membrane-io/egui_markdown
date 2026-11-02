@@ -8,5 +8,5 @@ Closes #<!-- issue number -->
 
 ---
 
-- [ ] I have run `./scripts/check.sh`
+- [ ] I have run `./check.sh`
 - [ ] I have added tests or examples for non-trivial changes
