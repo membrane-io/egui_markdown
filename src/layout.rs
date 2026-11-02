@@ -219,8 +219,9 @@ pub fn render_link_in_ui(
 
   if response.hovered() {
     ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
-    if !is_inline_widget {
-      let underline_color = link_handler.and_then(|h| h.link_style(href).and_then(|s| s.color)).unwrap_or(link_color);
+    let link_style = link_handler.and_then(|h| h.link_style(href));
+    if !is_inline_widget && link_style.as_ref().is_none_or(|style| style.underline) {
+      let underline_color = link_style.and_then(|style| style.color).unwrap_or(link_color);
       ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0_f32, underline_color));
     }
   }
@@ -249,6 +250,38 @@ fn apply_bold(format: &mut TextFormat, ui: &Ui, has_bold: bool) {
   } else {
     format.color = ui.visuals().strong_text_color();
   }
+}
+
+/// The format of text with the inline `style`: bold, italic, strikethrough, the heading size, and the
+/// inline code colors.
+fn styled_format(
+  base_format: &TextFormat,
+  style: &crate::types::TokenStyle,
+  ui: &Ui,
+  bold_available: bool,
+  color: Color32,
+  markdown_style: &MarkdownStyle,
+) -> TextFormat {
+  let mut format = base_format.clone();
+  if style.bold {
+    apply_bold(&mut format, ui, bold_available);
+  }
+  if style.italic {
+    format.italics = true;
+  }
+  if style.strikethrough {
+    format.strikethrough = Stroke::new(1.0_f32, color);
+  }
+  if let Some(level) = style.heading {
+    format.color = ui.visuals().strong_text_color();
+    apply_bold(&mut format, ui, bold_available);
+    let idx = (level as usize).saturating_sub(1).min(5);
+    format.font_id.size *= markdown_style.heading.scales[idx];
+  }
+  if style.inline_code {
+    apply_inline_code_bg(&mut format, ui.visuals().dark_mode, &markdown_style.inline_code);
+  }
+  format
 }
 
 /// Width of each line's leading whitespace, in points, using the code font.
@@ -341,34 +374,19 @@ pub fn build_layout(
         if text.is_empty() {
           continue;
         }
-        let mut format = base_format.clone();
-
-        if style.bold {
-          apply_bold(&mut format, ui, bold_available);
-        }
-        if style.italic {
-          format.italics = true;
-        }
-        if style.strikethrough {
-          format.strikethrough = Stroke::new(1.0_f32, color);
-        }
+        let format = styled_format(&base_format, style, ui, bold_available, color, style_ref);
         if style.inline_code {
-          apply_inline_code_bg(&mut format, ui.visuals().dark_mode, &style_ref.inline_code);
-          push_section(&mut job, " ", 0.0, transparent_format.clone());
+          // Transparent spaces on both sides keep the expanded background off the next glyph.
+          // The spacer takes only the font of the code, so it is as tall as the code and draws no background.
+          let spacer = TextFormat { font_id: format.font_id.clone(), ..transparent_format.clone() };
+          push_section(&mut job, " ", 0.0, spacer.clone());
           section_to_token.push(token_index);
           push_section(&mut job, text.as_ref(), 0.0, format);
           section_to_token.push(token_index);
-          push_section(&mut job, " ", 0.0, transparent_format.clone());
+          push_section(&mut job, " ", 0.0, spacer);
           section_to_token.push(token_index);
           continue;
         }
-        if let Some(level) = style.heading {
-          format.color = ui.visuals().strong_text_color();
-          apply_bold(&mut format, ui, bold_available);
-          let idx = (level as usize).saturating_sub(1).min(5);
-          format.font_id.size *= style_ref.heading.scales[idx];
-        }
-
         push_section(&mut job, text.as_ref(), 0.0, format);
         section_to_token.push(token_index);
       }
@@ -480,9 +498,11 @@ pub fn build_layout(
           section_to_token.push(token_index);
         }
       }
-      Token::Link { text, href, .. } => {
-        let link_base = text_format(font_id.clone(), color);
-        let info = append_link_to_job(ui, &mut job, text, href, &font_id, &link_base, hyperlink_color, link_handler);
+      Token::Link { text, href, style, .. } => {
+        // A link takes the size, weight and slant of the text around it, and keeps its own color.
+        let link_base = styled_format(&base_format, style, ui, bold_available, color, style_ref);
+        let link_font = link_base.font_id.clone();
+        let info = append_link_to_job(ui, &mut job, text, href, &link_font, &link_base, hyperlink_color, link_handler);
         if info.is_block_widget {
           segment_breaks.push(token_index);
         } else {
@@ -1004,6 +1024,30 @@ pub fn highlight_code(
 #[cfg(test)]
 mod section_tests {
   use super::*;
+
+  /// Code and links inside a heading have the size of the heading.
+  #[test]
+  fn code_and_links_in_a_heading_have_the_heading_size() {
+    let markdown = crate::parse("# Title `code` [link](u)");
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let style = MarkdownStyle::default();
+      let font = FontId::proportional(14.0);
+      let color = ui.visuals().text_color();
+      let layout =
+        build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+      let size_of = |text: &str| {
+        let section = layout.job.sections.iter().find(|s| &layout.job.text[s.byte_range.as_usize()] == text).unwrap();
+        section.format.font_id.size
+      };
+      let heading = 14.0 * style.heading.scales[0];
+      assert_eq!(size_of("Title "), heading);
+      assert_eq!(size_of("code"), heading);
+      assert_eq!(size_of("link"), heading);
+      checked = true;
+    });
+    assert!(checked);
+  }
 
   /// Each section of the job maps to the token that wrote it, so a hover on the text after a link
   /// does not find an earlier link.

@@ -19,8 +19,9 @@ pub trait LinkHandler {
   }
 
   /// The text of the tooltip that shows while the pointer is on the link, for example where the link goes
-  /// when its text does not say. Return `None` for no tooltip, or for the href when
-  /// [`egui::Style::url_in_tooltip`] is set.
+  /// when its text does not say. Return `None` for the title of the link, such as `"Docs"` in
+  /// `[text](url "Docs")`. A link with no title shows the href when [`egui::Style::url_in_tooltip`] is
+  /// set, and no tooltip when it is not.
   fn hover_text(&self, _href: &str) -> Option<String> {
     None
   }
@@ -86,9 +87,10 @@ pub trait LinkHandler {
 }
 
 /// Visual style overrides for a specific link.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LinkStyle {
   /// Custom text color, or `None` for the default hyperlink color.
   pub color: Option<Color32>,
-  /// Whether to draw an underline beneath the link text.
+  /// Whether to draw an underline under the link text while the pointer is on the link.
   pub underline: bool,
 }

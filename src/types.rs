@@ -31,6 +31,8 @@ pub enum Token<'s> {
     href: CowStr<'s>,
     /// Optional hover title.
     title: Option<CowStr<'s>>,
+    /// The inline style around the link, such as the heading level of a link inside a heading.
+    style: TokenStyle,
   },
   /// List item bullet or number, such as `"• "` or `"1. "`.
   ListMarker {
@@ -142,10 +144,11 @@ impl<'s> Hash for Token<'s> {
         text.as_ref().hash(state);
         language.as_ref().map(|l| l.as_ref()).hash(state);
       }
-      Token::Link { text, href, title } => {
+      Token::Link { text, href, title, style } => {
         text.as_ref().hash(state);
         href.as_ref().hash(state);
         title.as_ref().map(|t| t.as_ref()).hash(state);
+        style.hash(state);
       }
       Token::ListMarker { marker, indent_level } => {
         marker.as_ref().hash(state);

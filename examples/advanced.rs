@@ -6,9 +6,7 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use eframe::egui::{
-  self, text::LayoutJob, Color32, FontDefinitions, FontFamily, FontId, Rect, Response, RichText, TextFormat, Ui, Vec2,
-};
+use eframe::egui::{self, text::LayoutJob, Color32, FontId, Rect, Response, RichText, TextFormat, Ui, Vec2};
 use egui_markdown::{LinkHandler, LinkStyle, MarkdownLabel, MarkdownStyle};
 
 fn main() -> eframe::Result {
@@ -37,9 +35,9 @@ struct AdvancedApp {
 }
 
 impl AdvancedApp {
-  fn new(cc: &eframe::CreationContext<'_>) -> Self {
-    install_bold_font(&cc.egui_ctx);
-
+  // egui ships no bold font, so bold text uses the strong text color. An app that registers a
+  // `"bold"` font family gets real bold glyphs instead.
+  fn new(_cc: &eframe::CreationContext<'_>) -> Self {
     Self {
       markdown_input: DEFAULT_MARKDOWN.to_string(),
       show_editor: true,
@@ -54,16 +52,6 @@ impl AdvancedApp {
       last_stream_tick: Instant::now(),
     }
   }
-}
-
-fn install_bold_font(ctx: &egui::Context) {
-  let mut fonts = FontDefinitions::default();
-  // Use the built-in proportional font data as "bold" (real apps would load an actual bold font)
-  if let Some(font_data) = fonts.font_data.get("Ubuntu-Light").cloned() {
-    fonts.font_data.insert("Bold".to_owned(), font_data);
-    fonts.families.insert(FontFamily::Name("bold".into()), vec!["Bold".to_owned()]);
-  }
-  ctx.set_fonts(fonts);
 }
 
 struct DemoLinkHandler;
@@ -264,7 +252,9 @@ impl eframe::App for AdvancedApp {
               .code_block_buttons(&code_block_header)
               .scroll_code_blocks(true)
               .style(&self.markdown_style)
-              .heal(self.simulate_stream)
+              // Heal only while the text is incomplete. A complete document that ends in `[x]` would
+              // heal into a link.
+              .heal(self.simulate_stream && self.stream_pos < self.stream_source.len())
               .show(ui);
           },
         );

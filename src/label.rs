@@ -173,10 +173,11 @@ fn token_to_owned(t: &Token<'_>) -> Token<'static> {
     Token::CodeBlock { text, language } => {
       Token::CodeBlock { text: cowstr_to_owned(text), language: language.as_ref().map(|l| cowstr_to_owned(l)) }
     }
-    Token::Link { text, href, title } => Token::Link {
+    Token::Link { text, href, title, style } => Token::Link {
       text: cowstr_to_owned(text),
       href: cowstr_to_owned(href),
       title: title.as_ref().map(|t| cowstr_to_owned(t)),
+      style: style.clone(),
     },
     Token::ListMarker { marker, indent_level } => {
       Token::ListMarker { marker: cowstr_to_owned(marker), indent_level: *indent_level }
@@ -803,7 +804,9 @@ impl<'a> MarkdownLabel<'a> {
         }
         #[cfg(not(feature = "images"))]
         Token::Image { alt, url, .. } => {
+          let had_content = text_start < i;
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, text_hash) {
             i += 1;
@@ -829,7 +832,9 @@ impl<'a> MarkdownLabel<'a> {
           text_start = i;
         }
         Token::BlockquoteStart => {
+          let had_content = text_start < i;
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, out);
+          before_block(had_content, ui);
 
           // Find the matching BlockquoteEnd.
           let bq_start = i + 1;
@@ -1135,42 +1140,25 @@ impl<'a> MarkdownLabel<'a> {
       return Some(section_index);
     }
 
-    let stroke = match token {
-      Some(Token::Link { href, .. }) => {
-        let link_color = if let Some(handler) = self.link_handler {
-          handler.link_style(href).and_then(|s| s.color).unwrap_or(ui.visuals().hyperlink_color)
-        } else {
-          ui.visuals().hyperlink_color
-        };
-        Some(Stroke::new(1.0_f32, link_color))
-      }
-      _ => None,
-    };
-
-    if let Some(stroke) = stroke {
+    let Some(Token::Link { href, title, .. }) = token else { return Some(section_index) };
+    let link_style = self.link_handler.and_then(|handler| handler.link_style(href));
+    let underline = link_style.as_ref().is_none_or(|style| style.underline);
+    if underline {
+      let link_color = link_style.and_then(|style| style.color).unwrap_or(ui.visuals().hyperlink_color);
+      let stroke = Stroke::new(1.0_f32, link_color);
       // Find all sections belonging to the same token (for multi-section layout_link).
       let target_token = token_index.unwrap();
+      let mut sec_start_char = 0u32;
       for (sec_idx, &tok_idx) in section_to_token.iter().enumerate() {
-        if tok_idx != target_token {
+        let section = &galley.job.sections[sec_idx];
+        let sec_char_count = galley.job.text[section.byte_range.as_usize()].chars().count() as u32;
+        let sec_end_char = sec_start_char + sec_char_count;
+        let start_char = std::mem::replace(&mut sec_start_char, sec_end_char);
+        if tok_idx != target_token || sec_end_char <= start_char {
           continue;
         }
 
-        // Find the char range for this section.
-        let mut sec_start_char = 0u32;
-        for s in &galley.job.sections[..sec_idx] {
-          sec_start_char += galley.job.text[s.byte_range.as_usize()].chars().count() as u32;
-        }
-        let sec_char_count = galley.job.sections[sec_idx]
-          .byte_range
-          .as_usize()
-          .len()
-          .min(galley.job.text[galley.job.sections[sec_idx].byte_range.as_usize()].chars().count());
-        let sec_end_char = sec_start_char + sec_char_count as u32;
-        if sec_end_char <= sec_start_char {
-          continue;
-        }
-
-        let Some((sg, sr)) = glyph_at_index(galley, sec_start_char) else { continue };
+        let Some((sg, sr)) = glyph_at_index(galley, start_char) else { continue };
         let Some((eg, er)) = glyph_at_index(galley, sec_end_char.saturating_sub(1)) else { continue };
 
         for row_index in sr..=er {
@@ -1187,17 +1175,17 @@ impl<'a> MarkdownLabel<'a> {
           }
         }
       }
-      ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
+    }
+    ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
 
-      // The hover text of the handler comes first. The href shows when url_in_tooltip is set, as egui's
-      // Hyperlink does.
-      if let Some(Token::Link { href, .. }) = token {
-        if let Some(text) = self.link_handler.and_then(|handler| handler.hover_text(href)) {
-          response.clone().on_hover_text_at_pointer(text);
-        } else if ui.style().url_in_tooltip {
-          response.clone().on_hover_text_at_pointer(href.as_ref());
-        }
-      }
+    // The hover text of the handler comes first, then the title of the link. The href shows when
+    // url_in_tooltip is set, as egui's Hyperlink does.
+    if let Some(text) = self.link_handler.and_then(|handler| handler.hover_text(href)) {
+      response.clone().on_hover_text_at_pointer(text);
+    } else if let Some(title) = title {
+      response.clone().on_hover_text_at_pointer(title.as_ref());
+    } else if ui.style().url_in_tooltip {
+      response.clone().on_hover_text_at_pointer(href.as_ref());
     }
 
     Some(section_index)

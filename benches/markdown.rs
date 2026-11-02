@@ -127,6 +127,22 @@ fn bench_render(c: &mut Criterion) {
   }
   c.bench_function("render_steady_state", |b| b.iter(|| frame(&ctx, 700.0)));
 
+  // A long document, where a cost that grows with the document shows over the cost of the
+  // rows that show.
+  let long_doc = generate_document(500);
+  let long_frame = |ctx: &Context| {
+    let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 700.0));
+    let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      MarkdownLabel::new(Id::new("md"), black_box(&long_doc)).show(&mut child);
+    });
+  };
+  let ctx = Context::default();
+  for _ in 0..10 {
+    long_frame(&ctx);
+  }
+  c.bench_function("render_steady_state_long", |b| b.iter(|| long_frame(&ctx)));
+
   let ctx = Context::default();
   let mut width = 600.0f32;
   c.bench_function("render_resizing", |b| {

@@ -51,7 +51,7 @@ fn append_text<'s>(slot: &mut Option<CowStr<'s>>, text: CowStr<'s>) {
 ///
 /// assert_eq!(heal("hello"), "hello");
 /// assert_eq!(heal("```rust\nlet x = 1;"), "```rust\nlet x = 1;\n```");
-/// assert_eq!(heal("~~~python\nprint()"), "~~~python\nprint()\n```");
+/// assert_eq!(heal("~~~python\nprint()"), "~~~python\nprint()\n~~~");
 /// assert_eq!(heal("**bold text"), "**bold text**");
 /// assert_eq!(heal("_italic"), "_italic_");
 /// assert_eq!(heal("[link text"), "[link text]()");
@@ -60,20 +60,18 @@ fn append_text<'s>(slot: &mut Option<CowStr<'s>>, text: CowStr<'s>) {
 /// assert_eq!(heal("\\*escaped"), "\\*escaped");
 /// ```
 pub fn heal(s: &str) -> Cow<'_, str> {
-  let mut in_fence = false;
+  let mut fence = None;
   for line in s.lines() {
-    let trimmed = line.trim();
-    if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-      in_fence = !in_fence;
-    }
+    fence = next_fence(fence, line);
   }
-  if in_fence {
-    let mut healed = String::with_capacity(s.len() + 4);
+  if let Some(fence) = fence {
+    // Only a run of the same character, at least as long as the opener, closes a fence.
+    let mut healed = String::with_capacity(s.len() + fence.len + 1);
     healed.push_str(s);
     if !s.ends_with('\n') {
       healed.push('\n');
     }
-    healed.push_str("```");
+    healed.extend(std::iter::repeat_n(fence.marker, fence.len));
     return Cow::Owned(healed);
   }
 
@@ -91,6 +89,34 @@ pub fn heal(s: &str) -> Cow<'_, str> {
   healed.push_str(&table_suffix);
   healed.push_str(&inline_suffix);
   Cow::Owned(healed)
+}
+
+/// The opening run of a fenced code block.
+#[derive(Clone, Copy)]
+struct Fence {
+  marker: char,
+  len: usize,
+}
+
+/// The open fence after `line`, given the open fence before it.
+///
+/// A fence opens with a run of 3 or more backticks or tildes, and a backtick fence has no backtick
+/// after its run. It closes with a run of the same character that is at least as long, with nothing
+/// after it. So a backtick run inside a tilde fence, or a short run inside a long fence, is code.
+fn next_fence(open: Option<Fence>, line: &str) -> Option<Fence> {
+  let body = line.trim_start();
+  let Some(marker) = body.chars().next().filter(|c| matches!(c, '`' | '~')) else { return open };
+  let len = body.len() - body.trim_start_matches(marker).len();
+  if len < 3 {
+    return open;
+  }
+  let rest = &body[len..];
+  match open {
+    Some(fence) if fence.marker == marker && len >= fence.len && rest.trim().is_empty() => None,
+    Some(fence) => Some(fence),
+    None if marker == '`' && rest.contains('`') => None,
+    None => Some(Fence { marker, len }),
+  }
 }
 
 /// `s` without its last line when that line holds only block markers, or when that line is a
@@ -166,10 +192,19 @@ fn strip_list_marker(body: &str) -> Option<&str> {
 /// it shows when the next character arrives.
 fn without_marker_run(s: &str) -> &str {
   let last_line = s[s.rfind('\n').map_or(0, |newline| newline + 1)..].trim_start();
-  if last_line.starts_with("```") || last_line.starts_with("~~~") {
+  if last_line.starts_with("```") || last_line.starts_with("~~~") || ends_with_footnote_ref(s) {
     return s;
   }
   s.trim_end_matches(['*', '_', '~', '`', '[', ']', '\\'])
+}
+
+/// Whether `s` ends with a complete footnote reference such as `[^1]`, which no later text changes.
+fn ends_with_footnote_ref(s: &str) -> bool {
+  let Some(body) = s.strip_suffix(']') else { return false };
+  body.rfind("[^").is_some_and(|start| {
+    let label = &body[start + 2..];
+    !label.is_empty() && !label.contains([']', '[']) && !label.contains(char::is_whitespace)
+  })
 }
 
 /// The input to keep, and the closers to append to it.
@@ -177,7 +212,7 @@ fn without_marker_run(s: &str) -> &str {
 /// When the input ends inside a link URL, the input to keep ends before the `(`. The closers
 /// then start with `()`, so the link has an empty href until its `)` arrives.
 fn heal_inline(s: &str) -> (&str, String) {
-  let mut in_fence = false;
+  let mut fence = None;
   let mut in_inline_code = false;
   let mut open_star_bold = false;
   let mut open_star_italic = false;
@@ -196,11 +231,9 @@ fn heal_inline(s: &str) -> (&str, String) {
     line_start += raw.len();
     let line = raw.strip_suffix('\n').map_or(raw, |line| line.strip_suffix('\r').unwrap_or(line));
     let trimmed = line.trim();
-    if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-      in_fence = !in_fence;
-      continue;
-    }
-    if in_fence {
+    let was_in_fence = fence.is_some();
+    fence = next_fence(fence, line);
+    if was_in_fence || fence.is_some() {
       continue;
     }
     // A blank line ends the paragraph, and no inline construct continues past it.
@@ -383,11 +416,8 @@ fn heal_table(s: &str) -> String {
     return String::new();
   }
 
-  // Find last non-empty line.
-  let mut last_idx = lines.len() - 1;
-  while last_idx > 0 && lines[last_idx].trim().is_empty() {
-    last_idx -= 1;
-  }
+  // A blank line after the header ends the block, so a separator after it would show as text.
+  let last_idx = lines.len() - 1;
   let last = lines[last_idx].trim();
 
   // Case 1: Last line is a complete table header row - needs a separator.
@@ -428,8 +458,10 @@ fn is_full_separator(line: &str) -> bool {
   is_separator_like(line) && line.contains('-') && line.matches('|').count() >= 3
 }
 
+/// The cells of a row that starts and ends with `|`, counting empty cells. An escaped `\|` is text
+/// inside a cell.
 fn count_table_columns(row: &str) -> usize {
-  row.split('|').filter(|s| !s.trim().is_empty()).count()
+  row.replace("\\|", "").matches('|').count().saturating_sub(1)
 }
 
 /// Parse a markdown string into a [`Markdown`] token stream.
@@ -549,8 +581,10 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           if in_link {
             append_text(&mut link_text, text.clone());
           } else {
-            current_cell
-              .push(Token::Text { text: text.clone(), style: TokenStyle { inline_code: true, ..Default::default() } });
+            current_cell.push(Token::Text {
+              text: text.clone(),
+              style: TokenStyle { inline_code: true, ..current_style.clone() },
+            });
           }
           continue;
         }
@@ -600,7 +634,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           in_link = false;
           let text = link_text.take().unwrap_or_else(|| CowStr::Boxed("".into()));
           if let Some(url) = link_href.take() {
-            current_cell.push(Token::Link { text, href: url, title: link_title.take() });
+            current_cell.push(Token::Link { text, href: url, title: link_title.take(), style: current_style.clone() });
           }
           continue;
         }
@@ -637,7 +671,8 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
         } else if in_link {
           append_text(&mut link_text, text);
         } else {
-          let code_style = TokenStyle { inline_code: true, ..Default::default() };
+          // Inline code keeps the style around it, so code inside a heading has the size of the heading.
+          let code_style = TokenStyle { inline_code: true, ..current_style.clone() };
           tokens.push(Token::Text { text, style: code_style });
         }
       }
@@ -822,7 +857,7 @@ pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
           in_link = false;
           let text = link_text.take().unwrap_or_else(|| CowStr::Boxed("".into()));
           if let Some(url) = link_href.take() {
-            tokens.push(Token::Link { text, href: url, title: link_title.take() });
+            tokens.push(Token::Link { text, href: url, title: link_title.take(), style: current_style.clone() });
           }
         }
         TagEnd::Image => {
@@ -1414,7 +1449,7 @@ mod tests {
   fn heal_tilde_fence() {
     let input = "~~~python\nprint('hi')";
     let healed = super::heal(input);
-    assert!(healed.ends_with("```"));
+    assert!(healed.ends_with("\n~~~"));
     let md = parse(&healed);
     assert!(md.tokens.iter().any(|t| matches!(t, Token::CodeBlock { .. })));
   }
@@ -1538,7 +1573,7 @@ mod tests {
     let md = parse("[click](https://example.com \"Example Title\")");
     let link = md.tokens.iter().find(|t| matches!(t, Token::Link { .. }));
     assert!(link.is_some());
-    if let Some(Token::Link { text, href, title }) = link {
+    if let Some(Token::Link { text, href, title, .. }) = link {
       assert_eq!(text.as_ref(), "click");
       assert_eq!(href.as_ref(), "https://example.com");
       assert_eq!(title.as_deref(), Some("Example Title"));
@@ -1612,6 +1647,73 @@ mod tests {
     let md = parse("- item\n\n  ```\n  code\n  ```\n- next");
     let code = md.tokens.iter().position(|t| matches!(t, Token::CodeBlock { .. })).unwrap();
     assert!(md.tokens[code - 1].is_newline(), "{:?}", md.tokens);
+  }
+
+  #[test]
+  fn heal_closes_a_fence_with_a_run_like_its_opener() {
+    assert_eq!(super::heal("~~~py\nprint()"), "~~~py\nprint()\n~~~");
+    assert_eq!(super::heal("````md\n```rust\nx\n```"), "````md\n```rust\nx\n```\n````");
+    let healed = super::heal("~~~py\nprint()");
+    let md = parse(&healed);
+    assert!(matches!(md.tokens.first(), Some(Token::CodeBlock { text, .. }) if text.as_ref() == "print()"));
+  }
+
+  #[test]
+  fn heal_keeps_a_backtick_run_inside_a_tilde_fence_as_code() {
+    let input = "~~~\n```\n~~~\n\ntext";
+    assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
+    assert_eq!(super::heal("~~~\n```\n~~~\n\n**bold"), "~~~\n```\n~~~\n\n**bold**");
+  }
+
+  #[test]
+  fn heal_keeps_a_footnote_ref_at_the_end() {
+    assert_eq!(super::heal("See note.[^1]"), "See note.[^1]");
+    assert_eq!(super::heal("See [^1] and **more"), "See [^1] and **more**");
+  }
+
+  #[test]
+  fn heal_table_counts_empty_cells() {
+    assert_eq!(super::heal("| A | | C |\n"), "| A | | C |\n|---|---|---|");
+    let healed = super::heal("| A | | C |\n");
+    let md = parse(&healed);
+    assert!(matches!(md.tokens.first(), Some(Token::Table(data)) if data.headers.len() == 3));
+  }
+
+  #[test]
+  fn heal_table_adds_no_separator_after_a_blank_line() {
+    assert!(matches!(super::heal("| A | B |\n\n"), std::borrow::Cow::Borrowed(_)));
+  }
+
+  #[test]
+  fn inline_code_keeps_the_style_around_it() {
+    let md = parse("# The `foo` fn and **bold `code`**");
+    let code: Vec<_> = md
+      .tokens
+      .iter()
+      .filter_map(|t| match t {
+        Token::Text { style, .. } if style.inline_code => Some(style.clone()),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(code.len(), 2);
+    assert!(code.iter().all(|style| style.heading == Some(1)));
+    assert!(code[1].bold);
+  }
+
+  #[test]
+  fn a_link_keeps_the_style_around_it() {
+    let md = parse("## See [docs](u) and *[more](v)*");
+    let styles: Vec<_> = md
+      .tokens
+      .iter()
+      .filter_map(|t| match t {
+        Token::Link { style, .. } => Some(style.clone()),
+        _ => None,
+      })
+      .collect();
+    assert_eq!(styles.len(), 2);
+    assert!(styles.iter().all(|style| style.heading == Some(2)));
+    assert!(!styles[0].italic && styles[1].italic);
   }
 
   #[test]
