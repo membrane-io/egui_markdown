@@ -55,6 +55,7 @@ footnotes.
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `syntax_highlighting` | Yes | Syntax-highlighted code blocks through `syntect`. |
+| `extra_syntaxes` | No | The syntaxes of `bat` through `two-face`, with TypeScript, TSX and JSX. It makes the binary larger. |
 | `images` | No | Inline image rendering through the `egui_extras` image support. |
 | `svg` | No | SVG image support through `egui_extras`. |
 | `membrane` | No | Rendering that needs [the Membrane egui fork](https://github.com/membrane-io/egui). It does not compile against published egui. See the section below. |

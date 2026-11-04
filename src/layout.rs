@@ -605,6 +605,8 @@ mod syntect_code {
 
   use super::CodeThemeArg;
 
+  /// The syntect syntaxes have no TypeScript and no JSX, so those languages use JavaScript.
+  #[cfg(not(feature = "extra_syntaxes"))]
   fn effective_code_language(language: &str) -> &str {
     match language {
       "typescript" | "ts" | "tsx" => "javascript",
@@ -613,8 +615,28 @@ mod syntect_code {
     }
   }
 
+  /// The `two-face` TypeScript and TSX syntaxes are the TypeScript grammar of VS Code. VS Code
+  /// generates its JavaScript grammar from the TSX grammar, so JavaScript and JSX use TSX too. A
+  /// VS Code theme then colors a code block as VS Code colors the same file.
+  #[cfg(feature = "extra_syntaxes")]
+  fn effective_code_language(language: &str) -> &str {
+    match language {
+      "javascript" | "js" | "jsx" => "tsx",
+      other => other,
+    }
+  }
+
+  #[cfg(not(feature = "extra_syntaxes"))]
   fn syntax_set() -> &'static SyntaxSet {
     static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+    &SYNTAX_SET
+  }
+
+  /// The syntaxes of `bat`, through `two-face`. They add TypeScript, TSX and many other languages
+  /// to the syntect syntaxes.
+  #[cfg(feature = "extra_syntaxes")]
+  fn syntax_set() -> &'static SyntaxSet {
+    static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
     &SYNTAX_SET
   }
 
