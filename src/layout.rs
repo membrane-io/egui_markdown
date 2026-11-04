@@ -36,10 +36,10 @@ pub struct LayoutResult {
   pub hr_positions: Vec<usize>,
   /// Current blockquote nesting depth at the end of layout.
   pub blockquote_depth: u32,
-  /// Inline widget spans: `(start_char, end_char, token_index)`.
-  /// Each entry marks a transparent placeholder region that a [`LinkHandler`]
-  /// will paint over after galley positioning.
-  pub inline_widget_spans: Vec<(usize, usize, usize)>,
+  /// Inline widget spans: `(start_char, end_char, token_index, font)`, with the font that
+  /// [`LinkHandler::layout_link`] received. Each entry marks a transparent placeholder region that a
+  /// [`LinkHandler`] will paint over after galley positioning.
+  pub inline_widget_spans: Vec<(usize, usize, usize, FontId)>,
 }
 
 /// Look up the section index for a given character offset by walking LayoutJob sections.
@@ -206,15 +206,14 @@ pub fn render_link_in_ui(
   let galley = ui.fonts_mut(|f| f.layout_job(job));
   let size = galley.size();
   let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-  ui.painter().galley(rect.min, galley, link_color);
+  ui.painter().galley(rect.min, galley.clone(), link_color);
 
   let is_inline_widget = info.inline_widget_span.is_some();
-  if is_inline_widget {
-    if let Some(handler) = link_handler {
-      ui.push_id(("link_widget", href), |ui| {
-        handler.paint_inline_widget(ui, text, href, font_id, rect);
-      });
-    }
+  if let (Some((start, end)), Some(handler)) = (info.inline_widget_span, link_handler) {
+    let rows = crate::label::inline_widget_rows(&galley, rect.min, start..end);
+    ui.push_id(("link_widget", href), |ui| {
+      handler.paint_inline_widget(ui, text, href, font_id, &rows);
+    });
   }
 
   if response.hovered() {
@@ -351,7 +350,7 @@ pub fn build_layout(
   let mut segment_breaks: Vec<usize> = Vec::new();
   let mut blockquote_depth: u32 = 0;
   let mut hr_positions: Vec<usize> = Vec::new();
-  let mut inline_widget_spans: Vec<(usize, usize, usize)> = Vec::new();
+  let mut inline_widget_spans: Vec<(usize, usize, usize, FontId)> = Vec::new();
 
   // Pre-build common formats to avoid repeated font_id.clone().
   let base_format = text_format(font_id.clone(), color);
@@ -511,7 +510,7 @@ pub fn build_layout(
             section_to_token.push(token_index);
           }
           if let Some((start_char, end_char)) = info.inline_widget_span {
-            inline_widget_spans.push((start_char, end_char, token_index));
+            inline_widget_spans.push((start_char, end_char, token_index, font_id.clone()));
           }
         }
       }

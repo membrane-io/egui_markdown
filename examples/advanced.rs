@@ -6,8 +6,8 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use eframe::egui::{self, text::LayoutJob, Color32, FontId, Rect, Response, RichText, TextFormat, Ui, Vec2};
-use egui_markdown::{LinkHandler, LinkStyle, MarkdownLabel, MarkdownStyle};
+use eframe::egui::{self, text::LayoutJob, Color32, FontId, Response, RichText, TextFormat, Ui, Vec2};
+use egui_markdown::{InlineWidgetRow, LinkHandler, LinkStyle, MarkdownLabel, MarkdownStyle};
 
 fn main() -> eframe::Result {
   env_logger::init();
@@ -103,20 +103,23 @@ impl LinkHandler for DemoLinkHandler {
     }
   }
 
-  fn paint_inline_widget(&self, ui: &mut Ui, text: &str, href: &str, _font: &FontId, rect: Rect) {
+  fn paint_inline_widget(&self, ui: &mut Ui, text: &str, href: &str, _font: &FontId, rows: &[InlineWidgetRow]) {
     if !href.starts_with("badge://") {
       return;
     }
     let fill = Color32::from_rgb(80, 160, 80);
-    let rounding = rect.height() * 0.5;
-    ui.painter().rect_filled(rect, rounding, fill);
-    ui.painter().text(
-      rect.center(),
-      egui::Align2::CENTER_CENTER,
-      text,
-      FontId::proportional(rect.height() - 6.0),
-      Color32::WHITE,
-    );
+    for row in rows {
+      let rect = row.rect;
+      let rounding = rect.height() * 0.5;
+      ui.painter().rect_filled(rect, rounding, fill);
+      ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        FontId::proportional(rect.height() - 6.0),
+        Color32::WHITE,
+      );
+    }
   }
 
   fn is_block_widget(&self, href: &str) -> bool {

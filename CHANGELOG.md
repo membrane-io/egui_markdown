@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was `10.0`, which was small beside egui's 12.5 point body text. An app that wants the old size sets
   it.
 - **Breaking:** the crates need Rust 1.95, which egui 0.36 needs. `rust-version` said 1.80.
+- **Breaking:** `LinkHandler::paint_inline_widget` now runs once for each link, not once for each
+  row. It receives the font of the link and an `InlineWidgetRow` for each row, with the rect and the
+  characters of the row, so one widget can paint and react to hover over all of its rows.
 - `heal()` removes a last line that holds only block markers, such as `-` or `1.`, and a run of
   inline markers at the end, such as `**`. It also removes the URL of an open link, so the link
   has an empty href until its `)` arrives. A click on a link with an empty href opens no URL.
