@@ -1447,7 +1447,8 @@ pub(crate) fn inline_widget_rows(galley: &Galley, origin: Pos2, chars: std::ops:
     let first = &row.glyphs[start - row_chars.start];
     let last = &row.glyphs[end - 1 - row_chars.start];
     let rect = Rect::from_min_max(pos2(first.pos.x, row.min_y()), pos2(last.max_x(), row.max_y()));
-    rows.push(InlineWidgetRow { rect: rect.translate(origin.to_vec2()), chars: start - chars.start..end - chars.start });
+    rows
+      .push(InlineWidgetRow { rect: rect.translate(origin.to_vec2()), chars: start - chars.start..end - chars.start });
   }
   rows
 }
