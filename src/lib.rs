@@ -60,7 +60,7 @@ pub use egui_markdown_style::{global_style, set_style};
 pub use label::{cursor_from_pos, glyph_at_index, last_non_whitespace_glyph, OverflowWrap};
 pub use label::{MarkdownLabel, MarkdownLabelOutput};
 pub use layout::CodeThemeArg;
-pub use link::{LinkHandler, LinkStyle};
+pub use link::{InlineWidgetRow, LinkHandler, LinkStyle};
 pub use parser::{heal, parse};
 pub use style::MarkdownStyle;
 pub use types::{Alignment, Markdown, TableData, Token, TokenStyle};

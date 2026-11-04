@@ -1,6 +1,7 @@
 //! Link handler trait and styling for customizing link behavior.
 
 use egui::{text::LayoutJob, Color32, FontId, Rect, Response, Ui, Vec2};
+use std::ops::Range;
 
 /// Trait for customizing link behavior in rendered markdown.
 ///
@@ -60,9 +61,10 @@ pub trait LinkHandler {
 
   /// Paint a widget over the placeholder space reserved by [`Self::inline_widget_size`].
   ///
-  /// Called after galley positioning, once per row the placeholder spans.
-  /// `font` is the font of the text of the label. `rect` is in screen coordinates.
-  fn paint_inline_widget(&self, _ui: &mut Ui, _text: &str, _href: &str, _font: &FontId, _rect: Rect) {}
+  /// Called after galley positioning, once for each link, with one [`InlineWidgetRow`] for each row
+  /// that the placeholder spans, from top to bottom. `font` is the font that [`Self::layout_link`]
+  /// received for the link.
+  fn paint_inline_widget(&self, _ui: &mut Ui, _text: &str, _href: &str, _font: &FontId, _rows: &[InlineWidgetRow]) {}
 
   /// Should this link render as a standalone block-level widget?
   /// When true, the link becomes a segment break and [`Self::block_widget`]
@@ -87,6 +89,17 @@ pub trait LinkHandler {
   fn id(&self) -> u64 {
     0
   }
+}
+
+/// The part of an inline widget placeholder in one row of the galley.
+#[derive(Clone, Debug)]
+pub struct InlineWidgetRow {
+  /// The screen rect from the left edge of the first glyph to the right edge of the last glyph, at the
+  /// full height of the row.
+  pub rect: Rect,
+  /// The characters of the row, counted from the first character that [`LinkHandler::layout_link`]
+  /// appended for the link.
+  pub chars: Range<usize>,
 }
 
 /// Visual style overrides for a specific link.
