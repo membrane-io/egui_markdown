@@ -597,7 +597,7 @@ pub(crate) fn pad_code_body(text: &str) -> String {
 mod syntect_code {
   use std::sync::{Arc, LazyLock};
 
-  use egui::{text::LayoutJob, Color32, FontId, Ui};
+  use egui::{text::LayoutJob, Color32, FontFamily, FontId, Stroke, Ui};
   use epaint::text::Galley;
   use syntect::easy::HighlightLines;
   use syntect::highlighting::{HighlightState, Highlighter, Style};
@@ -605,6 +605,8 @@ mod syntect_code {
 
   use super::CodeThemeArg;
 
+  /// The syntect syntaxes have no TypeScript and no JSX, so those languages use JavaScript.
+  #[cfg(not(feature = "extra_syntaxes"))]
   fn effective_code_language(language: &str) -> &str {
     match language {
       "typescript" | "ts" | "tsx" => "javascript",
@@ -613,8 +615,28 @@ mod syntect_code {
     }
   }
 
+  /// The `two-face` TypeScript and TSX syntaxes are the TypeScript grammar of VS Code. VS Code
+  /// generates its JavaScript grammar from the TSX grammar, so JavaScript and JSX use TSX too. A
+  /// VS Code theme then colors a code block as VS Code colors the same file.
+  #[cfg(feature = "extra_syntaxes")]
+  fn effective_code_language(language: &str) -> &str {
+    match language {
+      "javascript" | "js" | "jsx" => "tsx",
+      other => other,
+    }
+  }
+
+  #[cfg(not(feature = "extra_syntaxes"))]
   fn syntax_set() -> &'static SyntaxSet {
     static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
+    &SYNTAX_SET
+  }
+
+  /// The syntaxes of `bat`, through `two-face`. They add TypeScript, TSX and many other languages
+  /// to the syntect syntaxes.
+  #[cfg(feature = "extra_syntaxes")]
+  fn syntax_set() -> &'static SyntaxSet {
+    static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
     &SYNTAX_SET
   }
 
@@ -652,25 +674,50 @@ mod syntect_code {
     0
   }
 
+  /// The monospace font of a code block. `bold` is the `"mono-bold"` family when the app registers
+  /// one; without it, a bold syntect style keeps the regular family.
+  struct CodeFont {
+    size: f32,
+    bold: Option<FontFamily>,
+  }
+
+  impl CodeFont {
+    fn new(ui: &Ui, size: f32) -> Self {
+      let family = FontFamily::Name("mono-bold".into());
+      let bold = ui.ctx().fonts(|f| f.families().contains(&family)).then_some(family);
+      Self { size, bold }
+    }
+  }
+
   fn append_highlight_ranges_at(
     job: &mut LayoutJob,
     ranges: &[(Style, &str)],
     mut byte_offset: usize,
-    code_font_size: f32,
+    font: &CodeFont,
   ) {
     use egui::text::{ByteIndex, LayoutSection, TextFormat as TF};
+    use syntect::highlighting::FontStyle;
 
     for (syn_style, range) in ranges {
       let byte_start = byte_offset;
       let byte_end = byte_offset + range.len();
       let fg = syn_style.foreground;
+      let color = Color32::from_rgb(fg.r, fg.g, fg.b);
+      let mut font_id = FontId::monospace(font.size);
+      if let Some(bold) = font.bold.as_ref().filter(|_| syn_style.font_style.contains(FontStyle::BOLD)) {
+        font_id.family = bold.clone();
+      }
+      let underline =
+        if syn_style.font_style.contains(FontStyle::UNDERLINE) { Stroke::new(1.0, color) } else { Stroke::NONE };
       #[allow(clippy::useless_conversion)]
       job.sections.push(LayoutSection {
         leading_space: 0.0_f32.into(),
         byte_range: ByteIndex(byte_start)..ByteIndex(byte_end),
         format: TF {
-          font_id: FontId::monospace(code_font_size),
-          color: Color32::from_rgb(fg.r, fg.g, fg.b),
+          font_id,
+          color,
+          italics: syn_style.font_style.contains(FontStyle::ITALIC),
+          underline,
           ..Default::default()
         },
       });
@@ -698,19 +745,19 @@ mod syntect_code {
     ss: &SyntaxSet,
     job: &mut LayoutJob,
     padded_line: &str,
-    code_font_size: f32,
+    font: &CodeFont,
   ) -> (ParseState, HighlightState) {
     let mut h = HighlightLines::from_state(theme, highlight_state.clone(), parse_state.clone());
     match h.highlight_line(padded_line, ss) {
       Ok(ranges) => {
         let byte_offset = job.text.len();
         job.text.push_str(padded_line);
-        append_highlight_ranges_at(job, &ranges, byte_offset, code_font_size);
+        append_highlight_ranges_at(job, &ranges, byte_offset, font);
         let (hs, ps) = h.state();
         (ps, hs)
       }
       Err(_) => {
-        append_plain_padded_line(job, padded_line, code_font_size);
+        append_plain_padded_line(job, padded_line, font.size);
         (parse_state.clone(), highlight_state.clone())
       }
     }
@@ -764,9 +811,9 @@ mod syntect_code {
       let mut parse_state = ParseState::new(syntax);
       let mut highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
       let mut job = LayoutJob { text: String::new(), ..Default::default() };
+      let font = CodeFont::new(ui, code_font_size);
       for line in syntect::util::LinesWithEndings::from(body) {
-        let (ps, hs) =
-          highlight_padded_line_into(syn_theme, &parse_state, &highlight_state, ss, &mut job, line, code_font_size);
+        let (ps, hs) = highlight_padded_line_into(syn_theme, &parse_state, &highlight_state, ss, &mut job, line, &font);
         parse_state = ps;
         highlight_state = hs;
       }
@@ -811,6 +858,7 @@ mod syntect_code {
         && text.len() >= c.frozen_len
         && text.as_bytes()[..c.frozen_len] == c.source.as_bytes()[..c.frozen_len]
     }) {
+      let font = CodeFont::new(ui, code_font_size);
       let rest = &text[cached.frozen_len..];
       let mut consumed = 0usize;
       let mut frozen_job = Arc::unwrap_or_clone(cached.frozen_job);
@@ -824,7 +872,7 @@ mod syntect_code {
           ss,
           &mut frozen_job,
           &padded_line,
-          code_font_size,
+          &font,
         );
         cached.parse_state = ps;
         cached.highlight_state = hs;
@@ -844,7 +892,7 @@ mod syntect_code {
           ss,
           &mut paint_job,
           &padded_tail,
-          code_font_size,
+          &font,
         );
       }
       paint_job.wrap.max_width = f32::INFINITY;
@@ -891,6 +939,7 @@ mod syntect_code {
     ss: &SyntaxSet,
   ) -> StreamingCodeCache {
     let highlighter = Highlighter::new(syn_theme);
+    let font = CodeFont::new(ui, code_font_size);
     let mut parse_state = ParseState::new(syntax);
     let mut highlight_state = HighlightState::new(&highlighter, ScopeStack::new());
     let mut frozen_job = LayoutJob { text: String::new(), ..Default::default() };
@@ -907,7 +956,7 @@ mod syntect_code {
           ss,
           &mut frozen_job,
           &padded_line,
-          code_font_size,
+          &font,
         );
         parse_state = ps;
         highlight_state = hs;
@@ -920,15 +969,8 @@ mod syntect_code {
     let mut paint_job = frozen_job.clone();
     if !incomplete.is_empty() {
       let padded_tail = pad_unpadded_line_with_ending(incomplete);
-      let _ = highlight_padded_line_into(
-        syn_theme,
-        &parse_state,
-        &highlight_state,
-        ss,
-        &mut paint_job,
-        &padded_tail,
-        code_font_size,
-      );
+      let _ =
+        highlight_padded_line_into(syn_theme, &parse_state, &highlight_state, ss, &mut paint_job, &padded_tail, &font);
     }
     paint_job.wrap.max_width = f32::INFINITY;
     let galley = ui.fonts_mut(|f| f.layout_job(paint_job));
@@ -948,6 +990,7 @@ mod syntect_code {
   mod tests {
     use super::*;
     use egui::{vec2, Context, RawInput, Rect, UiBuilder};
+    use epaint::text::ByteRangeExt as _;
     use std::fmt::Write as _;
 
     fn growing_body(n: usize) -> String {
@@ -993,6 +1036,40 @@ mod syntect_code {
         assert!(c2.frozen_len > frozen_before);
         assert_eq!(c2.frozen_len, b.len());
         assert_eq!(c2.source.as_ref(), b);
+      });
+      output.textures_delta.clear();
+    }
+
+    /// A code block shows the italic and the bold that the syntect theme gives a scope. Bold uses
+    /// the `"mono-bold"` family that the app registers.
+    #[test]
+    fn code_takes_the_font_style_of_the_theme() {
+      use syntect::highlighting::{FontStyle, ScopeSelectors, StyleModifier, Theme, ThemeItem};
+
+      let item = |scope: &str, font_style| ThemeItem {
+        scope: scope.parse::<ScopeSelectors>().unwrap(),
+        style: StyleModifier { foreground: None, background: None, font_style: Some(font_style) },
+      };
+      let theme = Theme {
+        scopes: vec![item("string", FontStyle::ITALIC), item("entity.name.function", FontStyle::BOLD)],
+        ..Default::default()
+      };
+
+      let ctx = Context::default();
+      let mut fonts = egui::FontDefinitions::default();
+      let mono = fonts.families[&FontFamily::Monospace].clone();
+      fonts.families.insert(FontFamily::Name("mono-bold".into()), mono);
+      ctx.set_fonts(fonts);
+      let mut output = ctx.run_ui(RawInput::default(), |ui| {
+        let job = highlight_code(ui, "fn main() { \"text\" }\n", "rust", 12.0, Some(&theme));
+        let format_of = |needle: &str| {
+          let section = job.sections.iter().find(|s| job.text[s.byte_range.as_usize()].contains(needle)).unwrap();
+          section.format.clone()
+        };
+        assert!(format_of("text").italics);
+        assert_eq!(format_of("text").font_id.family, FontFamily::Monospace);
+        assert!(!format_of("main").italics);
+        assert_eq!(format_of("main").font_id.family, FontFamily::Name("mono-bold".into()));
       });
       output.textures_delta.clear();
     }

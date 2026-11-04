@@ -47,6 +47,7 @@ footnotes.
 - **Streaming and heal mode** - `.heal(true)` closes unclosed code fences, bold, italic, links, and tables, so that partial LLM output renders correctly.
 - **Configurable style** - `MarkdownStyle` controls the inline code colors, and the code block padding, radius, stroke, and font size. It also controls the heading scales, the horizontal rule stroke, the blockquote indent, the table stroke, corner radius, and cell padding, and the block spacing. `MarkdownStyle::ui()` gives a built-in interactive editor.
 - **Bold font family** - uses a registered `"bold"` font family when one exists, and the strong text color when none exists.
+- **Code font styles** - a code block shows the italic, bold and underline that the syntect theme gives a scope. Bold uses a registered `"mono-bold"` font family. Without one, bold code keeps the regular monospace family.
 - **Layout caching and viewport culling** - layout caching based on a hash, with viewport culling per segment, for smooth scrolling through large documents.
 
 ## Feature Flags
@@ -54,6 +55,7 @@ footnotes.
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `syntax_highlighting` | Yes | Syntax-highlighted code blocks through `syntect`. |
+| `extra_syntaxes` | No | The syntaxes of `bat` through `two-face`, with TypeScript, TSX and JSX. It makes the binary larger. |
 | `images` | No | Inline image rendering through the `egui_extras` image support. |
 | `svg` | No | SVG image support through `egui_extras`. |
 | `membrane` | No | Rendering that needs [the Membrane egui fork](https://github.com/membrane-io/egui). It does not compile against published egui. See the section below. |
