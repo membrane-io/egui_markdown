@@ -19,7 +19,7 @@ use crate::layout::highlight_code;
 use crate::layout::{build_layout, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult};
 #[cfg(feature = "syntax_highlighting")]
 use crate::layout::{scrolling_code_galley, StreamingCodeCache};
-use crate::link::LinkHandler;
+use crate::link::{InlineWidgetRow, LinkHandler};
 use crate::paint;
 use crate::parser;
 use crate::style::MarkdownStyle;
@@ -1111,7 +1111,7 @@ impl<'a> MarkdownLabel<'a> {
     code_block_spans: &[(usize, usize)],
     code_block_info: &[(String, String)],
     hr_positions: &[usize],
-    inline_widget_spans: &[(usize, usize, usize)],
+    inline_widget_spans: &[(usize, usize, usize, FontId)],
     color: Color32,
     style: &MarkdownStyle,
     apply_map_job: bool,
@@ -1120,7 +1120,6 @@ impl<'a> MarkdownLabel<'a> {
     let wrap = self.resolve_wrap(ui);
     let mut job = job;
     Self::apply_live_wrap(&wrap, &mut job);
-    let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
     let mut mapped_sections = None;
     let mut built = Vec::new();
     if apply_map_job {
@@ -1136,7 +1135,7 @@ impl<'a> MarkdownLabel<'a> {
     let shown = |char_index: usize| built.is_empty() || shown_after_map(&galley.job, &built, char_index);
     let hr_positions: Vec<usize> = hr_positions.iter().copied().filter(|&at| shown(at)).collect();
     let hr_positions = hr_positions.as_slice();
-    let painted_widget_spans: Vec<_> = inline_widget_spans.iter().copied().filter(|&(at, ..)| shown(at)).collect();
+    let painted_widget_spans: Vec<_> = inline_widget_spans.iter().filter(|&&(at, ..)| shown(at)).cloned().collect();
     let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
     let available_width = ui.available_width();
     // Decorations (code block backgrounds, horizontal rules) span the allocated width, so a
@@ -1163,7 +1162,7 @@ impl<'a> MarkdownLabel<'a> {
       paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
       ui.painter().galley(rect.min, galley.clone(), color);
       if let Some(handler) = self.link_handler {
-        paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, &font, rect.min);
+        paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, rect.min);
       }
       return size;
     }
@@ -1182,7 +1181,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     if let Some(handler) = self.link_handler {
-      paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, &font, response.rect.min);
+      paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, response.rect.min);
     }
 
     let hovered_section =
@@ -1202,7 +1201,7 @@ impl<'a> MarkdownLabel<'a> {
     tokens: &[Token<'_>],
     galley: &Arc<Galley>,
     section_to_token: &[usize],
-    inline_widget_spans: &[(usize, usize, usize)],
+    inline_widget_spans: &[(usize, usize, usize, FontId)],
     response: &Response,
     rect: Rect,
     _color: Color32,
@@ -1232,7 +1231,7 @@ impl<'a> MarkdownLabel<'a> {
 
     // Check if this token is an inline widget - show pointing hand but suppress underline/tooltip.
     let is_inline_widget =
-      token_index.is_some_and(|ti| inline_widget_spans.iter().any(|&(_, _, span_ti)| span_ti == ti));
+      token_index.is_some_and(|ti| inline_widget_spans.iter().any(|&(_, _, span_ti, _)| span_ti == ti));
 
     if is_inline_widget {
       ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
@@ -1413,33 +1412,45 @@ fn paint_inline_widgets(
   ui: &mut Ui,
   handler: &dyn LinkHandler,
   tokens: &[Token<'_>],
-  spans: &[(usize, usize, usize)],
+  spans: &[(usize, usize, usize, FontId)],
   galley: &Arc<Galley>,
-  font: &FontId,
   origin: Pos2,
 ) {
-  for &(start_char, end_char, token_index) in spans {
-    let (text, href) = match tokens.get(token_index) {
+  for (start_char, end_char, token_index, font) in spans {
+    let (text, href) = match tokens.get(*token_index) {
       Some(Token::Link { text, href, .. }) => (text.as_ref(), href.as_ref()),
       _ => continue,
     };
 
-    let Some((start_glyph, start_row)) = glyph_at_index(galley, start_char as u32) else { continue };
-    let Some((end_glyph, end_row)) = glyph_at_index(galley, (end_char as u32).saturating_sub(1)) else { continue };
-
-    for row_index in start_row..=end_row {
-      let row = &galley.rows[row_index as usize];
-      let row_sg = if row_index == start_row { Some(start_glyph) } else { row.glyphs.first() };
-      let row_eg = if row_index == end_row { Some(end_glyph) } else { row.glyphs.last() };
-      if let (Some(sg), Some(eg)) = (row_sg, row_eg) {
-        let row_rect = Rect::from_min_max(pos2(sg.pos.x, row.min_y()), pos2(eg.pos.x + eg.advance_width, row.max_y()))
-          .translate(origin.to_vec2());
-        ui.push_id(token_index, |ui| {
-          handler.paint_inline_widget(ui, text, href, font, row_rect);
-        });
-      }
+    let rows = inline_widget_rows(galley, origin, *start_char..*end_char);
+    if rows.is_empty() {
+      continue;
     }
+    ui.push_id(token_index, |ui| {
+      handler.paint_inline_widget(ui, text, href, font, &rows);
+    });
   }
+}
+
+/// The rows that the characters `chars` of `galley` occupy, with `origin` as the position of the galley.
+pub(crate) fn inline_widget_rows(galley: &Galley, origin: Pos2, chars: std::ops::Range<usize>) -> Vec<InlineWidgetRow> {
+  let mut rows = Vec::new();
+  let mut row_start = 0;
+  for row in &galley.rows {
+    let row_chars = row_start..row_start + row.glyphs.len();
+    row_start += row.char_count_including_newline().0;
+    let start = chars.start.max(row_chars.start);
+    let end = chars.end.min(row_chars.end);
+    if start >= end {
+      continue;
+    }
+    let first = &row.glyphs[start - row_chars.start];
+    let last = &row.glyphs[end - 1 - row_chars.start];
+    let rect = Rect::from_min_max(pos2(first.pos.x, row.min_y()), pos2(last.max_x(), row.max_y()));
+    rows
+      .push(InlineWidgetRow { rect: rect.translate(origin.to_vec2()), chars: start - chars.start..end - chars.start });
+  }
+  rows
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
