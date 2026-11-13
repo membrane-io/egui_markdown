@@ -60,13 +60,16 @@ pub fn render_table(
   let table_size = Vec2::new(col_widths.iter().sum(), header_h + row_heights.iter().sum::<f32>());
   let radius = table_style.corner_radius.round() as u8;
 
-  // The scroll bar floats over the bottom row, inside the border of the table. egui puts a horizontal bar at the
-  // bottom of the scroll area and gives `scroll_bar_rect` only its x range, so the area has no bottom margin, and
-  // the bar stops before the rounded corners.
+  // The scroll bar of a table wider than the space floats over the bottom row, inside the border of the table. egui
+  // puts a horizontal bar at the bottom of the scroll area and gives `scroll_bar_rect` only its x range, so that area
+  // has no bottom margin, and the bar stops before the rounded corners. A table that fits has no bar, and keeps the
+  // bottom margin of 4 pt.
+  let scrolls = table_size.x > ui.available_width();
   let visible = Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width().min(table_size.x), table_size.y));
   let corner_inset = f32::from(radius) + stroke.map_or(0.0, |s| s.width);
   let output = ScrollArea::horizontal()
     .id_salt(id.with("scroll"))
+    .content_margin(Margin { top: 0, right: 0, bottom: if scrolls { 0 } else { 4 }, left: 0 })
     .scroll_bar_rect(visible.shrink2(Vec2::new(corner_inset, 0.0)))
     .show(ui, |ui| {
       let paint_table = |ui: &mut Ui| {
