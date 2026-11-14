@@ -41,7 +41,8 @@ pub enum Token<'s> {
     /// Nesting depth (1 = top-level).
     indent_level: usize,
   },
-  /// Inline image with alt text, URL, and optional title.
+  /// Inline image with alt text, URL, and optional title. Markdown `![alt](url)` and an HTML `<img>` tag
+  /// both give this token.
   Image {
     /// Alt text for the image.
     alt: CowStr<'s>,
@@ -49,6 +50,10 @@ pub enum Token<'s> {
     url: CowStr<'s>,
     /// Optional hover title.
     title: Option<CowStr<'s>>,
+    /// The width in points from the `width` attribute of an `<img>` tag.
+    width: Option<u16>,
+    /// The height in points from the `height` attribute of an `<img>` tag.
+    height: Option<u16>,
   },
   /// Table with headers, rows, and column alignments.
   Table(TableData<'s>),
@@ -154,10 +159,12 @@ impl<'s> Hash for Token<'s> {
         marker.as_ref().hash(state);
         indent_level.hash(state);
       }
-      Token::Image { alt, url, title } => {
+      Token::Image { alt, url, title, width, height } => {
         alt.as_ref().hash(state);
         url.as_ref().hash(state);
         title.as_ref().map(|t| t.as_ref()).hash(state);
+        width.hash(state);
+        height.hash(state);
       }
       Token::Table(data) => data.hash(state),
       Token::TaskListMarker { checked, indent_level } => {
@@ -241,10 +248,12 @@ fn token_to_owned(t: &Token<'_>) -> Token<'static> {
     Token::ListMarker { marker, indent_level } => {
       Token::ListMarker { marker: cowstr_to_owned(marker), indent_level: *indent_level }
     }
-    Token::Image { alt, url, title } => Token::Image {
+    Token::Image { alt, url, title, width, height } => Token::Image {
       alt: cowstr_to_owned(alt),
       url: cowstr_to_owned(url),
       title: title.as_ref().map(|t| cowstr_to_owned(t)),
+      width: *width,
+      height: *height,
     },
     Token::Table(data) => Token::Table(TableData {
       alignments: data.alignments.clone(),

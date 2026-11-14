@@ -198,20 +198,25 @@ struct BlockHeight {
   frame_key: u64,
   /// [`hash_block`] of the block, for a frame where the revision cannot vouch for it.
   block_hash: u64,
+  /// The available width when the block was measured. The height of an image that shrinks to the width
+  /// depends on it.
+  width: f32,
   height: f32,
 }
 
-/// The cached height of the block at token `index`, when it is still valid.
+/// The cached height of the block at token `index`, when it is still valid at the available `width`.
 fn cached_block_height(
   ui: &Ui,
   block_sz_id: Id,
   revision: Revision,
   index: usize,
+  width: f32,
   block_hash: impl FnOnce() -> u64,
 ) -> Option<f32> {
   let cached = ui.data(|d| d.get_temp::<BlockHeight>(block_sz_id))?;
-  let valid = revision.unchanged(cached.generation, cached.frame_key, index + 1)
-    || (cached.frame_key == revision.frame_key && cached.block_hash == block_hash());
+  let valid = cached.width == width
+    && (revision.unchanged(cached.generation, cached.frame_key, index + 1)
+      || (cached.frame_key == revision.frame_key && cached.block_hash == block_hash()));
   if !valid {
     return None;
   }
@@ -230,7 +235,8 @@ fn try_cull_block(
   index: usize,
   block_hash: impl FnOnce() -> u64,
 ) -> bool {
-  let Some(cached_height) = cached_block_height(ui, block_sz_id, revision, index, block_hash) else {
+  let Some(cached_height) = cached_block_height(ui, block_sz_id, revision, index, ui.available_width(), block_hash)
+  else {
     return false;
   };
   let size = Vec2::new(ui.available_width(), cached_height);
@@ -257,8 +263,9 @@ fn cache_block_height(
     _ => block_hash(),
   };
   let frame_key = revision.frame_key;
+  let width = ui.available_width();
   ui.data_mut(|d| {
-    d.insert_temp(block_sz_id, BlockHeight { generation: revision.generation, frame_key, block_hash, height })
+    d.insert_temp(block_sz_id, BlockHeight { generation: revision.generation, frame_key, block_hash, width, height })
   });
 }
 
@@ -852,7 +859,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         #[cfg(feature = "images")]
-        Token::Image { url, .. } => {
+        Token::Image { url, width, height, .. } => {
           let had_content = text_start < i;
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
@@ -864,7 +871,12 @@ impl<'a> MarkdownLabel<'a> {
             continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          let image = egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true);
+          let image = if width.is_some() || height.is_some() {
+            let size = crate::image::image_size(ui, url, *width, *height, ui.available_width());
+            crate::image::sized_image(url, size)
+          } else {
+            egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true)
+          };
           ui.add(image);
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
@@ -1606,17 +1618,19 @@ mod tests {
     egui::__run_test_ui(|ui| {
       let id = Id::NULL.with("block");
       let revision = |generation, kept_from| Revision { generation, kept_from, frame_key: 7 };
-      ui.data_mut(|d| d.insert_temp(id, BlockHeight { generation: 1, frame_key: 7, block_hash: 10, height: 42.0 }));
+      let block = BlockHeight { generation: 1, frame_key: 7, block_hash: 10, width: 300.0, height: 42.0 };
+      ui.data_mut(|d| d.insert_temp(id, block));
       let no_hash = || panic!("the revision vouches for the block");
 
-      assert_eq!(cached_block_height(ui, id, revision(1, None), 5, no_hash), Some(42.0), "nothing was parsed");
+      assert_eq!(cached_block_height(ui, id, revision(1, None), 5, 300.0, no_hash), Some(42.0), "nothing was parsed");
       // Parse 2 kept the first 20 tokens of parse 1, and the block is token 5.
-      assert_eq!(cached_block_height(ui, id, revision(2, Some((1, 20))), 5, no_hash), Some(42.0));
+      assert_eq!(cached_block_height(ui, id, revision(2, Some((1, 20))), 5, 300.0, no_hash), Some(42.0));
       // Parse 3 kept only 3 tokens, so the label hashes the block, which did not change.
-      assert_eq!(cached_block_height(ui, id, revision(3, Some((2, 3))), 5, || 10), Some(42.0));
-      assert_eq!(cached_block_height(ui, id, revision(4, None), 5, || 11), None, "the block changed");
+      assert_eq!(cached_block_height(ui, id, revision(3, Some((2, 3))), 5, 300.0, || 10), Some(42.0));
+      assert_eq!(cached_block_height(ui, id, revision(4, None), 5, 300.0, || 11), None, "the block changed");
       let other_style = Revision { frame_key: 8, ..revision(3, None) };
-      assert_eq!(cached_block_height(ui, id, other_style, 5, || 10), None, "the style changed");
+      assert_eq!(cached_block_height(ui, id, other_style, 5, 300.0, || 10), None, "the style changed");
+      assert_eq!(cached_block_height(ui, id, revision(3, None), 5, 600.0, || 10), None, "the width changed");
       checked = true;
     });
     assert!(checked);

@@ -5,7 +5,8 @@
 //!
 //! Parses CommonMark markdown into a token stream, then renders it as an interactive
 //! egui widget with support for text formatting, links, code blocks, tables, images,
-//! blockquotes, lists, and more.
+//! blockquotes, lists, and more. Of the raw HTML in the text, it renders the `<img>` and `<br>`
+//! tags, and it shows each other tag as written.
 //!
 //! # Quick Start
 //!
@@ -36,6 +37,7 @@
 //   4. Feature-gate the dependency: `math = ["dep:egui_math"]`, delegating to it
 //      for inline/display math rendering (same pattern as egui_extras for tables).
 
+mod image;
 /// The [`MarkdownLabel`] widget.
 pub mod label;
 /// Layout job construction from token streams.
