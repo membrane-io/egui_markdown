@@ -1,6 +1,7 @@
 //! CommonMark markdown parser with streaming-friendly healing.
 
 use std::borrow::Cow;
+use std::ops::Range;
 
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd, TextMergeStream};
 
@@ -27,6 +28,152 @@ fn append_text<'s>(slot: &mut Option<CowStr<'s>>, text: CowStr<'s>) {
     None => text,
     Some(before) => CowStr::Boxed(format!("{before}{text}").into_boxed_str()),
   });
+}
+
+/// The bytes `range` of `s`, borrowed from the source text when `s` is.
+fn substr<'s>(s: &CowStr<'s>, range: Range<usize>) -> CowStr<'s> {
+  match s {
+    CowStr::Borrowed(s) => CowStr::Borrowed(&s[range]),
+    s => CowStr::Boxed(s[range].into()),
+  }
+}
+
+/// Append the tokens of the raw HTML `html` to `tokens`.
+///
+/// An `<img>` tag with a `src` gives a [`Token::Image`], and a `<br>` tag gives a [`Token::Newline`]. When
+/// `html` holds neither tag, it stays one text token, so that each other tag shows as written. When it
+/// holds one, the text between the tags gives text tokens, and the parser drops text that holds only
+/// whitespace.
+fn push_html<'s>(html: CowStr<'s>, style: &TokenStyle, tokens: &mut Vec<Token<'s>>) {
+  let mut tags = Vec::new();
+  let mut at = 0;
+  while let Some(offset) = html[at..].find('<') {
+    let start = at + offset;
+    match html_tag(&html, start) {
+      Some((token, end)) => {
+        tags.push((start..end, token));
+        at = end;
+      }
+      None => at = start + 1,
+    }
+  }
+  if tags.is_empty() {
+    tokens.push(Token::Text { text: html, style: style.clone() });
+    return;
+  }
+  let mut text_start = 0;
+  for (range, token) in tags {
+    push_html_text(&html, text_start..range.start, style, tokens);
+    tokens.push(token);
+    text_start = range.end;
+  }
+  push_html_text(&html, text_start..html.len(), style, tokens);
+}
+
+fn push_html_text<'s>(html: &CowStr<'s>, range: Range<usize>, style: &TokenStyle, tokens: &mut Vec<Token<'s>>) {
+  if !html[range.clone()].trim().is_empty() {
+    tokens.push(Token::Text { text: substr(html, range), style: style.clone() });
+  }
+}
+
+/// The token of the `<img>` or `<br>` tag that starts at the byte `start` of `html`, and the byte after
+/// the `>` of the tag. `None` for another tag, for an `<img>` tag without a `src`, and for a tag without
+/// a `>`.
+///
+/// The `width` and `height` of an `<img>` tag are in points. The parser ignores a value in percent.
+fn html_tag<'s>(html: &CowStr<'s>, start: usize) -> Option<(Token<'s>, usize)> {
+  let name_start = start + 1;
+  let name_end =
+    html[name_start..].find(|c: char| !c.is_ascii_alphanumeric()).map_or(html.len(), |offset| name_start + offset);
+  let name = &html[name_start..name_end];
+  let is_image = name.eq_ignore_ascii_case("img");
+  if !is_image && !name.eq_ignore_ascii_case("br") {
+    return None;
+  }
+  let (attributes, end) = html_attributes(html, name_end)?;
+  if !is_image {
+    return Some((Token::Newline, end));
+  }
+  let attribute = |key: &str| {
+    attributes.iter().find(|(name, _)| html[name.clone()].eq_ignore_ascii_case(key)).map(|(_, value)| value.clone())
+  };
+  let size = |key: &str| {
+    attribute(key).and_then(|value| value.trim().trim_end_matches("px").parse::<u16>().ok()).filter(|&size| size > 0)
+  };
+  let url = attribute("src").filter(|url| !url.is_empty())?;
+  let token = Token::Image {
+    alt: attribute("alt").unwrap_or(CowStr::Borrowed("")),
+    url,
+    title: attribute("title").filter(|title| !title.is_empty()),
+    width: size("width"),
+    height: size("height"),
+  };
+  Some((token, end))
+}
+
+/// The byte range of the name of an HTML attribute, and its value.
+type HtmlAttribute<'s> = (Range<usize>, CowStr<'s>);
+
+/// The attributes of the tag whose name ends at the byte `at` of `html`, and the byte after the `>` of the
+/// tag. `None` when the tag has no `>`.
+fn html_attributes<'s>(html: &CowStr<'s>, mut at: usize) -> Option<(Vec<HtmlAttribute<'s>>, usize)> {
+  let bytes = html.as_bytes();
+  let skip_whitespace = |at: &mut usize| {
+    while bytes.get(*at).is_some_and(u8::is_ascii_whitespace) {
+      *at += 1;
+    }
+  };
+  let mut attributes = Vec::new();
+  loop {
+    skip_whitespace(&mut at);
+    match *bytes.get(at)? {
+      b'>' => return Some((attributes, at + 1)),
+      b'/' => {
+        at += 1;
+        continue;
+      }
+      _ => {}
+    }
+    let name_start = at;
+    while bytes.get(at).is_some_and(|&b| !b.is_ascii_whitespace() && !matches!(b, b'=' | b'>' | b'/')) {
+      at += 1;
+    }
+    let name = name_start..at;
+    skip_whitespace(&mut at);
+    if bytes.get(at) != Some(&b'=') {
+      attributes.push((name, CowStr::Borrowed("")));
+      continue;
+    }
+    at += 1;
+    skip_whitespace(&mut at);
+    let value = match *bytes.get(at)? {
+      quote @ (b'"' | b'\'') => {
+        let value_end = at + 1 + html[at + 1..].find(quote as char)?;
+        let value = at + 1..value_end;
+        at = value_end + 1;
+        value
+      }
+      _ => {
+        let value_start = at;
+        while bytes.get(at).is_some_and(|&b| !b.is_ascii_whitespace() && b != b'>') {
+          at += 1;
+        }
+        value_start..at
+      }
+    };
+    attributes.push((name, decode_entities(substr(html, value))));
+  }
+}
+
+/// `value` with the character references `&lt;`, `&gt;`, `&quot;`, `&#39;` and `&amp;` replaced by their
+/// characters. A URL in an HTML attribute writes `&` as `&amp;`.
+fn decode_entities(value: CowStr<'_>) -> CowStr<'_> {
+  if !value.contains('&') {
+    return value;
+  }
+  let decoded =
+    value.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&");
+  CowStr::Boxed(decoded.into_boxed_str())
 }
 
 /// Auto-close unclosed markdown constructs for streaming/incomplete input.
@@ -495,6 +642,8 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
   let mut image_alt = None;
   let mut image_url = None;
   let mut image_title: Option<CowStr> = None;
+  // pulldown-cmark gives an HTML block as one event for each line, and a tag can continue on the next line.
+  let mut html_block: Option<CowStr> = None;
   let mut list_stack: Vec<ListInfo> = Vec::new();
   // Items nest, so this counts the open items rather than holding a flag that an inner item would clear.
   let mut item_depth = 0usize;
@@ -577,15 +726,39 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           continue;
         }
         Event::Text(text) => {
-          if in_link {
+          if in_image {
+            append_text(&mut image_alt, text.clone());
+          } else if in_link {
             append_text(&mut link_text, text.clone());
           } else {
             current_cell.push(Token::Text { text: text.clone(), style: current_style.clone() });
           }
           continue;
         }
+        Event::InlineHtml(html) => {
+          if let Some((token, _)) = html_tag(html, 0).filter(|_| !in_link && !in_image) {
+            current_cell.push(token);
+          }
+          continue;
+        }
+        Event::Start(Tag::Image { dest_url, title, .. }) => {
+          in_image = true;
+          image_url = Some(dest_url.clone());
+          image_title = if title.is_empty() { None } else { Some(title.clone()) };
+          continue;
+        }
+        Event::End(TagEnd::Image) => {
+          in_image = false;
+          let alt = image_alt.take().unwrap_or_else(|| CowStr::Boxed("".into()));
+          if let Some(url) = image_url.take() {
+            current_cell.push(Token::Image { alt, url, title: image_title.take(), width: None, height: None });
+          }
+          continue;
+        }
         Event::Code(text) => {
-          if in_link {
+          if in_image {
+            append_text(&mut image_alt, text.clone());
+          } else if in_link {
             append_text(&mut link_text, text.clone());
           } else {
             current_cell.push(Token::Text {
@@ -665,11 +838,11 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
       }
 
       Event::Html(html) => {
-        tokens.push(Token::Text { text: html, style: current_style.clone() });
+        append_text(&mut html_block, html);
       }
 
       Event::InlineHtml(html) => {
-        tokens.push(Token::Text { text: html, style: current_style.clone() });
+        push_html(html, &current_style, tokens);
       }
 
       Event::Code(text) => {
@@ -873,7 +1046,12 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           in_image = false;
           let alt = image_alt.take().unwrap_or_else(|| CowStr::Boxed("".into()));
           if let Some(url) = image_url.take() {
-            tokens.push(Token::Image { alt, url, title: image_title.take() });
+            tokens.push(Token::Image { alt, url, title: image_title.take(), width: None, height: None });
+          }
+        }
+        TagEnd::HtmlBlock => {
+          if let Some(html) = html_block.take() {
+            push_html(html, &current_style, tokens);
           }
         }
         TagEnd::BlockQuote(_) => {
@@ -1087,12 +1265,16 @@ mod tests {
     assert!(it.next().is_none());
   }
 
+  /// A tag other than `<img>` and `<br>` shows as written, and `<br/>` breaks the line.
   #[test]
   fn test_html_tags_preserved() {
     let md = parse("This is a <tag>test</tag> with <br/> tags");
     assert!(md.tokens.iter().any(|token| matches!(token, Token::Text { text, .. } if text.contains("<tag>"))));
     assert!(md.tokens.iter().any(|token| matches!(token, Token::Text { text, .. } if text.contains("</tag>"))));
-    assert!(md.tokens.iter().any(|token| matches!(token, Token::Text { text, .. } if text.contains("<br/>"))));
+    let with = md.tokens.iter().position(|token| token.text() == " with ").unwrap();
+    assert!(
+      matches!(&md.tokens[with + 1..=with + 2], [Token::Newline, Token::Text { text, .. }] if text.as_ref() == " tags")
+    );
   }
 
   #[test]

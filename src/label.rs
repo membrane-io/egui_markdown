@@ -852,7 +852,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         #[cfg(feature = "images")]
-        Token::Image { url, .. } => {
+        Token::Image { url, width, height, .. } => {
           let had_content = text_start < i;
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
@@ -864,7 +864,12 @@ impl<'a> MarkdownLabel<'a> {
             continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          let image = egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true);
+          let image = if width.is_some() || height.is_some() {
+            let size = crate::image::image_size(ui, url, *width, *height, ui.available_width());
+            crate::image::sized_image(url, size)
+          } else {
+            egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true)
+          };
           ui.add(image);
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;

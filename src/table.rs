@@ -36,9 +36,7 @@ pub fn render_table(
   let has_bold = ui.ctx().fonts(|f| f.families().contains(&bold_family));
 
   let pad = table_style.cell_padding;
-  let measured = measure_table(
-    ui,
-    data,
+  let cell_style = CellStyle {
     font_id,
     color,
     hyperlink_color,
@@ -47,8 +45,9 @@ pub fn render_table(
     dark_mode,
     inline_code_style,
     link_handler,
-    pad,
-  );
+    max_image_width: (ui.available_width() - pad[0] - pad[2]).max(0.0),
+  };
+  let measured = measure_table(ui, data, &cell_style, pad);
 
   let stroke = (table_style.stroke_width > 0.0)
     .then(|| Stroke::new(table_style.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color));
@@ -90,21 +89,7 @@ pub fn render_table(
             for (col_idx, cell_tokens) in data.headers.iter().enumerate() {
               let align = data.alignments.get(col_idx).copied().unwrap_or(Alignment::None);
               header.col(|ui| {
-                padded_cell(ui, cell_margin, align, |ui| {
-                  render_cell(
-                    ui,
-                    cell_tokens,
-                    font_id,
-                    color,
-                    hyperlink_color,
-                    strong_color,
-                    has_bold,
-                    true,
-                    dark_mode,
-                    inline_code_style,
-                    link_handler,
-                  );
-                });
+                padded_cell(ui, cell_margin, |ui| render_cell(ui, cell_tokens, &cell_style, true, align));
                 if let Some(stroke) = stroke {
                   paint_cell_separators(ui, ui.max_rect(), stroke, col_idx + 1 == num_cols, data.rows.is_empty());
                 }
@@ -118,21 +103,7 @@ pub fn render_table(
               for (col_idx, cell_tokens) in row_data.iter().enumerate() {
                 let align = data.alignments.get(col_idx).copied().unwrap_or(Alignment::None);
                 row.col(|ui| {
-                  padded_cell(ui, cell_margin, align, |ui| {
-                    render_cell(
-                      ui,
-                      cell_tokens,
-                      font_id,
-                      color,
-                      hyperlink_color,
-                      strong_color,
-                      has_bold,
-                      false,
-                      dark_mode,
-                      inline_code_style,
-                      link_handler,
-                    );
-                  });
+                  padded_cell(ui, cell_margin, |ui| render_cell(ui, cell_tokens, &cell_style, false, align));
                   if let Some(stroke) = stroke {
                     paint_cell_separators(ui, ui.max_rect(), stroke, col_idx + 1 == num_cols, row_idx == last_body);
                   }
@@ -150,9 +121,9 @@ pub fn render_table(
   paint_table_chrome(ui, output.inner, output.inner_rect, stroke, radius);
 }
 
-fn padded_cell(ui: &mut Ui, margin: Margin, align: Alignment, add: impl FnOnce(&mut Ui)) {
+fn padded_cell(ui: &mut Ui, margin: Margin, add: impl FnOnce(&mut Ui)) {
   let inner = ui.max_rect() - margin;
-  ui.scope_builder(UiBuilder::new().max_rect(inner).layout(cell_layout(align)), add);
+  ui.scope_builder(UiBuilder::new().max_rect(inner), add);
 }
 
 /// Outer stroke on the visible table, plus a light inner shadow on cut edges.
@@ -229,58 +200,169 @@ fn paint_cell_separators(ui: &Ui, rect: Rect, stroke: Stroke, last_col: bool, la
   }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn render_cell(
-  ui: &mut Ui,
-  tokens: &[Token<'_>],
-  font_id: &FontId,
+/// The style of the text in the cells of a table, and the widest image that a cell can show.
+struct CellStyle<'a> {
+  font_id: &'a FontId,
   color: Color32,
   hyperlink_color: Color32,
   strong_color: Color32,
   has_bold: bool,
-  is_header: bool,
   dark_mode: bool,
-  inline_code_style: &InlineCodeStyle,
-  link_handler: Option<&dyn LinkHandler>,
-) {
-  let has_links = tokens.iter().any(|t| matches!(t, Token::Link { .. }));
-  if !has_links {
-    let job = tokens_to_layout_job(
+  inline_code_style: &'a InlineCodeStyle,
+  link_handler: Option<&'a dyn LinkHandler>,
+  max_image_width: f32,
+}
+
+impl CellStyle<'_> {
+  fn job(&self, ui: &Ui, tokens: &[Token<'_>], is_header: bool) -> LayoutJob {
+    tokens_to_layout_job(
       ui,
       tokens,
-      font_id,
-      color,
-      hyperlink_color,
-      strong_color,
-      has_bold,
+      self.font_id,
+      self.color,
+      self.hyperlink_color,
+      self.strong_color,
+      self.has_bold,
       is_header,
-      dark_mode,
-      inline_code_style,
-      link_handler,
-    );
-    ui.label(job);
+      self.dark_mode,
+      self.inline_code_style,
+      self.link_handler,
+    )
+  }
+}
+
+/// A part of a row of a cell: text and links that lay out as one job, or an image.
+enum CellPart<'a, 's> {
+  Text(&'a [Token<'s>]),
+  Image(&'a str),
+}
+
+/// A row of a cell, between two line breaks. Each part has its size.
+struct CellLine<'a, 's> {
+  parts: Vec<(CellPart<'a, 's>, Vec2)>,
+  size: Vec2,
+}
+
+/// The rows of a cell. A [`Token::Newline`], such as from a `<br>` tag, starts a row. Without the `images`
+/// feature, an image is a link in the text.
+fn layout_cell<'a, 's>(ui: &Ui, tokens: &'a [Token<'s>], style: &CellStyle, is_header: bool) -> Vec<CellLine<'a, 's>> {
+  let lines: Vec<&[Token<'s>]> = tokens.split(Token::is_newline).collect();
+  let single_line = lines.len() == 1;
+  let text_part = |run: &'a [Token<'s>]| {
+    let size = ui.ctx().fonts_mut(|f| f.layout_job(style.job(ui, run, is_header))).size();
+    (CellPart::Text(run), size)
+  };
+  lines
+    .into_iter()
+    .map(|line| {
+      let mut parts = Vec::new();
+      let mut text_start = 0;
+      for (i, token) in line.iter().enumerate() {
+        let Token::Image { url, width, height, .. } = token else { continue };
+        if !cfg!(feature = "images") {
+          continue;
+        }
+        if text_start < i {
+          parts.push(text_part(&line[text_start..i]));
+        }
+        let size = crate::image::image_size(ui, url, *width, *height, style.max_image_width);
+        parts.push((CellPart::Image(url), size));
+        text_start = i + 1;
+      }
+      // An empty cell keeps the height of an empty text job.
+      if text_start < line.len() || (single_line && line.is_empty()) {
+        parts.push(text_part(&line[text_start..]));
+      }
+      let size = if parts.is_empty() {
+        Vec2::new(0.0, ui.ctx().fonts_mut(|f| f.row_height(style.font_id)))
+      } else {
+        Vec2::new(parts.iter().map(|(_, size)| size.x).sum(), parts.iter().map(|(_, size)| size.y).fold(0.0, f32::max))
+      };
+      CellLine { parts, size }
+    })
+    .collect()
+}
+
+/// The size of a cell: its widest row, and the sum of the heights of its rows.
+fn cell_size(lines: &[CellLine]) -> Vec2 {
+  Vec2::new(lines.iter().map(|line| line.size.x).fold(0.0, f32::max), lines.iter().map(|line| line.size.y).sum())
+}
+
+/// Paint the rows of a cell, centered in the height of the cell, at the x that `align` gives.
+fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: bool, align: Alignment) {
+  let lines = layout_cell(ui, tokens, style, is_header);
+  let rect = ui.max_rect();
+  let mut y = rect.center().y - cell_size(&lines).y / 2.0;
+  for line in &lines {
+    let x = match align {
+      Alignment::None | Alignment::Left => rect.left(),
+      Alignment::Center => rect.center().x - line.size.x / 2.0,
+      Alignment::Right => rect.right() - line.size.x,
+    };
+    let line_rect = Rect::from_min_size(egui::pos2(x, y), line.size);
+    ui.scope_builder(UiBuilder::new().max_rect(line_rect).layout(Layout::left_to_right(Align::Center)), |ui| {
+      ui.spacing_mut().item_spacing.x = 0.0;
+      for (part, size) in &line.parts {
+        match part {
+          CellPart::Text(run) => render_text_run(ui, run, style, is_header),
+          CellPart::Image(url) => {
+            ui.add(crate::image::sized_image(url, *size));
+          }
+        }
+      }
+    });
+    y += line.size.y;
+  }
+}
+
+fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: bool) {
+  let has_links = tokens.iter().any(|t| matches!(t, Token::Link { .. } | Token::Image { .. }));
+  if !has_links {
+    ui.label(style.job(ui, tokens, is_header));
     return;
   }
 
   // Render tokens individually so links are clickable and dispatch through the LinkHandler. The tokens
   // hold their own spaces, so the labels sit side by side, as in the job that measured the cell.
-  ui.spacing_mut().item_spacing.x = 0.0;
+  let (link_font, link_color) =
+    link_font_and_color(style.font_id, style.hyperlink_color, style.strong_color, style.has_bold, is_header);
   for token in tokens {
     match token {
       Token::Link { text, href, .. } => {
-        let (link_font, link_color) = link_font_and_color(font_id, hyperlink_color, strong_color, has_bold, is_header);
         let base_format = TextFormat::default();
-        render_link_in_ui(ui, text.as_ref(), href.as_ref(), &link_font, &base_format, link_color, link_handler);
+        render_link_in_ui(ui, text.as_ref(), href.as_ref(), &link_font, &base_format, link_color, style.link_handler);
       }
-      Token::Text { text, style } => {
-        let format =
-          token_style_to_format(style, font_id, color, strong_color, has_bold, is_header, dark_mode, inline_code_style);
+      Token::Image { alt, url, .. } => {
+        let base_format = TextFormat::default();
+        render_link_in_ui(ui, image_link_text(alt, url), url.as_ref(), &link_font, &base_format, link_color, None);
+      }
+      Token::Text { text, style: text_style } => {
+        let format = token_style_to_format(
+          text_style,
+          style.font_id,
+          style.color,
+          style.strong_color,
+          style.has_bold,
+          is_header,
+          style.dark_mode,
+          style.inline_code_style,
+        );
         let mut job = LayoutJob::default();
-        append_cell_text(&mut job, text, format, style.inline_code);
+        append_cell_text(&mut job, text, format, text_style.inline_code);
         ui.label(job);
       }
       _ => {}
     }
+  }
+}
+
+/// The text of the link that stands for an image without the `images` feature: the alt text, or the URL
+/// when the image has no alt text.
+fn image_link_text<'a>(alt: &'a str, url: &'a str) -> &'a str {
+  if alt.is_empty() {
+    url
+  } else {
+    alt
   }
 }
 
@@ -312,41 +394,13 @@ struct Measured {
   row_heights: Vec<f32>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn measure_table(
-  ui: &Ui,
-  data: &TableData<'_>,
-  font_id: &FontId,
-  color: Color32,
-  hyperlink_color: Color32,
-  strong_color: Color32,
-  has_bold: bool,
-  dark_mode: bool,
-  inline_code_style: &InlineCodeStyle,
-  link_handler: Option<&dyn LinkHandler>,
-  pad: [f32; 4],
-) -> Measured {
+fn measure_table(ui: &Ui, data: &TableData<'_>, style: &CellStyle, pad: [f32; 4]) -> Measured {
   let num_cols = data.alignments.len();
   let mut widths = vec![40.0_f32; num_cols];
   let hpad = pad[0] + pad[2];
   let vpad = pad[1] + pad[3];
 
-  let measure = |tokens: &[Token<'_>], is_header: bool| -> Vec2 {
-    let job = tokens_to_layout_job(
-      ui,
-      tokens,
-      font_id,
-      color,
-      hyperlink_color,
-      strong_color,
-      has_bold,
-      is_header,
-      dark_mode,
-      inline_code_style,
-      link_handler,
-    );
-    ui.ctx().fonts_mut(|f| f.layout_job(job)).size()
-  };
+  let measure = |tokens: &[Token<'_>], is_header: bool| cell_size(&layout_cell(ui, tokens, style, is_header));
 
   let mut header_h = 0.0_f32;
   for (col, cell) in data.headers.iter().enumerate() {
@@ -369,15 +423,6 @@ fn measure_table(
   }
 
   Measured { col_widths: widths, header_h: header_h + vpad, row_heights }
-}
-
-#[inline]
-fn cell_layout(align: Alignment) -> Layout {
-  match align {
-    Alignment::None | Alignment::Left => Layout::left_to_right(Align::Center),
-    Alignment::Center => Layout::top_down(Align::Center),
-    Alignment::Right => Layout::right_to_left(Align::Center),
-  }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -416,8 +461,10 @@ fn tokens_to_layout_job(
           link_handler,
         );
       }
-      Token::Newline => {
-        job.append(" ", 0.0, TextFormat { font_id: font_id.clone(), color, ..Default::default() });
+      Token::Image { alt, url, .. } => {
+        let (link_font, link_color) = link_font_and_color(font_id, hyperlink_color, strong_color, has_bold, is_header);
+        let base_format = TextFormat::default();
+        append_link_to_job(ui, &mut job, image_link_text(alt, url), url, &link_font, &base_format, link_color, None);
       }
       _ => {}
     }
