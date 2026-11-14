@@ -1277,6 +1277,74 @@ mod tests {
     );
   }
 
+  /// The attributes of an `<img>` tag give the fields of the image, and a size can end with `px`.
+  #[test]
+  fn an_img_tag_gives_an_image_with_its_alt_title_and_size() {
+    let md = parse(r#"Logo <img src="logo.png" alt="The logo" title="Membrane" width="120" height="40px"> here"#);
+
+    let image = md.tokens.iter().find(|token| matches!(token, Token::Image { .. }));
+
+    let Some(Token::Image { alt, url, title, width, height }) = image else { panic!("no image in {:?}", md.tokens) };
+    assert_eq!(
+      (alt.as_ref(), url.as_ref(), title.as_deref(), *width, *height),
+      ("The logo", "logo.png", Some("Membrane"), Some(120), Some(40))
+    );
+  }
+
+  /// pulldown-cmark gives each line of an HTML block as an event of its own, and a tag can continue on the
+  /// next line.
+  #[test]
+  fn an_img_tag_that_spans_lines_in_an_html_block_gives_an_image() {
+    let md = parse("<div>\n<img\n  src=\"wide.png\"\n  height=\"30\">\n</div>\n");
+
+    let image = md.tokens.iter().find(|token| matches!(token, Token::Image { .. }));
+
+    assert!(
+      matches!(image, Some(Token::Image { url, width: None, height: Some(30), .. }) if url.as_ref() == "wide.png"),
+      "{:?}",
+      md.tokens
+    );
+  }
+
+  /// An `<img>` tag without a `src` has no image to show, so it shows as written.
+  #[test]
+  fn an_img_tag_without_src_shows_as_written() {
+    let md = parse(r#"a <img alt="x"> b"#);
+
+    assert!(!md.tokens.iter().any(|token| matches!(token, Token::Image { .. })), "{:?}", md.tokens);
+    assert!(md.tokens.iter().any(|token| token.text() == r#"<img alt="x">"#), "{:?}", md.tokens);
+  }
+
+  /// HTML writes `&` in an attribute as `&amp;`, so the URL of the image holds a plain `&`.
+  #[test]
+  fn an_amp_entity_in_src_gives_an_ampersand() {
+    let md = parse(r#"<img src="https://example.com/a.png?w=1&amp;h=2">"#);
+
+    assert!(
+      matches!(md.tokens.as_slice(), [Token::Image { url, .. }] if url.as_ref() == "https://example.com/a.png?w=1&h=2"),
+      "{:?}",
+      md.tokens
+    );
+  }
+
+  /// A `<br>` tag in a table cell breaks the line, and an `<img>` tag and a markdown image show as images.
+  #[test]
+  fn br_img_and_markdown_images_in_a_table_cell_give_tokens() {
+    let md = parse("| a |\n|---|\n| x<br>y <img src=\"i.png\" width=16> ![m](m.png) |\n");
+
+    let Some(Token::Table(table)) = md.tokens.first() else { panic!("no table in {:?}", md.tokens) };
+    let cell: Vec<String> = table.rows[0][0]
+      .iter()
+      .map(|token| match token {
+        Token::Newline => "\n".to_owned(),
+        Token::Image { url, .. } => format!("image {url}"),
+        token => token.text().to_owned(),
+      })
+      .collect();
+
+    assert_eq!(cell, ["x", "\n", "y ", "image i.png", " ", "image m.png"]);
+  }
+
   #[test]
   fn test_empty_list_items() {
     let md = parse("- \n- Item with content\n- ");
