@@ -249,7 +249,10 @@ fn layout_cell<'a, 's>(ui: &Ui, tokens: &'a [Token<'s>], style: &CellStyle, is_h
   let lines: Vec<&[Token<'s>]> = tokens.split(Token::is_newline).collect();
   let single_line = lines.len() == 1;
   let text_part = |run: &'a [Token<'s>]| {
-    let size = ui.ctx().fonts_mut(|f| f.layout_job(style.job(ui, run, is_header))).size();
+    // `style.job` calls the link handler, which can read the context. `fonts_mut` holds a lock of the context, so
+    // the job is complete before the call.
+    let job = style.job(ui, run, is_header);
+    let size = ui.ctx().fonts_mut(|f| f.layout_job(job)).size();
     (CellPart::Text(run), size)
   };
   lines
