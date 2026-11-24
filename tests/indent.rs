@@ -1,14 +1,11 @@
 //! Soft-wrapped rows keep the indentation of the line they continue.
-//!
-//! Requires the `membrane` feature (egui's `LeadingSpace::Indent`).
-#![cfg(feature = "membrane")]
 
 use egui::{vec2, Context, Id, RawInput, Rect, UiBuilder};
 use egui_markdown::{MarkdownLabel, MarkdownStyle};
 
 struct Row {
   text: String,
-  /// X position of each glyph in the row.
+  /// X position of each glyph, relative to the galley.
   xs: Vec<f32>,
 }
 
@@ -38,7 +35,7 @@ fn rows_styled(md: &str, width: f32, style: &MarkdownStyle) -> Vec<Row> {
       .iter()
       .map(|row| Row {
         text: row.glyphs.iter().map(|g| g.chr).collect(),
-        xs: row.glyphs.iter().map(|g| g.pos.x).collect(),
+        xs: row.glyphs.iter().map(|g| row.pos.x + g.pos.x).collect(),
       })
       .collect();
   });

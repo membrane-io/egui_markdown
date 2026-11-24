@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 # Local CI script, run before pushing.
-#
-# Every feature but `membrane` is checked here. `membrane` compiles only against the
-# Membrane egui fork, so CI checks it in a separate job that patches egui to the fork.
 set -euo pipefail
 
 FEATURES="syntax_highlighting,images,svg"
@@ -16,7 +13,7 @@ cargo clippy --all-targets -- -D warnings
 echo "--- clippy (no default features) ---"
 cargo clippy --all-targets --no-default-features -- -D warnings
 
-echo "--- clippy (every feature but membrane) ---"
+echo "--- clippy (every feature but extra_syntaxes) ---"
 cargo clippy --all-targets --features "$FEATURES" -- -D warnings
 
 echo "--- cargo test ---"

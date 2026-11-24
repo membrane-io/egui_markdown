@@ -11,7 +11,6 @@ tables. `set_style` installs one style for a whole `egui::Context`, and `global_
 | Feature | Description |
 |---------|-------------|
 | `serde` | `Serialize` and `Deserialize` on every style type. |
-| `membrane` | The inline code fields that need [the Membrane egui fork](https://github.com/membrane-io/egui). |
 
 ## License
 

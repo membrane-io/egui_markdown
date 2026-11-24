@@ -17,9 +17,9 @@ keywords = ["egui", "markdown", "gui", "commonmark"]
 include = ["**/*.rs", "tests/fixtures/*.json", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
 
 [dependencies]
-egui = { version = "0.36", default-features = false }
-epaint = { version = "0.36", default-features = false }
-egui_extras = { version = "0.36", default-features = false }
+egui = { version = "0.37", default-features = false }
+epaint = { version = "0.37", default-features = false }
+egui_extras = { version = "0.37", default-features = false }
 egui_markdown_style = { path = "./egui_markdown_style", version = "0.1.0" }
 pulldown-cmark = "0.13.0"
 syntect = { version = "5", optional = true, default-features = false, features = ["default-syntaxes", "default-themes", "regex-fancy"] }
@@ -27,8 +27,8 @@ two-face = { version = "0.5", optional = true, default-features = false, feature
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
-eframe = { version = "0.36", default-features = true, features = ["default_fonts", "glow"] }
-egui_extras = { version = "0.36", features = ["syntect"] }
+eframe = { version = "0.37", default-features = true, features = ["default_fonts", "glow"] }
+egui_extras = { version = "0.37", features = ["syntect"] }
 env_logger = "0.11"
 serde_json = "1"
 
@@ -38,7 +38,6 @@ syntax_highlighting = ["egui_extras/syntect", "dep:syntect"]
 extra_syntaxes = ["syntax_highlighting", "dep:two-face"]
 images = ["egui_extras/image", "egui_extras/http"]
 svg = ["egui_extras/svg"]
-membrane = ["egui_markdown_style/membrane"]
 
 [[example]]
 name = "simple"
@@ -51,3 +50,11 @@ path = "examples/advanced.rs"
 [[bench]]
 name = "markdown"
 harness = false
+
+[patch.crates-io]
+ecolor = { git = "https://github.com/emilk/egui.git", branch = "main" }
+eframe = { git = "https://github.com/emilk/egui.git", branch = "main" }
+egui = { git = "https://github.com/emilk/egui.git", branch = "main" }
+egui_extras = { git = "https://github.com/emilk/egui.git", branch = "main" }
+emath = { git = "https://github.com/emilk/egui.git", branch = "main" }
+epaint = { git = "https://github.com/emilk/egui.git", branch = "main" }

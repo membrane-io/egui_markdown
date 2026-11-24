@@ -63,37 +63,24 @@ footnotes.
 | `extra_syntaxes` | No | The syntaxes of `bat` through `two-face`, with TypeScript, TSX and JSX. It makes the binary larger. |
 | `images` | No | Inline image rendering through the `egui_extras` image support. |
 | `svg` | No | SVG image support through `egui_extras`. |
-| `membrane` | No | Rendering that needs [the Membrane egui fork](https://github.com/membrane-io/egui). It does not compile against published egui. See the section below. |
 
-### The `membrane` feature
+### egui version
 
-Every feature above works against published egui. The `membrane` feature does not. It
-calls `epaint::text::LeadingSpace`, `TextFormat::bg_corner_radius`, `TextFormat::bg_stroke`, and a
-two-dimensional `TextFormat::expand_bg`. Published egui has none of these four, so this feature causes a
-compile error unless you patch egui to
-[the fork](https://github.com/membrane-io/egui).
+egui_markdown needs egui `main` until the next egui release, for `LayoutSection::wrap_indent`
+and `TextFormat::background_stroke`. Patch egui to it in your workspace:
 
 ```toml
 [patch.crates-io]
-egui = { path = "path/to/egui/crates/egui" }
-epaint = { path = "path/to/egui/crates/epaint" }
-egui_extras = { path = "path/to/egui/crates/egui_extras" }
-emath = { path = "path/to/egui/crates/emath" }
-ecolor = { path = "path/to/egui/crates/ecolor" }
+egui = { git = "https://github.com/emilk/egui.git", branch = "main" }
+epaint = { git = "https://github.com/emilk/egui.git", branch = "main" }
+egui_extras = { git = "https://github.com/emilk/egui.git", branch = "main" }
+emath = { git = "https://github.com/emilk/egui.git", branch = "main" }
+ecolor = { git = "https://github.com/emilk/egui.git", branch = "main" }
 ```
 
 Patch `emath` and `ecolor` even when you do not depend on them directly. Without those two
 entries the build has two incompatible copies of the types that egui shares between crates.
 Add `eframe` as well when you use it.
-
-Three things render differently without the feature. An inline code background has square
-corners, and its padding expands by the same amount horizontally and vertically rather than
-by separate amounts. Inline code has no border. A row that soft-wraps inside a list, inside a code
-block, or inside another indented block, returns to the left margin. It does not keep the
-indentation of the line it continues.
-
-The parse, the selection, the links, the tables, and the syntax highlighting are the same
-with the feature and without it.
 
 ## Customization
 

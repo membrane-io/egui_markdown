@@ -3,7 +3,7 @@
 ## Get started
 
 1. Clone the repository.
-2. Install Rust 1.95 or later, which egui 0.36 requires (`rustup update stable`).
+2. Install Rust 1.95 or later, which egui 0.37 requires (`rustup update stable`).
 3. Run `cargo check` to verify your setup.
 4. Run `cargo run --example simple` to see the library render a document.
 
@@ -24,8 +24,7 @@ Run the local CI script:
 ```
 
 This runs `cargo fmt --check`, `cargo clippy` across the feature configurations, `cargo test`,
-`cargo doc`, and a wasm check. It covers every feature except `membrane`, which compiles only against
-[the Membrane egui fork](https://github.com/membrane-io/egui). CI checks `membrane` in a separate job.
+`cargo doc`, and a wasm check.
 
 ## Pull Request Guidelines
 

@@ -13,12 +13,10 @@ keywords = ["egui", "markdown", "style"]
 include = ["**/*.rs", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
 
 [dependencies]
-egui = { version = "0.36", default-features = false }
+egui = { version = "0.37", default-features = false }
 serde = { version = "1", optional = true, default-features = false, features = ["derive"] }
 
 [features]
 default = []
-## Membrane-specific inline code fields (`expand_bg_y`, `bg_corner_radius`).
-membrane = []
 ## Enable `Serialize` / `Deserialize` on style types.
 serde = ["dep:serde", "egui/serde"]

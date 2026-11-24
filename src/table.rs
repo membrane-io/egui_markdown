@@ -31,7 +31,6 @@ pub fn render_table(
 
   let hyperlink_color = ui.visuals().hyperlink_color;
   let strong_color = ui.visuals().strong_text_color();
-  let dark_mode = ui.visuals().dark_mode;
   let bold_family = FontFamily::Name("bold".into());
   let has_bold = ui.ctx().fonts(|f| f.families().contains(&bold_family));
 
@@ -42,7 +41,6 @@ pub fn render_table(
     hyperlink_color,
     strong_color,
     has_bold,
-    dark_mode,
     inline_code_style,
     link_handler,
     max_image_width: (ui.available_width() - pad[0] - pad[2]).max(0.0),
@@ -207,7 +205,6 @@ struct CellStyle<'a> {
   hyperlink_color: Color32,
   strong_color: Color32,
   has_bold: bool,
-  dark_mode: bool,
   inline_code_style: &'a InlineCodeStyle,
   link_handler: Option<&'a dyn LinkHandler>,
   max_image_width: f32,
@@ -224,7 +221,6 @@ impl CellStyle<'_> {
       self.strong_color,
       self.has_bold,
       is_header,
-      self.dark_mode,
       self.inline_code_style,
       self.link_handler,
     )
@@ -347,11 +343,11 @@ fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_head
           style.strong_color,
           style.has_bold,
           is_header,
-          style.dark_mode,
+          ui.visuals(),
           style.inline_code_style,
         );
         let mut job = LayoutJob::default();
-        append_cell_text(&mut job, text, format, text_style.inline_code);
+        job.append(text, 0.0, format);
         ui.label(job);
       }
       _ => {}
@@ -438,7 +434,6 @@ fn tokens_to_layout_job(
   strong_color: Color32,
   has_bold: bool,
   is_header: bool,
-  dark_mode: bool,
   inline_code_style: &InlineCodeStyle,
   link_handler: Option<&dyn LinkHandler>,
 ) -> LayoutJob {
@@ -446,9 +441,17 @@ fn tokens_to_layout_job(
   for token in tokens {
     match token {
       Token::Text { text, style } => {
-        let format =
-          token_style_to_format(style, font_id, color, strong_color, has_bold, is_header, dark_mode, inline_code_style);
-        append_cell_text(&mut job, text, format, style.inline_code);
+        let format = token_style_to_format(
+          style,
+          font_id,
+          color,
+          strong_color,
+          has_bold,
+          is_header,
+          ui.visuals(),
+          inline_code_style,
+        );
+        job.append(text, 0.0, format);
       }
       Token::Link { text, href, .. } => {
         let (link_font, link_color) = link_font_and_color(font_id, hyperlink_color, strong_color, has_bold, is_header);
@@ -475,19 +478,6 @@ fn tokens_to_layout_job(
   job
 }
 
-/// Append the text of a cell token. Inline code gets a transparent space on each side, as in the label, so
-/// its expanded background stays off the text next to it.
-fn append_cell_text(job: &mut LayoutJob, text: &str, format: TextFormat, inline_code: bool) {
-  if !inline_code {
-    job.append(text, 0.0, format);
-    return;
-  }
-  let spacer = TextFormat { font_id: format.font_id.clone(), color: Color32::TRANSPARENT, ..Default::default() };
-  job.append(" ", 0.0, spacer.clone());
-  job.append(text, 0.0, format);
-  job.append(" ", 0.0, spacer);
-}
-
 #[inline]
 fn apply_bold_to_format(format: &mut TextFormat, strong_color: Color32, has_bold: bool) {
   if has_bold {
@@ -505,7 +495,7 @@ fn token_style_to_format(
   strong_color: Color32,
   has_bold: bool,
   is_header: bool,
-  dark_mode: bool,
+  visuals: &egui::Visuals,
   inline_code_style: &InlineCodeStyle,
 ) -> TextFormat {
   let mut format = TextFormat { font_id: font_id.clone(), color, ..Default::default() };
@@ -519,7 +509,7 @@ fn token_style_to_format(
     format.strikethrough = egui::Stroke::new(1.0_f32, color);
   }
   if style.inline_code {
-    crate::layout::apply_inline_code_bg(&mut format, dark_mode, inline_code_style);
+    crate::layout::apply_inline_code_bg(&mut format, visuals, inline_code_style);
   }
   format
 }
@@ -531,9 +521,10 @@ mod tests {
   use epaint::text::ByteRangeExt as _;
   use pulldown_cmark::CowStr;
 
-  /// Inline code in a cell gets a transparent space on each side, so its background stays off the next word.
+  /// Inline code in a cell takes the margin and stroke of [`egui::Visuals::code`], so its background
+  /// stays off the next word.
   #[test]
-  fn inline_code_in_a_cell_has_a_space_on_each_side() {
+  fn inline_code_in_a_cell_keeps_its_background_off_the_next_word() {
     let code = TokenStyle { inline_code: true, ..Default::default() };
     let tokens = [
       Token::Text { text: CowStr::Borrowed("Behind the "), style: TokenStyle::default() },
@@ -545,13 +536,11 @@ mod tests {
       let font = FontId::proportional(14.0);
       let color = ui.visuals().text_color();
       let style = InlineCodeStyle::default();
-      let job = tokens_to_layout_job(ui, &tokens, &font, color, color, color, false, false, false, &style, None);
-      assert_eq!(job.text, "Behind the  images  feature");
-      let spacers: Vec<_> = job.sections.iter().filter(|s| &job.text[s.byte_range.as_usize()] == " ").collect();
-      assert_eq!(spacers.len(), 2);
-      assert!(spacers
-        .iter()
-        .all(|s| s.format.color == Color32::TRANSPARENT && s.format.background == Color32::TRANSPARENT));
+      let job = tokens_to_layout_job(ui, &tokens, &font, color, color, color, false, false, &style, None);
+      assert_eq!(job.text, "Behind the images feature");
+      let code_section = job.sections.iter().find(|s| &job.text[s.byte_range.as_usize()] == "images");
+      assert_eq!(code_section.map(|s| s.format.background_margin), Some(ui.visuals().code.margin));
+      assert_eq!(code_section.map(|s| s.format.background_stroke), Some(ui.visuals().code.stroke));
       checked = true;
     });
     assert!(checked);

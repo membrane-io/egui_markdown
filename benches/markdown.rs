@@ -117,7 +117,7 @@ fn bench_render(c: &mut Criterion) {
     let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(width, 700.0));
     let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
       let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-      MarkdownLabel::new(Id::new("md"), black_box(&doc)).show(&mut child);
+      MarkdownLabel::new(Id::unique("md"), black_box(&doc)).show(&mut child);
     });
   };
 
@@ -134,7 +134,7 @@ fn bench_render(c: &mut Criterion) {
     let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 700.0));
     let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
       let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-      MarkdownLabel::new(Id::new("md"), black_box(&long_doc)).show(&mut child);
+      MarkdownLabel::new(Id::unique("md"), black_box(&long_doc)).show(&mut child);
     });
   };
   let ctx = Context::default();
@@ -149,7 +149,7 @@ fn bench_render(c: &mut Criterion) {
     let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 700.0));
     let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
       let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-      MarkdownLabel::new(Id::new("md"), black_box(text)).heal(heal).show(&mut child);
+      MarkdownLabel::new(Id::unique("md"), black_box(text)).heal(heal).show(&mut child);
     });
   };
   // The streamed paragraph grows to 200 words and then starts again, so one paragraph does not grow
@@ -194,7 +194,7 @@ fn bench_render_scroll_code(c: &mut Criterion) {
     let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(700.0, 900.0));
     let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
       let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-      MarkdownLabel::new(Id::new("md"), black_box(&fence)).scroll_code_blocks(true).show(&mut child);
+      MarkdownLabel::new(Id::unique("md"), black_box(&fence)).scroll_code_blocks(true).show(&mut child);
     });
   };
 
@@ -222,7 +222,7 @@ fn bench_render_scroll_code_streaming(c: &mut Criterion) {
   let warm = format!("```rust\n{body}```\n");
   let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-    MarkdownLabel::new(Id::new("md"), &warm).scroll_code_blocks(true).show(&mut child);
+    MarkdownLabel::new(Id::unique("md"), &warm).scroll_code_blocks(true).show(&mut child);
   });
 
   let mut line_idx = 100usize;
@@ -233,7 +233,7 @@ fn bench_render_scroll_code_streaming(c: &mut Criterion) {
       let fence = format!("```rust\n{body}```\n");
       let _ = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
         let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-        MarkdownLabel::new(Id::new("md"), black_box(&fence)).scroll_code_blocks(true).show(&mut child);
+        MarkdownLabel::new(Id::unique("md"), black_box(&fence)).scroll_code_blocks(true).show(&mut child);
       });
     });
   });

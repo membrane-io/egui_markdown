@@ -1526,9 +1526,9 @@ fn render_code_block(
 
   let p = &style.code_block.padding;
   let frame = egui::Frame::NONE
-    .fill(ui.visuals().code_bg_color)
+    .fill(ui.visuals().code.bg_color)
     .stroke(stroke)
-    .corner_radius(style.code_block.corner_radius)
+    .corner_radius(ui.visuals().code.corner_radius)
     .inner_margin(egui::Margin { left: p[0] as i8, top: p[1] as i8, right: p[2] as i8, bottom: p[3] as i8 });
 
   let frame_response = frame.show(ui, |ui| {
