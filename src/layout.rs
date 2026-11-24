@@ -167,11 +167,27 @@ pub fn append_link_to_job(
 /// Append `text` to `job` as a new section. `LayoutJob::append` merges the text into the last section when the
 /// formats are equal, and each section must stay separate so that it maps to one token.
 fn push_section(job: &mut LayoutJob, text: &str, leading_space: f32, format: TextFormat) {
+  push_section_with_wrap_indent(job, text, leading_space, 0.0, format);
+}
+
+/// As [`push_section`]. When `text` starts a paragraph, the rows that paragraph wraps onto start at
+/// `wrap_indent`. The `membrane` fork indents wrapped rows with `LeadingSpace::Indent` instead, so
+/// it ignores `wrap_indent`.
+#[cfg_attr(feature = "membrane", allow(unused_variables))]
+fn push_section_with_wrap_indent(
+  job: &mut LayoutJob,
+  text: &str,
+  leading_space: f32,
+  wrap_indent: f32,
+  format: TextFormat,
+) {
   let start = job.text.len();
   job.text.push_str(text);
   #[allow(clippy::useless_conversion)]
   job.sections.push(egui::text::LayoutSection {
     leading_space: leading_space.into(),
+    #[cfg(not(feature = "membrane"))]
+    wrap_indent,
     byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(job.text.len()),
     format,
   });
@@ -284,7 +300,6 @@ fn styled_format(
 }
 
 /// Width of each line's leading whitespace, in points, using the code font.
-#[cfg(feature = "membrane")]
 fn code_line_indents(ui: &Ui, text: &str, code_font_size: f32) -> Vec<f32> {
   let font_id = FontId::monospace(code_font_size);
   ui.ctx().fonts_mut(|f| {
@@ -435,10 +450,25 @@ pub fn build_layout(
             }
           }
           #[cfg(not(feature = "membrane"))]
-          for section in highlighted_job.sections {
-            let section_text = &highlighted_job.text[section.byte_range.as_usize()];
-            push_section(&mut job, section_text, 0.0, section.format);
-            section_to_token.push(token_index);
+          {
+            // Each source line is its own paragraph. The section that starts a line indents the
+            // wrapped rows of that line by its leading whitespace.
+            let line_indents = code_line_indents(ui, &padded_text, code_font_size);
+            let mut line_index = 0usize;
+            let mut at_line_start = true;
+            for section in highlighted_job.sections {
+              let section_text = &highlighted_job.text[section.byte_range.as_usize()];
+              for part in section_text.split_inclusive('\n') {
+                let wrap_indent =
+                  if at_line_start { line_indents.get(line_index).copied().unwrap_or(0.0) } else { 0.0 };
+                at_line_start = part.ends_with('\n');
+                if at_line_start {
+                  line_index += 1;
+                }
+                push_section_with_wrap_indent(&mut job, part, 0.0, wrap_indent, section.format.clone());
+                section_to_token.push(token_index);
+              }
+            }
           }
           let end_char = job.text.chars().count();
           code_block_spans.push((start_char, end_char));
@@ -470,9 +500,11 @@ pub fn build_layout(
         // The nudge and the gap are made up after the marker, so moving a marker never moves text.
         let trailing = nesting + slot_width + list.gap - leading - marker_width;
 
+        // Wrapped rows of the item resume where its text starts.
+        let text_start = leading + marker_width + trailing.max(0.0);
+
         #[cfg(feature = "membrane")]
         {
-          let text_start = leading + marker_width + trailing.max(0.0);
           let mut format = base_format.clone();
           format.line_height = MARKDOWN_LINE_HEIGHT_POINTS.map(|h| h * 4.0);
           if leading > 0.0 {
@@ -485,12 +517,12 @@ pub fn build_layout(
         }
         #[cfg(not(feature = "membrane"))]
         {
-          // Upstream egui only supports first-row leading space; wrapped rows return to column 0.
           push_section(&mut job, "", leading, base_format.clone());
           section_to_token.push(token_index);
         }
 
-        push_section(&mut job, marker.as_ref(), 0.0, marker_format);
+        // The marker holds the first character of the item, so its wrap indent applies to the whole item.
+        push_section_with_wrap_indent(&mut job, marker.as_ref(), 0.0, text_start, marker_format);
         section_to_token.push(token_index);
 
         if trailing > 0.0 {
@@ -711,6 +743,8 @@ mod syntect_code {
       #[allow(clippy::useless_conversion)]
       job.sections.push(LayoutSection {
         leading_space: 0.0_f32.into(),
+        #[cfg(not(feature = "membrane"))]
+        wrap_indent: 0.0,
         byte_range: ByteIndex(byte_start)..ByteIndex(byte_end),
         format: TF {
           font_id,
@@ -732,6 +766,8 @@ mod syntect_code {
     #[allow(clippy::useless_conversion)]
     job.sections.push(LayoutSection {
       leading_space: 0.0_f32.into(),
+      #[cfg(not(feature = "membrane"))]
+      wrap_indent: 0.0,
       byte_range: ByteIndex(byte_start)..ByteIndex(job.text.len()),
       format: TF { font_id: FontId::monospace(code_font_size), ..Default::default() },
     });

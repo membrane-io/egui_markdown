@@ -86,11 +86,9 @@ Patch `emath` and `ecolor` even when you do not depend on them directly. Without
 entries the build has two incompatible copies of the types that egui shares between crates.
 Add `eframe` as well when you use it.
 
-Three things render differently without the feature. An inline code background has square
+Two things render differently without the feature. An inline code background has square
 corners, and its padding expands by the same amount horizontally and vertically rather than
-by separate amounts. Inline code has no border. A row that soft-wraps inside a list, inside a code
-block, or inside another indented block, returns to the left margin. It does not keep the
-indentation of the line it continues.
+by separate amounts. Inline code has no border.
 
 The parse, the selection, the links, the tables, and the syntax highlighting are the same
 with the feature and without it.
