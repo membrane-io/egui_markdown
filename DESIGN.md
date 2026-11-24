@@ -16,14 +16,15 @@ Layout applies them in this order, and the first one that applies wins:
    standalone widget. The link becomes a segment break. The renderer flushes the text
    before the link as a galley. The handler then draws any egui widget it wants, such as
    a card or an embedded preview. The text after the link starts a new galley. The
-   handler receives the `Ui` and returns a `Response`.
+   handler receives the `Ui` and returns `Some(Response)`, or `None` when it did not render the link.
 
-2. **`inline_widget_size(href, font)` -> `paint_inline_widget(ui, text, href, font, rect)`** -
+2. **`inline_widget_size(href, font)` -> `paint_inline_widget(ui, text, href, font, rows)`** -
    Reserve space inside the text and paint a widget over it, such as a mention or a
    status badge. The size sets the row height. `layout_link` emits the placeholder text
    that sets the width, or the renderer emits the link text in a transparent color. After
-   the galley is placed, the renderer calls `paint_inline_widget` once for each row the
-   placeholder spans.
+   the galley is placed, the renderer calls `paint_inline_widget` once for each link. It
+   gives one `InlineWidgetRow` for each row that the placeholder spans, with the rect and the
+   characters of that row.
 
 3. **`layout_link(ui, text, href, job, font, color)`** - Customize inline styling. The
    handler appends sections to the `LayoutJob` directly (icons, colored segments,
@@ -69,9 +70,11 @@ unchanged content. Scrolling code blocks also add syntect highlighting.
 1. **Full-document cache** (`CachedMarkdownLayout`): Holds the parse and layout result
    for the whole markdown string. The key is a hash of the text content, the style, and
    the cache key of the link handler. On a cache hit, the widget parses nothing and lays
-   out nothing, and it borrows the cached tokens rather than copying them. The segmented path handles tables, scrolling code blocks, blockquotes,
-   and similar elements. When the document needs that path, the entry holds `None` in
-   its `layout` field and keeps only the tokens.
+   out nothing, and it shares the cached tokens through an `Arc` rather than copying them. On a
+   cache miss, the widget takes the entry out of egui memory, so that the incremental parse
+   below can keep its tokens. The segmented path handles tables, scrolling code blocks,
+   blockquotes, and similar elements. When the document needs that path, the entry holds `None`
+   in its `layout` field and keeps only the tokens.
 
 2. **Per-segment cache** (`CachedFlushRange`): When the document has block elements, the
    widget lays out the text between the blocks independently. Each segment has its own
@@ -145,9 +148,10 @@ to reserve the correct space, which keeps the scrollbars correct. It then lays o
 and paints nothing.
 
 A measured size does depend on the width, but a layout job does not. The segment size
-cache therefore stores the width it measured at together with the hash, and a hit needs
-both values to match. This is the counterpart to the layout keys above, which leave the
-width out.
+cache and the block size cache (`BlockHeight`) therefore store the width they measured at
+together with the hash, and a hit needs both values to match. A table or an image that is
+outside the viewport during a resize is measured again when it comes into view. This is the
+counterpart to the layout keys above, which leave the width out.
 
 This reduces the layout and paint work per frame from O(document) to O(visible area).
 
@@ -275,9 +279,10 @@ is_partial_table_line)
 large `Token` variant therefore increases the memory use and reduces the cache
 performance.
 
-**Solution:** A compile-time test asserts that `Token` stays under 88 bytes. The `Link`
-and `Image` variants set the current size, because each one holds three `CowStr` fields,
-which is about 80 bytes. The test detects unintended growth from a new field or variant.
+**Solution:** A test asserts that `Token` is 88 bytes or smaller. The `Link` and `Image`
+variants set the current size, because each one holds three `CowStr` fields and more. `Link`
+also holds a `TokenStyle`, and `Image` holds the width and height of an `<img>` tag. The test
+detects unintended growth from a new field or variant.
 
 **Files:** `types.rs` (size_tests)
 
@@ -288,7 +293,7 @@ Criterion benchmarks cover the operations that the caches depend on: the parse
 `hash_token_slice_100_sections`), and the retrieval (`arc_clone_tokens`). These confirm
 that the cost of a cache lookup stays below the cost of the work it prevents.
 
-Four more benchmarks measure a whole frame. A regression in the cache layers therefore
+Seven more benchmarks measure a whole frame. A regression in the cache layers therefore
 appears as a frame cost, and not only as a slower hash:
 
 - `render_steady_state`: repeated frames at a constant width. The cache layers together
@@ -297,5 +302,8 @@ appears as a frame cost, and not only as a slower hash:
   width-independent layout keys exist for.
 - `render_scroll_code_steady_state` and `render_scroll_code_streaming_append`: a settled
   code block and a code block that grows. These two cover the append-only syntect path.
+- `render_steady_state_long`, `render_streaming_long` and `render_streaming_long_healed`: repeated
+  frames, and a reply that streams in with heal off and on, on a document of 500 sections. These
+  cover the incremental parse and the hash skips of the culling caches.
 
 **Files:** `benches/markdown.rs`
