@@ -59,8 +59,12 @@ pub fn section_for_char(job: &LayoutJob, char_index: u32) -> Option<u32> {
 }
 
 /// Apply inline code background and text color to a [`TextFormat`].
+///
+/// Without the `membrane` feature, the margin and corner radius of the background come from
+/// [`egui::Visuals::code`].
 #[inline]
-pub fn apply_inline_code_bg(format: &mut TextFormat, dark_mode: bool, inline_style: &InlineCodeStyle) {
+pub fn apply_inline_code_bg(format: &mut TextFormat, visuals: &egui::Visuals, inline_style: &InlineCodeStyle) {
+  let dark_mode = visuals.dark_mode;
   format.color = inline_style.color(dark_mode);
   format.background = inline_style.background(dark_mode);
   #[cfg(feature = "membrane")]
@@ -71,10 +75,9 @@ pub fn apply_inline_code_bg(format: &mut TextFormat, dark_mode: bool, inline_sty
   }
   #[cfg(not(feature = "membrane"))]
   {
-    #[allow(clippy::useless_conversion)]
-    {
-      format.expand_bg = inline_style.expand_bg.into();
-    }
+    format.expand_bg = inline_style.expand_bg;
+    format.background_margin = visuals.code.margin;
+    format.background_corner_radius = visuals.code.corner_radius;
   }
 }
 
@@ -294,7 +297,7 @@ fn styled_format(
     format.font_id.size *= markdown_style.heading.scales[idx];
   }
   if style.inline_code {
-    apply_inline_code_bg(&mut format, ui.visuals().dark_mode, &markdown_style.inline_code);
+    apply_inline_code_bg(&mut format, ui.visuals(), &markdown_style.inline_code);
   }
   format
 }
@@ -397,7 +400,7 @@ pub fn build_layout(
           continue;
         }
         let format = styled_format(&base_format, style, ui, bold_available, color, style_ref);
-        if style.inline_code {
+        if cfg!(feature = "membrane") && style.inline_code {
           // Transparent spaces on both sides keep the expanded background off the next glyph.
           // The spacer takes only the font of the code, so it is as tall as the code and draws no background.
           let spacer = TextFormat { font_id: format.font_id.clone(), ..transparent_format.clone() };
