@@ -296,15 +296,13 @@ impl InlineCodeStyle {
 pub struct CodeBlockStyle {
   /// Padding `[left, top, right, bottom]`.
   pub padding: [f32; 4],
-  /// Corner radius for the code block border.
-  pub corner_radius: f32,
   /// Stroke width for the code block border.
   pub stroke_width: f32,
 }
 
 impl Default for CodeBlockStyle {
   fn default() -> Self {
-    Self { padding: [4.0, 6.0, 12.0, 6.0], corner_radius: 3.0, stroke_width: 1.0 }
+    Self { padding: [4.0, 6.0, 12.0, 6.0], stroke_width: 1.0 }
   }
 }
 
@@ -313,7 +311,6 @@ impl Hash for CodeBlockStyle {
     for v in &self.padding {
       v.to_bits().hash(state);
     }
-    self.corner_radius.to_bits().hash(state);
     self.stroke_width.to_bits().hash(state);
   }
 }
@@ -335,10 +332,6 @@ impl CodeBlockStyle {
 
       ui.label("Padding bottom:");
       ui.add(DragValue::new(&mut self.padding[3]).range(0.0..=30.0).speed(0.5));
-      ui.end_row();
-
-      ui.label("Corner radius:");
-      ui.add(DragValue::new(&mut self.corner_radius).range(0.0..=20.0).speed(0.5));
       ui.end_row();
 
       ui.label("Stroke width:");

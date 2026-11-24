@@ -36,17 +36,18 @@ pub fn compute_code_block_rects(ui: &mut Ui, code_blocks: &[(usize, usize)], gal
 
 /// Paint code block background and border.
 ///
-/// The fill is `visuals.code_bg_color`, the same color [`crate::MarkdownLabel`] gives the frame of
-/// a scrolling code block, so both render paths show one code surface.
+/// The fill and corner radius come from [`egui::Visuals::code`], as for the frame that
+/// [`crate::MarkdownLabel`] gives a scrolling code block, so both render paths show one code surface.
 pub fn paint_code_block_bg(ui: &Ui, bg_rect: Rect, origin: Pos2, code_style: &CodeBlockStyle) {
   let mut r = bg_rect.translate(origin.to_vec2());
   r.min.x -= code_style.padding[0];
   r.min.y -= code_style.padding[1];
   r.max.x += code_style.padding[2];
   r.max.y += code_style.padding[3];
-  ui.painter().rect_filled(r, code_style.corner_radius, ui.visuals().code.bg_color);
+  let code = &ui.visuals().code;
+  ui.painter().rect_filled(r, code.corner_radius, code.bg_color);
   let stroke = Stroke::new(code_style.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
-  ui.painter().rect_stroke(r, code_style.corner_radius, stroke, StrokeKind::Inside);
+  ui.painter().rect_stroke(r, code.corner_radius, stroke, StrokeKind::Inside);
 }
 
 /// Paint horizontal rules at the given character positions.
