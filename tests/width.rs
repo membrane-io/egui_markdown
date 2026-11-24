@@ -100,7 +100,7 @@ fn unbroken_string_breaks_with_break_all() {
   );
 }
 
-/// Upstream epaint and the membrane fork both break between two glyphs when a row has no
+/// epaint breaks between two glyphs when a row has no
 /// other break.
 #[test]
 fn unbroken_string_breaks_with_normal() {

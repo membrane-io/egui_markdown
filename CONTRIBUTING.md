@@ -24,8 +24,7 @@ Run the local CI script:
 ```
 
 This runs `cargo fmt --check`, `cargo clippy` across the feature configurations, `cargo test`,
-`cargo doc`, and a wasm check. It covers every feature except `membrane`, which compiles only against
-[the Membrane egui fork](https://github.com/membrane-io/egui). CI checks `membrane` in a separate job.
+`cargo doc`, and a wasm check.
 
 ## Pull Request Guidelines
 

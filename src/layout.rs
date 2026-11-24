@@ -60,25 +60,16 @@ pub fn section_for_char(job: &LayoutJob, char_index: u32) -> Option<u32> {
 
 /// Apply inline code background and text color to a [`TextFormat`].
 ///
-/// Without the `membrane` feature, the margin and corner radius of the background come from
-/// [`egui::Visuals::code`].
+/// The margin, corner radius and stroke of the background come from [`egui::Visuals::code`].
 #[inline]
 pub fn apply_inline_code_bg(format: &mut TextFormat, visuals: &egui::Visuals, inline_style: &InlineCodeStyle) {
   let dark_mode = visuals.dark_mode;
   format.color = inline_style.color(dark_mode);
   format.background = inline_style.background(dark_mode);
-  #[cfg(feature = "membrane")]
-  {
-    format.expand_bg = epaint::Vec2::new(inline_style.expand_bg, inline_style.expand_bg_y);
-    format.bg_corner_radius = inline_style.bg_corner_radius;
-    format.bg_stroke = inline_style.stroke(dark_mode);
-  }
-  #[cfg(not(feature = "membrane"))]
-  {
-    format.expand_bg = inline_style.expand_bg;
-    format.background_margin = visuals.code.margin;
-    format.background_corner_radius = visuals.code.corner_radius;
-  }
+  format.expand_bg = inline_style.expand_bg;
+  format.background_margin = visuals.code.margin;
+  format.background_corner_radius = visuals.code.corner_radius;
+  format.background_stroke = visuals.code.stroke;
 }
 
 #[inline]
@@ -174,9 +165,7 @@ fn push_section(job: &mut LayoutJob, text: &str, leading_space: f32, format: Tex
 }
 
 /// As [`push_section`]. When `text` starts a paragraph, the rows that paragraph wraps onto start at
-/// `wrap_indent`. The `membrane` fork indents wrapped rows with `LeadingSpace::Indent` instead, so
-/// it ignores `wrap_indent`.
-#[cfg_attr(feature = "membrane", allow(unused_variables))]
+/// `wrap_indent`.
 fn push_section_with_wrap_indent(
   job: &mut LayoutJob,
   text: &str,
@@ -189,7 +178,6 @@ fn push_section_with_wrap_indent(
   #[allow(clippy::useless_conversion)]
   job.sections.push(egui::text::LayoutSection {
     leading_space: leading_space.into(),
-    #[cfg(not(feature = "membrane"))]
     wrap_indent,
     byte_range: egui::text::ByteIndex(start)..egui::text::ByteIndex(job.text.len()),
     format,
@@ -400,18 +388,6 @@ pub fn build_layout(
           continue;
         }
         let format = styled_format(&base_format, style, ui, bold_available, color, style_ref);
-        if cfg!(feature = "membrane") && style.inline_code {
-          // Transparent spaces on both sides keep the expanded background off the next glyph.
-          // The spacer takes only the font of the code, so it is as tall as the code and draws no background.
-          let spacer = TextFormat { font_id: format.font_id.clone(), ..transparent_format.clone() };
-          push_section(&mut job, " ", 0.0, spacer.clone());
-          section_to_token.push(token_index);
-          push_section(&mut job, text, 0.0, format);
-          section_to_token.push(token_index);
-          push_section(&mut job, " ", 0.0, spacer);
-          section_to_token.push(token_index);
-          continue;
-        }
         push_section(&mut job, text, 0.0, format);
         section_to_token.push(token_index);
       }
@@ -426,33 +402,6 @@ pub fn build_layout(
 
           let start_char = job.text.chars().count();
 
-          #[cfg(feature = "membrane")]
-          {
-            // Each source line is its own paragraph, so a soft wrap inside a long line would
-            // restart at column 0. Indent every line's wrapped rows by its own leading whitespace.
-            let line_indents = code_line_indents(ui, &padded_text, code_font_size);
-            let mut line_index = 0usize;
-            let mut at_line_start = true;
-            for section in highlighted_job.sections {
-              let section_text = &highlighted_job.text[section.byte_range.as_usize()];
-              for part in section_text.split_inclusive('\n') {
-                if at_line_start {
-                  let indent = line_indents.get(line_index).copied().unwrap_or(0.0);
-                  if indent > 0.0 {
-                    job.push_with_leading_space("", epaint::text::LeadingSpace::Indent(indent), section.format.clone());
-                    section_to_token.push(token_index);
-                  }
-                }
-                at_line_start = part.ends_with('\n');
-                if at_line_start {
-                  line_index += 1;
-                }
-                push_section(&mut job, part, 0.0, section.format.clone());
-                section_to_token.push(token_index);
-              }
-            }
-          }
-          #[cfg(not(feature = "membrane"))]
           {
             // Each source line is its own paragraph. The section that starts a line indents the
             // wrapped rows of that line by its leading whitespace.
@@ -506,23 +455,8 @@ pub fn build_layout(
         // Wrapped rows of the item resume where its text starts.
         let text_start = leading + marker_width + trailing.max(0.0);
 
-        #[cfg(feature = "membrane")]
-        {
-          let mut format = base_format.clone();
-          format.line_height = MARKDOWN_LINE_HEIGHT_POINTS.map(|h| h * 4.0);
-          if leading > 0.0 {
-            job.push_with_leading_space("", epaint::text::LeadingSpace::FirstRow(leading), format.clone());
-            section_to_token.push(token_index);
-          }
-          // Wrapped rows resume where the item's text starts.
-          job.push_with_leading_space("", epaint::text::LeadingSpace::Indent(text_start), format);
-          section_to_token.push(token_index);
-        }
-        #[cfg(not(feature = "membrane"))]
-        {
-          push_section(&mut job, "", leading, base_format.clone());
-          section_to_token.push(token_index);
-        }
+        push_section(&mut job, "", leading, base_format.clone());
+        section_to_token.push(token_index);
 
         // The marker holds the first character of the item, so its wrap indent applies to the whole item.
         push_section_with_wrap_indent(&mut job, marker.as_ref(), 0.0, text_start, marker_format);
@@ -746,7 +680,6 @@ mod syntect_code {
       #[allow(clippy::useless_conversion)]
       job.sections.push(LayoutSection {
         leading_space: 0.0_f32.into(),
-        #[cfg(not(feature = "membrane"))]
         wrap_indent: 0.0,
         byte_range: ByteIndex(byte_start)..ByteIndex(byte_end),
         format: TF {
@@ -769,7 +702,6 @@ mod syntect_code {
     #[allow(clippy::useless_conversion)]
     job.sections.push(LayoutSection {
       leading_space: 0.0_f32.into(),
-      #[cfg(not(feature = "membrane"))]
       wrap_indent: 0.0,
       byte_range: ByteIndex(byte_start)..ByteIndex(job.text.len()),
       format: TF { font_id: FontId::monospace(code_font_size), ..Default::default() },

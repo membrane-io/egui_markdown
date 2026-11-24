@@ -18,7 +18,5 @@ serde = { version = "1", optional = true, default-features = false, features = [
 
 [features]
 default = []
-## Membrane-specific inline code fields (`expand_bg_y`, `bg_corner_radius`).
-membrane = []
 ## Enable `Serialize` / `Deserialize` on style types.
 serde = ["dep:serde", "egui/serde"]

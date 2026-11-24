@@ -38,7 +38,6 @@ syntax_highlighting = ["egui_extras/syntect", "dep:syntect"]
 extra_syntaxes = ["syntax_highlighting", "dep:two-face"]
 images = ["egui_extras/image", "egui_extras/http"]
 svg = ["egui_extras/svg"]
-membrane = ["egui_markdown_style/membrane"]
 
 [[example]]
 name = "simple"
