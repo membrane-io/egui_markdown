@@ -44,7 +44,7 @@ pub fn paint_code_block_bg(ui: &Ui, bg_rect: Rect, origin: Pos2, code_style: &Co
   r.min.y -= code_style.padding[1];
   r.max.x += code_style.padding[2];
   r.max.y += code_style.padding[3];
-  ui.painter().rect_filled(r, code_style.corner_radius, ui.visuals().code_bg_color);
+  ui.painter().rect_filled(r, code_style.corner_radius, ui.visuals().code.bg_color);
   let stroke = Stroke::new(code_style.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
   ui.painter().rect_stroke(r, code_style.corner_radius, stroke, StrokeKind::Inside);
 }

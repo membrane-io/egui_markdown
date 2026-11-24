@@ -3,7 +3,7 @@
 ## Get started
 
 1. Clone the repository.
-2. Install Rust 1.95 or later, which egui 0.36 requires (`rustup update stable`).
+2. Install Rust 1.95 or later, which egui 0.37 requires (`rustup update stable`).
 3. Run `cargo check` to verify your setup.
 4. Run `cargo run --example simple` to see the library render a document.
 
