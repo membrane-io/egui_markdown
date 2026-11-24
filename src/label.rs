@@ -630,6 +630,7 @@ impl<'a> MarkdownLabel<'a> {
     let galley = ui.fonts_mut(|f| f.layout_job(job));
     let sense = if self.interactable { Sense::click_and_drag() } else { Sense::hover() };
     let (rect, response) = ui.allocate_exact_size(galley.size(), sense);
+    set_label_widget_info(ui, &response, &galley);
 
     let galley_pos = match galley.job.halign {
       Align::LEFT => rect.left_top(),
@@ -1170,6 +1171,7 @@ impl<'a> MarkdownLabel<'a> {
     // An invisible Ui, such as the one calculate_size measures in, gets no hover, click or selection.
     if !self.interactable || !ui.is_visible() {
       let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+      set_label_widget_info(ui, &response, &galley);
       out.response = out.response.union(response);
       paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
       ui.painter().galley(rect.min, galley.clone(), color);
@@ -1180,6 +1182,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    set_label_widget_info(ui, &response, &galley);
     paint_decorations(ui, hr_positions, &galley, &code_block_rects, response.rect.min, decoration_width, style);
 
     if self.selectable {
@@ -1539,7 +1542,8 @@ fn render_code_block(
       ui.set_min_width((width - p[0] - p[2]).min(ui.available_width()));
     }
     egui::ScrollArea::horizontal().id_salt(id).show(ui, |ui| {
-      let (rect, _) = ui.allocate_exact_size(epaint::vec2(galley_width, galley_height), Sense::hover());
+      let (rect, response) = ui.allocate_exact_size(epaint::vec2(galley_width, galley_height), Sense::hover());
+      set_label_widget_info(ui, &response, &galley);
       ui.painter().galley(rect.min, galley, ui.visuals().text_color());
     });
   });
@@ -1567,6 +1571,11 @@ fn build_code_block_galley(
   let mut job = highlight_code(ui, &padded_text, lang, code_font_size, code_theme);
   job.wrap.max_width = f32::INFINITY;
   ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// Expose the text of `galley` to screen readers and other accessibility tools, the way [`egui::Label`] does.
+fn set_label_widget_info(ui: &Ui, response: &Response, galley: &Galley) {
+  response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), galley.text()));
 }
 
 /// Custom cursor-from-position that avoids egui's Galley::cursor_from_pos bug (#5796).
