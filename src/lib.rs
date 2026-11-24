@@ -21,6 +21,7 @@
 //! # Feature Flags
 //!
 //! - `syntax_highlighting` (default) - Syntax-highlighted code blocks via `syntect`.
+//! - `extra_syntaxes` - The syntaxes of `bat` through `two-face`, with TypeScript, TSX and JSX.
 //! - `images` - Render images inline using `egui_extras` image support.
 //! - `svg` - SVG image support.
 //! - `membrane` - Rendering that needs [the Membrane egui fork](https://github.com/membrane-io/egui),

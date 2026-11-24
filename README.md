@@ -11,6 +11,9 @@ It parses [CommonMark](https://commonmark.org/) markdown into a token stream. It
 renders that stream as one interactive egui widget, with selectable text, clickable links,
 syntax-highlighted code blocks, tables, images, blockquotes, and lists.
 
+[ECOSYSTEM.md](ECOSYSTEM.md) compares `egui_markdown` with `egui_commonmark`, and lists other Rust
+markdown crates.
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/simple-dark.png">
   <img alt="The simple example: markdown source on the left, and the rendered output on the right" src="docs/screenshots/simple-light.png">
@@ -37,6 +40,8 @@ and unordered lists (nested), horizontal rules.
 **GitHub Flavored Markdown** - tables (with column alignment), task lists,
 footnotes.
 
+**HTML** - the label renders the `<img>` and `<br>` tags, and it shows each other tag as written.
+
 ## Features
 
 - **Text selection** - rendered markdown is selectable in the same way as normal egui text.
@@ -45,7 +50,7 @@ footnotes.
 - **Syntax highlighting** - highlighting through `syntect`, with built-in base16-ocean dark and light themes, and support for custom themes.
 - **Custom link handlers** - the `LinkHandler` trait lets you style links, respond to clicks, and override the layout. It can also render a link as an inline or block-level widget.
 - **Streaming and heal mode** - `.heal(true)` closes unclosed code fences, bold, italic, links, and tables, so that partial LLM output renders correctly.
-- **Configurable style** - `MarkdownStyle` controls the inline code colors, and the code block padding, radius, stroke, and font size. It also controls the heading scales, the horizontal rule stroke, the blockquote indent, the table stroke, corner radius, and cell padding, and the block spacing. `MarkdownStyle::ui()` gives a built-in interactive editor.
+- **Configurable style** - `MarkdownStyle` controls the inline code colors, and the code block padding, radius, stroke, font size, and default language. It also controls the heading scales, the horizontal rule stroke and height, the blockquote indent and bar width, the list marker positions and bullet size, the table stroke, corner radius, and cell padding, and the block spacing. `MarkdownStyle::ui()` gives a built-in interactive editor.
 - **Bold font family** - uses a registered `"bold"` font family when one exists, and the strong text color when none exists.
 - **Code font styles** - a code block shows the italic, bold and underline that the syntect theme gives a scope. Bold uses a registered `"mono-bold"` font family. Without one, bold code keeps the regular monospace family.
 - **Layout caching and viewport culling** - layout caching based on a hash, with viewport culling per segment, for smooth scrolling through large documents.
@@ -63,8 +68,8 @@ footnotes.
 ### The `membrane` feature
 
 Every feature above works against published egui. The `membrane` feature does not. It
-calls `epaint::text::LeadingSpace`, `TextFormat::bg_corner_radius`, and a two-dimensional
-`TextFormat::expand_bg`. Published egui has none of these three, so this feature causes a
+calls `epaint::text::LeadingSpace`, `TextFormat::bg_corner_radius`, `TextFormat::bg_stroke`, and a
+two-dimensional `TextFormat::expand_bg`. Published egui has none of these four, so this feature causes a
 compile error unless you patch egui to
 [the fork](https://github.com/membrane-io/egui).
 
@@ -81,10 +86,11 @@ Patch `emath` and `ecolor` even when you do not depend on them directly. Without
 entries the build has two incompatible copies of the types that egui shares between crates.
 Add `eframe` as well when you use it.
 
-Two things render differently without the feature. An inline code background has square
+Three things render differently without the feature. An inline code background has square
 corners, and its padding expands by the same amount horizontally and vertically rather than
-by separate amounts. A row that soft-wraps inside a list, or inside another indented block,
-returns to the left margin. It does not keep the indentation of the line it continues.
+by separate amounts. Inline code has no border. A row that soft-wraps inside a list, inside a code
+block, or inside another indented block, returns to the left margin. It does not keep the
+indentation of the line it continues.
 
 The parse, the selection, the links, the tables, and the syntax highlighting are the same
 with the feature and without it.
@@ -117,10 +123,10 @@ egui_markdown::set_style(ctx, MarkdownStyle { code_font_size: 13.0, ..Default::d
 ### `LinkHandler`
 
 Implement the [`LinkHandler`](https://docs.rs/egui_markdown/latest/egui_markdown/link/trait.LinkHandler.html) trait
-to customize the style of a link, the response to a click, and the rendering. Implement
-`inline_widget()` to render a link as an inline widget, such as a user mention or a status
-badge. Implement `is_block_widget()` to render a link as a block-level widget, such as an
-embed or a card.
+to customize the style of a link, the tooltip, the response to a click, and the rendering.
+Implement `inline_widget_size()` and `paint_inline_widget()` to render a link as an inline widget,
+such as a user mention or a status badge. Implement `is_block_widget()` and `block_widget()` to
+render a link as a block-level widget, such as an embed or a card.
 
 ### Code Themes
 
@@ -148,6 +154,20 @@ A label wraps the way the surrounding `Ui` does, and `.wrap()`, `.truncate()` an
 override that, as on `egui::Label`. `.truncate().max_lines(3)` elides after three rows.
 `.overflow_wrap(OverflowWrap::BreakAll)` breaks a run that is wider than the label, such as a
 long URL, between any two characters.
+
+### Code blocks
+
+`.code_block_buttons(f)` calls `f(ui, code, language)` to add buttons over each code block, for
+example a copy button. `.scroll_code_blocks(true)` makes each code block a separate widget that
+scrolls horizontally. With scrolling code blocks, `.shrink_code_blocks(true)` makes a code block as
+wide as its content, and `.code_block_min_width()` sets the smallest width of a shrunk code block.
+
+### Size
+
+`.hug_content(true)` makes the label as wide as its content, not as wide as the available space.
+`calculate_size()` measures the label in an invisible child `Ui`. `layout_in_ui()` lays out the
+text as one galley, and the caller paints it. That galley leaves out tables, images, block widgets
+and scrolling code blocks.
 
 ### Clicks
 

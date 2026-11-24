@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The `egui_markdown_style` crate, which holds `MarkdownStyle` and the other style types, so that an
+  application can store a style without a dependency on the renderer.
+- `set_style` and `global_style`, which install and read one `MarkdownStyle` for an `egui::Context`. A
+  label with no `.style()` uses it.
+- `set_code_themes` and `code_theme`, which install and read a dark and a light syntect theme for an
+  `egui::Context`. A label with no `.code_theme()` uses them.
+- `ListStyle` on `MarkdownStyle`. A list marker is right-aligned in a slot, and a wrapped row of an item
+  starts at the x of the item text.
+- `MarkdownLabel::shrink_code_blocks` and `MarkdownLabel::code_block_min_width`, which size a scrolling
+  code block to its content.
+- `MarkdownLabel::hug_content`, which sizes the label to its content and not to the available width.
+- `MarkdownLabel::map_job`, which rewrites the layout job before the label shapes it, for example to
+  fade in new text.
+- The `membrane` feature, for the rendering that needs the Membrane egui fork. With it, inline code
+  has rounded corners, separate horizontal and vertical padding, and a border
+  (`InlineCodeStyle::stroke_dark`, `stroke_light` and `stroke_width`).
+- The `extra_syntaxes` feature, which highlights TypeScript, TSX, JSX and the other syntaxes of `bat`
+  through `two-face`.
+- A code block shows the italic, bold and underline that the syntect theme gives a scope. Bold code
+  uses a registered `"mono-bold"` font family.
+- The label renders the HTML `<img>` and `<br>` tags. An `<img>` tag gives a `Token::Image` with its
+  `width` and `height` in points. A table cell shows an image and starts a new row at a `<br>`.
 - `OverflowWrap` enum (`Normal`, `BreakAll`) and `MarkdownLabel::overflow_wrap`, which break a
   run of text that is wider than the available width.
 - `MarkdownLabel::wrap_mode`, `.wrap()`, `.truncate()`, and `.extend()`, which mirror the same
@@ -30,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** the crates need egui 0.36. Version 0.1.0 needed egui 0.33.
+- **Breaking:** `LinkHandler::layout_link` receives the `&Ui`, so that a handler can lay out against
+  the live `Ui`.
+- A scrolling code block keeps the syntect state of each complete line, and highlights only the new
+  lines when the code grows.
+- A code block in the text galley gets the `code_bg_color` fill, as a scrolling code block does.
+- The scroll bar of a table that scrolls is inside the border of the table.
 - **Breaking:** `build_layout` now takes `max_width: f32` and `break_anywhere: bool`, and no
   longer reads `ui.wrap_mode()` itself. A caller that caches the resulting job must write the
   live wrap values over it before each shape, as `MarkdownLabel` already does.
@@ -106,6 +135,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invisible child `Ui`. Its width is still the width of the content.
 - `MarkdownLabel::layout_in_ui` now heals the text when `heal` is on. Its docs say that the galley holds
   text only.
+- A table or an image outside the view keeps no height from an old width. The label measures it
+  again when the available width changes.
+- A `LinkHandler::layout_link` that reads the egui context inside a table cell no longer runs while
+  the label holds the fonts lock.
+- Two tables in one label no longer share a scroll id.
+- A code line that soft-wraps keeps the indent of the line on the egui fork.
 - The published package now includes the streaming test fixtures, and `egui_markdown_style` ships
   its license files.
 
