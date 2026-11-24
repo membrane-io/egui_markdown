@@ -22,9 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MarkdownLabel::hug_content`, which sizes the label to its content and not to the available width.
 - `MarkdownLabel::map_job`, which rewrites the layout job before the label shapes it, for example to
   fade in new text.
-- The `membrane` feature, for the rendering that needs the Membrane egui fork. With it, inline code
-  has rounded corners, separate horizontal and vertical padding, and a border
-  (`InlineCodeStyle::stroke_dark`, `stroke_light` and `stroke_width`).
+- Inline code has rounded corners, a margin, and a border. It takes all three from
+  `egui::Visuals::code`.
+- A row that soft-wraps inside a list item or a code line starts at the indent of the line that it
+  continues. The label sets `LayoutSection::wrap_indent` for this.
 - The `extra_syntaxes` feature, which highlights TypeScript, TSX, JSX and the other syntaxes of `bat`
   through `two-face`.
 - A code block shows the italic, bold and underline that the syntect theme gives a scope. Bold code
@@ -52,12 +53,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** the crates need egui 0.36. Version 0.1.0 needed egui 0.33.
+- **Breaking:** the crates need egui 0.37 from the egui `main` branch, for
+  `LayoutSection::wrap_indent` and `TextFormat::background_stroke`. Patch egui to `main` until the
+  next egui release. Version 0.1.0 needed egui 0.33.
+- **Breaking:** `CodeBlockStyle::corner_radius` is removed. A code block takes its fill and its corner
+  radius from `egui::Visuals::code`.
+- **Breaking:** `InlineCodeStyle::expand_bg_y`, `bg_corner_radius`, `stroke_dark`, `stroke_light` and
+  `stroke_width` are removed. Set the margin, the corner radius and the border of inline code on
+  `egui::Visuals::code`.
+- **Breaking:** `apply_inline_code_bg` takes `&egui::Visuals` in place of `dark_mode: bool`.
 - **Breaking:** `LinkHandler::layout_link` receives the `&Ui`, so that a handler can lay out against
   the live `Ui`.
 - A scrolling code block keeps the syntect state of each complete line, and highlights only the new
   lines when the code grows.
-- A code block in the text galley gets the `code_bg_color` fill, as a scrolling code block does.
+- A code block in the text galley gets the code background fill, as a scrolling code block does.
 - The scroll bar of a table that scrolls is inside the border of the table.
 - **Breaking:** `build_layout` now takes `max_width: f32` and `break_anywhere: bool`, and no
   longer reads `ui.wrap_mode()` itself. A caller that caches the resulting job must write the
@@ -140,7 +149,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `LinkHandler::layout_link` that reads the egui context inside a table cell no longer runs while
   the label holds the fonts lock.
 - Two tables in one label no longer share a scroll id.
-- A code line that soft-wraps keeps the indent of the line on the egui fork.
 - The published package now includes the streaming test fixtures, and `egui_markdown_style` ships
   its license files.
 
