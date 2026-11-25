@@ -93,6 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Without the `syntax_highlighting` feature, a code block was gray and hard to read in light mode.
+  It now takes the text color of `egui::Visuals::code`.
 - The rendered text was invisible to screen readers and other accessibility tools. Each galley now
   has the widget info of a label, as `egui::Label` does.
 - The text of a code block shown with `scroll_code_blocks` could not be selected. It now can, as other

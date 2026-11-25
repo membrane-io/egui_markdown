@@ -1053,14 +1053,16 @@ pub(crate) use syntect_code::{scrolling_code_galley, theme_identity_ptr, Streami
 /// Produce a plain (unhighlighted) [`LayoutJob`] for a code block body.
 #[cfg(not(feature = "syntax_highlighting"))]
 pub fn highlight_code(
-  _ui: &Ui,
+  ui: &Ui,
   body: &str,
   _language: &str,
   code_font_size: f32,
   _code_theme: CodeThemeArg<'_>,
 ) -> LayoutJob {
+  let visuals = ui.visuals();
+  let color = visuals.code.text_color.unwrap_or_else(|| visuals.text_color());
   let mut job = LayoutJob::default();
-  job.append(body, 0.0, TextFormat { font_id: FontId::monospace(code_font_size), ..Default::default() });
+  job.append(body, 0.0, TextFormat { font_id: FontId::monospace(code_font_size), color, ..Default::default() });
   job
 }
 
