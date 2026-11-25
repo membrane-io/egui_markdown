@@ -301,6 +301,64 @@ fn code_line_indents(ui: &Ui, text: &str, code_font_size: f32) -> Vec<f32> {
   })
 }
 
+/// The horizontal layout of a list marker: the space before it, its width, and the space after it.
+pub(crate) struct MarkerLayout {
+  pub leading: f32,
+  pub marker_width: f32,
+  pub trailing: f32,
+}
+
+/// Lay out `marker`, set in `marker_font`, for an item at `indent_level` inside `blockquote_depth` quotes.
+/// `body_font` sets the width of the marker slot.
+pub(crate) fn marker_layout(
+  ui: &Ui,
+  marker: &str,
+  marker_font: &FontId,
+  body_font: &FontId,
+  indent_level: usize,
+  blockquote_depth: u32,
+  style: &MarkdownStyle,
+) -> MarkerLayout {
+  let list = &style.list;
+  let is_ordered = marker.trim_start().starts_with(|c: char| c.is_ascii_digit());
+  let nudge = if is_ordered { list.number_nudge } else { list.bullet_nudge };
+  let (marker_width, slot_width) = ui.ctx().fonts_mut(|f| {
+    let marker_width: f32 = marker.chars().map(|c| f.glyph_width(marker_font, c)).sum();
+    let slot_width: f32 = MARKER_SLOT_REFERENCE.chars().map(|c| f.glyph_width(body_font, c)).sum();
+    (marker_width, slot_width)
+  });
+  // `indent_level` is 1-based, so a top-level item gets no nesting indent. Each level starts its
+  // marker slot at the x of the text of the level above it.
+  let nesting = (indent_level as f32 - 1.0).max(0.0) * (slot_width + list.gap)
+    + blockquote_depth as f32 * style.blockquote.indent_per_depth;
+  // Right-align the marker inside a fixed slot so every item at this level starts its text
+  // at the same x, whatever its marker. A marker wider than the slot keeps its own width
+  // rather than reaching left of the item, which would paint outside the widget.
+  let leading = (nesting + slot_width - nudge - marker_width).max(0.0);
+  // The nudge and the gap are made up after the marker, so moving a marker never moves text.
+  let trailing = nesting + slot_width + list.gap - leading - marker_width;
+  MarkerLayout { leading, marker_width, trailing }
+}
+
+/// The x of the item text that a code block in a list item starts at. The parser puts an empty
+/// [`Token::ListMarker`] before such a code block. Any other code block starts at 0.
+pub(crate) fn code_block_indent(
+  ui: &Ui,
+  previous: Option<&Token<'_>>,
+  font_id: &FontId,
+  blockquote_depth: u32,
+  style: &MarkdownStyle,
+) -> f32 {
+  match previous {
+    Some(Token::ListMarker { marker, indent_level }) if marker.is_empty() => {
+      let MarkerLayout { leading, marker_width, trailing } =
+        marker_layout(ui, "", font_id, font_id, *indent_level, blockquote_depth, style);
+      leading + marker_width + trailing.max(0.0)
+    }
+    _ => 0.0,
+  }
+}
+
 /// Whether a token stream contains anything that [`build_layout`] would report as a segment
 /// break, which means whether it must use the segmented render path.
 ///
@@ -401,6 +459,15 @@ pub fn build_layout(
           let highlighted_job = highlight_code(ui, &padded_text, lang, code_font_size, code_theme);
 
           let start_char = job.text.chars().count();
+          // In a list item, every line starts at the x of the item text. The empty marker before the
+          // block already moves the first line there.
+          let indent = code_block_indent(
+            ui,
+            token_index.checked_sub(1).map(|i| &tokens[i]),
+            &font_id,
+            blockquote_depth,
+            style_ref,
+          );
 
           {
             // Each source line is its own paragraph. The section that starts a line indents the
@@ -411,13 +478,17 @@ pub fn build_layout(
             for section in highlighted_job.sections {
               let section_text = &highlighted_job.text[section.byte_range.as_usize()];
               for part in section_text.split_inclusive('\n') {
-                let wrap_indent =
-                  if at_line_start { line_indents.get(line_index).copied().unwrap_or(0.0) } else { 0.0 };
+                let (leading_space, wrap_indent) = if at_line_start {
+                  let leading_space = if line_index > 0 { indent } else { 0.0 };
+                  (leading_space, indent + line_indents.get(line_index).copied().unwrap_or(0.0))
+                } else {
+                  (0.0, 0.0)
+                };
                 at_line_start = part.ends_with('\n');
                 if at_line_start {
                   line_index += 1;
                 }
-                push_section_with_wrap_indent(&mut job, part, 0.0, wrap_indent, section.format.clone());
+                push_section_with_wrap_indent(&mut job, part, leading_space, wrap_indent, section.format.clone());
                 section_to_token.push(token_index);
               }
             }
@@ -428,29 +499,13 @@ pub fn build_layout(
         }
       }
       Token::ListMarker { marker, indent_level } => {
-        let list = &style_ref.list;
         let is_ordered = marker.trim_start().starts_with(|c: char| c.is_ascii_digit());
-        let nudge = if is_ordered { list.number_nudge } else { list.bullet_nudge };
         let mut marker_format = base_format.clone();
         if !is_ordered {
-          marker_format.font_id.size *= list.bullet_scale;
+          marker_format.font_id.size *= style_ref.list.bullet_scale;
         }
-
-        let (marker_width, slot_width) = ui.ctx().fonts_mut(|f| {
-          let marker_width: f32 = marker.chars().map(|c| f.glyph_width(&marker_format.font_id, c)).sum();
-          let slot_width: f32 = MARKER_SLOT_REFERENCE.chars().map(|c| f.glyph_width(&font_id, c)).sum();
-          (marker_width, slot_width)
-        });
-        // `indent_level` is 1-based, so a top-level item gets no nesting indent. Each level starts its
-        // marker slot at the x of the text of the level above it.
-        let nesting = (*indent_level as f32 - 1.0).max(0.0) * (slot_width + list.gap)
-          + blockquote_depth as f32 * style_ref.blockquote.indent_per_depth;
-        // Right-align the marker inside a fixed slot so every item at this level starts its text
-        // at the same x, whatever its marker. A marker wider than the slot keeps its own width
-        // rather than reaching left of the item, which would paint outside the widget.
-        let leading = (nesting + slot_width - nudge - marker_width).max(0.0);
-        // The nudge and the gap are made up after the marker, so moving a marker never moves text.
-        let trailing = nesting + slot_width + list.gap - leading - marker_width;
+        let MarkerLayout { leading, marker_width, trailing } =
+          marker_layout(ui, marker, &marker_format.font_id, &font_id, *indent_level, blockquote_depth, style_ref);
 
         // Wrapped rows of the item resume where its text starts.
         let text_start = leading + marker_width + trailing.max(0.0);

@@ -22,8 +22,13 @@ pub fn compute_code_block_rects(ui: &mut Ui, code_blocks: &[(usize, usize)], gal
       }
       if let Some(start_row) = start_row {
         if row_range.contains(&end) || row_index == galley.rows.len() - 1 {
-          let mut bg_rect = Rect::from_min_max(galley.rows[start_row].rect().min, row.rect().max);
-          bg_rect.set_width(available_width);
+          let first = &galley.rows[start_row];
+          let mut bg_rect = Rect::from_min_max(first.rect().min, row.rect().max);
+          // The padding space that starts the block sits at its left edge, which is past 0 in a list item.
+          if let Some(glyph) = first.glyphs.first() {
+            bg_rect.min.x = first.pos.x + glyph.pos.x;
+          }
+          bg_rect.max.x = available_width;
           code_block_rects.push(bg_rect);
           break;
         }

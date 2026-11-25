@@ -16,7 +16,9 @@ use epaint::text::ByteRangeExt as _;
 
 #[cfg(not(feature = "syntax_highlighting"))]
 use crate::layout::highlight_code;
-use crate::layout::{build_layout, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult};
+use crate::layout::{
+  build_layout, code_block_indent, needs_segmentation, section_for_char, CodeThemeArg, LayoutResult,
+};
 #[cfg(feature = "syntax_highlighting")]
 use crate::layout::{scrolling_code_galley, StreamingCodeCache};
 use crate::link::{InlineWidgetRow, LinkHandler};
@@ -832,8 +834,13 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::CodeBlock { text, language } if self.scroll_code_blocks => {
-          let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
+          // The empty marker that the parser puts before a code block in a list item gives the x of the
+          // block. It is not text, so the flush leaves it out.
+          let previous = i.checked_sub(1).filter(|&p| p >= text_start).map(|p| &tokens[p]);
+          let indent = code_block_indent(ui, previous, font, 0, style);
+          let text_end = if indent > 0.0 { i - 1 } else { i };
+          let had_content = text_start < text_end;
+          self.flush_text_range(ui, tokens, font, color, text_start, text_end, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -843,18 +850,22 @@ impl<'a> MarkdownLabel<'a> {
             continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          render_code_block(
-            ui,
-            self.id.with(("code_block", i)),
-            text,
-            language.as_deref(),
-            self.code_block_buttons,
-            self.shrink_code_blocks,
-            self.code_block_min_width,
-            self.selectable && self.interactable,
-            style,
-            self.code_theme_arg(),
-          );
+          let mut block_rect = ui.available_rect_before_wrap();
+          block_rect.min.x += indent;
+          ui.scope_builder(UiBuilder::new().max_rect(block_rect), |ui| {
+            render_code_block(
+              ui,
+              self.id.with(("code_block", i)),
+              text,
+              language.as_deref(),
+              self.code_block_buttons,
+              self.shrink_code_blocks,
+              self.code_block_min_width,
+              self.selectable && self.interactable,
+              style,
+              self.code_theme_arg(),
+            );
+          });
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
