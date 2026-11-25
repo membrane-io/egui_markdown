@@ -502,7 +502,7 @@ fn token_style_to_format(
   }
   if style.inline_code {
     crate::layout::apply_inline_code_bg(&mut format, ui.visuals(), inline_code_style);
-    crate::layout::apply_inline_code_font(&mut format, ui);
+    crate::layout::apply_inline_code_font(&mut format, ui, style.bold || is_header);
   }
   format
 }
