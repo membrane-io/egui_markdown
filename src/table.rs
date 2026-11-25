@@ -346,7 +346,7 @@ fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_head
           style.strong_color,
           style.has_bold,
           is_header,
-          ui.visuals(),
+          ui,
           style.inline_code_style,
         );
         let mut job = LayoutJob::default();
@@ -444,16 +444,8 @@ fn tokens_to_layout_job(
   for token in tokens {
     match token {
       Token::Text { text, style } => {
-        let format = token_style_to_format(
-          style,
-          font_id,
-          color,
-          strong_color,
-          has_bold,
-          is_header,
-          ui.visuals(),
-          inline_code_style,
-        );
+        let format =
+          token_style_to_format(style, font_id, color, strong_color, has_bold, is_header, ui, inline_code_style);
         job.append(text, 0.0, format);
       }
       Token::Link { text, href, .. } => {
@@ -498,7 +490,7 @@ fn token_style_to_format(
   strong_color: Color32,
   has_bold: bool,
   is_header: bool,
-  visuals: &egui::Visuals,
+  ui: &Ui,
   inline_code_style: &InlineCodeStyle,
 ) -> TextFormat {
   let mut format = TextFormat { font_id: font_id.clone(), color, ..Default::default() };
@@ -512,7 +504,8 @@ fn token_style_to_format(
     format.strikethrough = egui::Stroke::new(1.0_f32, color);
   }
   if style.inline_code {
-    crate::layout::apply_inline_code_bg(&mut format, visuals, inline_code_style);
+    crate::layout::apply_inline_code_bg(&mut format, ui.visuals(), inline_code_style);
+    crate::layout::apply_inline_code_font(&mut format, ui, style.bold || is_header);
   }
   format
 }
@@ -544,6 +537,7 @@ mod tests {
       let code_section = job.sections.iter().find(|s| &job.text[s.byte_range.as_usize()] == "images");
       assert_eq!(code_section.map(|s| s.format.background_margin), Some(ui.visuals().code.margin));
       assert_eq!(code_section.map(|s| s.format.background_stroke), Some(ui.visuals().code.stroke));
+      assert_eq!(code_section.map(|s| s.format.font_id.family.clone()), Some(FontFamily::Monospace));
       checked = true;
     });
     assert!(checked);

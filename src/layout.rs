@@ -72,6 +72,21 @@ pub fn apply_inline_code_bg(format: &mut TextFormat, visuals: &egui::Visuals, in
   format.background_stroke = visuals.code.stroke;
 }
 
+/// Set the font family of inline code to [`FontFamily::Monospace`], as a code block has. When `bold` is
+/// true, inline code uses the `"mono-bold"` family if the app registers one. Without it, bold inline
+/// code keeps the regular monospace family. The size does not change, so inline code in a heading has
+/// the size of the heading.
+pub(crate) fn apply_inline_code_font(format: &mut TextFormat, ui: &Ui, bold: bool) {
+  let mono_bold = if bold { registered_family(ui, "mono-bold") } else { None };
+  format.font_id.family = mono_bold.unwrap_or(FontFamily::Monospace);
+}
+
+/// The family `name` when the app registers it with egui, else `None`.
+fn registered_family(ui: &Ui, name: &str) -> Option<FontFamily> {
+  let family = FontFamily::Name(name.into());
+  ui.ctx().fonts(|f| f.families().contains(&family)).then_some(family)
+}
+
 #[inline]
 fn text_format(font_id: FontId, color: Color32) -> TextFormat {
   TextFormat { font_id, color, valign: Align::BOTTOM, line_height: MARKDOWN_LINE_HEIGHT_POINTS, ..Default::default() }
@@ -244,8 +259,7 @@ pub fn render_link_in_ui(
 
 /// Check if a "bold" font family is registered with egui.
 fn has_bold_font(ui: &Ui) -> bool {
-  let bold_family = FontFamily::Name("bold".into());
-  ui.ctx().fonts(|f| f.families().contains(&bold_family))
+  registered_family(ui, "bold").is_some()
 }
 
 /// Apply bold styling. Use the bold font family when it is registered, and the strong text color when it is not.
@@ -259,7 +273,7 @@ fn apply_bold(format: &mut TextFormat, ui: &Ui, has_bold: bool) {
 }
 
 /// The format of text with the inline `style`: bold, italic, strikethrough, the heading size, and the
-/// inline code colors.
+/// inline code colors and font.
 fn styled_format(
   base_format: &TextFormat,
   style: &crate::types::TokenStyle,
@@ -286,6 +300,7 @@ fn styled_format(
   }
   if style.inline_code {
     apply_inline_code_bg(&mut format, ui.visuals(), &markdown_style.inline_code);
+    apply_inline_code_font(&mut format, ui, style.bold || style.heading.is_some());
   }
   format
 }
@@ -403,7 +418,7 @@ pub fn build_layout(
   style: &MarkdownStyle,
   code_theme: CodeThemeArg<'_>,
 ) -> LayoutResult {
-  let code_font_size = style.code_font_size;
+  let code_font_size = style.code_font_size(ui.style());
   let style_ref = style;
   let hyperlink_color = ui.visuals().hyperlink_color;
   let bold_available = has_bold_font(ui);
@@ -707,9 +722,7 @@ mod syntect_code {
 
   impl CodeFont {
     fn new(ui: &Ui, size: f32) -> Self {
-      let family = FontFamily::Name("mono-bold".into());
-      let bold = ui.ctx().fonts(|f| f.families().contains(&family)).then_some(family);
-      Self { size, bold }
+      Self { size, bold: super::registered_family(ui, "mono-bold") }
     }
   }
 
@@ -1148,6 +1161,46 @@ mod section_tests {
       checked = true;
     });
     assert!(checked);
+  }
+
+  /// Inline code uses the monospace family, as a code block does, and keeps the size of the text
+  /// around it. Bold inline code uses the `"mono-bold"` family when the app registers it, also when the
+  /// app does not register `"bold"`.
+  #[test]
+  fn inline_code_is_monospace() {
+    let markdown = crate::parse("Plain `code`, **bold `strong`**.\n\n# Title `heading`");
+    for register_bold in [true, false] {
+      let ctx = egui::Context::default();
+      let mut fonts = egui::FontDefinitions::default();
+      let proportional = fonts.families[&FontFamily::Proportional].clone();
+      let mono = fonts.families[&FontFamily::Monospace].clone();
+      if register_bold {
+        fonts.families.insert(FontFamily::Name("bold".into()), proportional);
+      }
+      fonts.families.insert(FontFamily::Name("mono-bold".into()), mono);
+      ctx.set_fonts(fonts);
+      let mut checked = false;
+      let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let style = MarkdownStyle::default();
+        let font = FontId::proportional(14.0);
+        let color = ui.visuals().text_color();
+        let layout =
+          build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+        let font_of = |text: &str| {
+          let section = layout.job.sections.iter().find(|s| &layout.job.text[s.byte_range.as_usize()] == text).unwrap();
+          section.format.font_id.clone()
+        };
+        assert_eq!(font_of("Plain ").family, FontFamily::Proportional);
+        assert_eq!(font_of("code").family, FontFamily::Monospace);
+        assert_eq!(font_of("strong").family, FontFamily::Name("mono-bold".into()));
+        assert_eq!(font_of("heading").family, FontFamily::Name("mono-bold".into()));
+        assert_eq!(font_of("heading").size, font_of("Title ").size);
+        assert_eq!(font_of("heading").size, 14.0 * style.heading.scales[0]);
+        checked = true;
+      });
+      output.textures_delta.clear();
+      assert!(checked);
+    }
   }
 
   /// A rule takes a row of its own, with one blank row above and below it, as between two paragraphs.
