@@ -92,3 +92,35 @@ fn two_measures_under_one_id_do_not_clash() {
   }
   assert!(!painted.iter().any(|t| t.contains("🔥")), "egui reported an id clash: {painted:?}");
 }
+
+/// The bottom of a frame with a margin around the label, after one frame that is a sizing pass or a normal pass.
+fn frame_bottom(ctx: &Context, md: &str, sizing_pass: bool) -> f32 {
+  let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(300.0, 600.0));
+  let mut bottom = 0.0;
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+    let mut builder = UiBuilder::new().max_rect(screen);
+    if sizing_pass {
+      builder = builder.sizing_pass();
+    }
+    let mut child = ui.new_child(builder);
+    let framed = egui::Frame::new().inner_margin(8).show(&mut child, |ui| {
+      MarkdownLabel::new(Id::NULL.with(md), md).show(ui);
+    });
+    bottom = framed.response.rect.bottom();
+  });
+  output.textures_delta.clear();
+  bottom
+}
+
+#[test]
+fn a_sizing_pass_measures_the_height_of_a_table() {
+  let one_table = "Text before\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n";
+  let two_tables = "| a | b |\n|---|---|\n| 1 | 2 |\n\nText between\n\n| c | d |\n|---|---|\n| 3 | 4 |\n";
+  for md in [one_table, two_tables] {
+    let ctx = Context::default();
+    let sizing = frame_bottom(&ctx, md, true);
+    let normal = frame_bottom(&ctx, md, false);
+    assert_eq!(sizing, normal, "{md:?}");
+    assert_eq!(frame_bottom(&ctx, md, true), normal, "a sizing pass after a normal pass: {md:?}");
+  }
+}
