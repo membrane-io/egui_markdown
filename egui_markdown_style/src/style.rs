@@ -41,9 +41,9 @@ pub struct MarkdownStyle {
   pub table: TableStyle,
   /// Vertical spacing between block elements in pixels.
   pub block_spacing: f32,
-  /// Font size for code blocks. Default: `13.0`, the size of egui's default
-  /// [`egui::TextStyle::Monospace`] and of inline code in egui's default body text.
-  pub code_font_size: f32,
+  /// Font size for code blocks. `None`, the default, uses the size of [`egui::TextStyle::Monospace`]
+  /// in the egui style, as `ui.code()` does. `Some(size)` sets a fixed size.
+  pub code_font_size: Option<f32>,
   /// Language used for syntax highlighting when no language is specified.
   pub default_code_language: String,
 }
@@ -59,7 +59,7 @@ impl Default for MarkdownStyle {
       list: ListStyle::default(),
       table: TableStyle::default(),
       block_spacing: 8.0,
-      code_font_size: 13.0,
+      code_font_size: None,
       default_code_language: String::new(),
     }
   }
@@ -75,12 +75,18 @@ impl Hash for MarkdownStyle {
     self.list.hash(state);
     self.table.hash(state);
     self.block_spacing.to_bits().hash(state);
-    self.code_font_size.to_bits().hash(state);
+    self.code_font_size.map(f32::to_bits).hash(state);
     self.default_code_language.hash(state);
   }
 }
 
 impl MarkdownStyle {
+  /// The font size of code blocks: [`Self::code_font_size`], or the size of
+  /// [`egui::TextStyle::Monospace`] in `style` when it is `None`.
+  pub fn code_font_size(&self, style: &egui::Style) -> f32 {
+    self.code_font_size.unwrap_or_else(|| egui::TextStyle::Monospace.resolve(style).size)
+  }
+
   /// Show an interactive editor for all style fields, plus a dark/light switch.
   pub fn ui(&mut self, ui: &mut Ui) {
     ui.horizontal(|ui| {
@@ -115,10 +121,16 @@ impl MarkdownStyle {
     egui::CollapsingHeader::new("Code Blocks").default_open(true).show(ui, |ui| {
       self.code_block.ui(ui);
       ui.separator();
-      ui.horizontal(|ui| {
-        ui.label("Font size:");
-        ui.add(DragValue::new(&mut self.code_font_size).range(6.0..=30.0).speed(0.5));
-      });
+      let mut use_egui_size = self.code_font_size.is_none();
+      if ui.checkbox(&mut use_egui_size, "Use egui's monospace size").changed() {
+        self.code_font_size = (!use_egui_size).then(|| self.code_font_size(ui.style()));
+      }
+      if let Some(size) = &mut self.code_font_size {
+        ui.horizontal(|ui| {
+          ui.label("Font size:");
+          ui.add(DragValue::new(size).range(6.0..=30.0).speed(0.5));
+        });
+      }
       ui.horizontal(|ui| {
         ui.label("Default language:");
         ui.add(egui::TextEdit::singleline(&mut self.default_code_language).desired_width(80.0));

@@ -55,8 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Inline code uses `FontFamily::Monospace`, as a code block does. It keeps the size of the text
   around it. Bold inline code uses the `"mono-bold"` family when the app registers one.
-- The default `code_font_size` is 13, the size of egui's default `TextStyle::Monospace`, so a code
-  block has the size of inline code. It was 12. A code block is about 1.5 points taller per line.
+- **Breaking:** `MarkdownStyle::code_font_size` is an `Option<f32>`. `None`, the default, uses the
+  size of `TextStyle::Monospace` in the egui style, as `ui.code()` does. `Some(size)` sets a fixed
+  size. Version 0.1.0 used a fixed `10.0`.
 - **Breaking:** the crates need egui 0.37 from the egui `main` branch, for
   `LayoutSection::wrap_indent` and `TextFormat::background_stroke`. Patch egui to `main` until the
   next egui release. Version 0.1.0 needed egui 0.33.
@@ -84,9 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Holding Shift no longer turns off text selection, so a shift-click extends the selection, as it
   does on `egui::Label`. The selection also stays painted while Shift is down. An app that used
   Shift for something else can pass `.selectable(!ui.input(|i| i.modifiers.shift))`.
-- The default `MarkdownStyle::code_font_size` is `12.0`, the size of egui's default monospace text. It
-  was `10.0`, which was small beside egui's 12.5 point body text. An app that wants the old size sets
-  it.
 - **Breaking:** the crates need Rust 1.95, which egui 0.36 needs. `rust-version` said 1.80.
 - **Breaking:** `LinkHandler::paint_inline_widget` now runs once for each link, not once for each
   row. It receives the font of the link and an `InlineWidgetRow` for each row, with the rect and the

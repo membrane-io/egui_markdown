@@ -356,7 +356,7 @@ pub fn build_layout(
   style: &MarkdownStyle,
   code_theme: CodeThemeArg<'_>,
 ) -> LayoutResult {
-  let code_font_size = style.code_font_size;
+  let code_font_size = style.code_font_size(ui.style());
   let style_ref = style;
   let hyperlink_color = ui.visuals().hyperlink_color;
   let bold_available = has_bold_font(ui);

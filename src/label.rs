@@ -73,6 +73,17 @@ fn hash_text(text: &str, style: &MarkdownStyle, handler: Option<&dyn LinkHandler
   hasher.finish()
 }
 
+/// `style` with [`MarkdownStyle::code_font_size`] set to the size that it resolves to in `egui_style`. Each
+/// cache key hashes the style, so a cached layout changes when the app changes the size of
+/// [`egui::TextStyle::Monospace`].
+fn with_code_font_size<'s>(style: &'s MarkdownStyle, egui_style: &egui::Style) -> std::borrow::Cow<'s, MarkdownStyle> {
+  if style.code_font_size.is_some() {
+    std::borrow::Cow::Borrowed(style)
+  } else {
+    std::borrow::Cow::Owned(MarkdownStyle { code_font_size: Some(style.code_font_size(egui_style)), ..style.clone() })
+  }
+}
+
 /// Identity of everything a [`LayoutResult`] depends on.
 ///
 /// Deliberately excludes the wrap width and break flag: `build_layout` only seeds
@@ -643,7 +654,8 @@ impl<'a> MarkdownLabel<'a> {
 
   fn render(&self, ui: &mut Ui, out: &mut MarkdownLabelOutput) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
-    let style = self.style.unwrap_or(context_style.as_ref());
+    let style = with_code_font_size(self.style.unwrap_or(context_style.as_ref()), ui.style());
+    let style = style.as_ref();
     let color = ui.visuals().text_color();
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
 
@@ -1483,6 +1495,7 @@ fn render_code_block(
   code_theme: CodeThemeArg<'_>,
 ) {
   let lang = language.unwrap_or(style.default_code_language.as_str());
+  let code_font_size = style.code_font_size(ui.style());
   let cache_id = id.with("code_galley");
 
   #[cfg(feature = "syntax_highlighting")]
@@ -1490,14 +1503,13 @@ fn render_code_block(
     let identity_hash = hash_code_block_identity(
       ui,
       lang,
-      style.code_font_size,
+      code_font_size,
       ui.visuals().dark_mode,
       ui.ctx().pixels_per_point(),
       code_theme,
     );
     let cached = ui.data(|d| d.get_temp::<StreamingCodeCache>(cache_id));
-    let updated =
-      scrolling_code_galley(ui, text.as_ref(), lang, style.code_font_size, identity_hash, code_theme, cached);
+    let updated = scrolling_code_galley(ui, text.as_ref(), lang, code_font_size, identity_hash, code_theme, cached);
     let galley = Arc::clone(&updated.galley);
     ui.data_mut(|d| d.insert_temp(cache_id, updated));
     galley
@@ -1508,7 +1520,7 @@ fn render_code_block(
     let ctx_hash = hash_code_block_context(
       text.as_ref(),
       lang,
-      style.code_font_size,
+      code_font_size,
       ui.visuals().dark_mode,
       ui.ctx().pixels_per_point(),
       code_theme,
@@ -1516,7 +1528,7 @@ fn render_code_block(
     match ui.data(|d| d.get_temp::<CachedCodeBlock>(cache_id)) {
       Some(cached) if cached.ctx_hash == ctx_hash => cached.galley,
       _ => {
-        let galley = build_code_block_galley(ui, text.as_ref(), lang, style.code_font_size, code_theme);
+        let galley = build_code_block_galley(ui, text.as_ref(), lang, code_font_size, code_theme);
         ui.data_mut(|d| {
           d.insert_temp(cache_id, CachedCodeBlock { ctx_hash, galley: Arc::clone(&galley) });
         });
@@ -1626,6 +1638,43 @@ pub fn last_non_whitespace_glyph(row: &Row) -> Option<&Glyph> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A code block has the size of `TextStyle::Monospace` by default, and follows a change of that size,
+  /// also after the label caches its layout. `Some(size)` keeps a fixed size.
+  #[test]
+  fn code_block_font_size_follows_egui_monospace() {
+    let markdown = "```\nfn main() {}\n```";
+    let ctx = Context::default();
+    // The size of the code block section in the layout, and the height of the label.
+    let run = |style: &MarkdownStyle| {
+      let mut result = (0.0, 0.0);
+      let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let tokens = crate::parse(markdown).tokens;
+        let font = FontId::proportional(13.0);
+        let layout =
+          build_layout(ui, &tokens, font, Color32::WHITE, None, f32::INFINITY, false, None, false, style, None);
+        let code = layout.job.sections.iter().find(|s| layout.job.text[s.byte_range.as_usize()].contains("main"));
+        let height = MarkdownLabel::new(Id::NULL.with("md"), markdown).style(style).calculate_size(ui).y;
+        result = (code.unwrap().format.font_id.size, height);
+      });
+      output.textures_delta.clear();
+      result
+    };
+
+    let default = MarkdownStyle::default();
+    let (size, height) = run(&default);
+    assert_eq!(size, egui::TextStyle::Monospace.resolve(&ctx.global_style()).size);
+
+    ctx.all_styles_mut(|style| {
+      style.text_styles.insert(egui::TextStyle::Monospace, FontId::monospace(16.0));
+    });
+    let (size, taller) = run(&default);
+    assert_eq!(size, 16.0);
+    assert!(taller > height, "the cached layout of the label keeps the old size: {taller} <= {height}");
+
+    let (size, _) = run(&MarkdownStyle { code_font_size: Some(11.0), ..Default::default() });
+    assert_eq!(size, 11.0);
+  }
 
   /// A block's cached height stays valid while text elsewhere in the document changes, as it does on
   /// every delta of a streamed reply, so the block stays culled. A change to the block itself drops it.

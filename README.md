@@ -93,7 +93,7 @@ use egui_markdown::{MarkdownLabel, MarkdownStyle};
 
 let mut style = MarkdownStyle::default();
 style.heading.scales[0] = 2.0; // Bigger H1
-style.code_font_size = 14.0;
+style.code_font_size = Some(14.0); // `None` uses egui's monospace size
 MarkdownLabel::new(id, text).style(&style).show(ui);
 ```
 
@@ -104,7 +104,7 @@ To give every label in an app the same style, install it once on the context. A 
 `.style()` reads it:
 
 ```rust
-egui_markdown::set_style(ctx, MarkdownStyle { code_font_size: 13.0, ..Default::default() });
+egui_markdown::set_style(ctx, MarkdownStyle { code_font_size: Some(14.0), ..Default::default() });
 ```
 
 ### `LinkHandler`
