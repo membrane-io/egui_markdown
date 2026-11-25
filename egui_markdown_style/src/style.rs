@@ -41,8 +41,13 @@ pub struct MarkdownStyle {
   pub table: TableStyle,
   /// Vertical spacing between block elements in pixels.
   pub block_spacing: f32,
-  /// Font size for code blocks. `None`, the default, uses the size of [`egui::TextStyle::Monospace`]
-  /// in the egui style, as `ui.code()` does. `Some(size)` sets a fixed size.
+  /// Font size for code blocks. `None`, the default, gives the label font size times the ratio of
+  /// [`egui::TextStyle::Monospace`] to [`egui::TextStyle::Body`] in the egui style. In a label with the
+  /// body font, that is the size of `ui.code()`. `Some(size)` sets a fixed size.
+  ///
+  /// Inline code has the size of the text around it times the ratio of the code block size to the label
+  /// font size. So inline code in a paragraph has the size of a code block, and inline code in a heading
+  /// is larger by the heading scale.
   pub code_font_size: Option<f32>,
   /// Language used for syntax highlighting when no language is specified.
   pub default_code_language: String,
@@ -80,11 +85,22 @@ impl Hash for MarkdownStyle {
   }
 }
 
+/// The size of [`egui::TextStyle::Monospace`] divided by the size of [`egui::TextStyle::Body`] in
+/// `style`. It is 1.0 when `style` does not have one of them, or when a size is not positive.
+fn monospace_ratio(style: &egui::Style) -> f32 {
+  let size = |text_style| style.text_styles.get(&text_style).map(|font| font.size);
+  match (size(egui::TextStyle::Monospace), size(egui::TextStyle::Body)) {
+    (Some(mono), Some(body)) if mono > 0.0 && body > 0.0 => mono / body,
+    _ => 1.0,
+  }
+}
+
 impl MarkdownStyle {
-  /// The font size of code blocks: [`Self::code_font_size`], or the size of
-  /// [`egui::TextStyle::Monospace`] in `style` when it is `None`.
-  pub fn code_font_size(&self, style: &egui::Style) -> f32 {
-    self.code_font_size.unwrap_or_else(|| egui::TextStyle::Monospace.resolve(style).size)
+  /// The font size of code blocks in a label with the font size `label_font_size`:
+  /// [`Self::code_font_size`], or, when it is `None`, `label_font_size` times the ratio of
+  /// [`egui::TextStyle::Monospace`] to [`egui::TextStyle::Body`] in `style`.
+  pub fn code_font_size(&self, style: &egui::Style, label_font_size: f32) -> f32 {
+    self.code_font_size.unwrap_or_else(|| label_font_size * monospace_ratio(style))
   }
 
   /// Show an interactive editor for all style fields, plus a dark/light switch.
@@ -121,9 +137,10 @@ impl MarkdownStyle {
     egui::CollapsingHeader::new("Code Blocks").default_open(true).show(ui, |ui| {
       self.code_block.ui(ui);
       ui.separator();
-      let mut use_egui_size = self.code_font_size.is_none();
-      if ui.checkbox(&mut use_egui_size, "Use egui's monospace size").changed() {
-        self.code_font_size = (!use_egui_size).then(|| self.code_font_size(ui.style()));
+      let mut scale_with_label = self.code_font_size.is_none();
+      if ui.checkbox(&mut scale_with_label, "Scale with the label font").changed() {
+        let body_size = egui::TextStyle::Body.resolve(ui.style()).size;
+        self.code_font_size = (!scale_with_label).then(|| self.code_font_size(ui.style(), body_size));
       }
       if let Some(size) = &mut self.code_font_size {
         ui.horizontal(|ui| {
@@ -515,5 +532,27 @@ impl ListStyle {
       ui.add(DragValue::new(&mut self.bullet_scale).range(0.5..=4.0).speed(0.05));
       ui.end_row();
     });
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use egui::{FontId, TextStyle};
+
+  /// Without a positive `Body` and `Monospace` size, a code block has the label font size, and the style
+  /// does not panic.
+  #[test]
+  fn code_font_size_without_the_text_styles() {
+    let style = MarkdownStyle::default();
+    let mut egui_style = egui::Style::default();
+    egui_style.text_styles.insert(TextStyle::Monospace, FontId::monospace(11.0));
+    assert_eq!(style.code_font_size(&egui_style, 26.0), 22.0);
+
+    egui_style.text_styles.insert(TextStyle::Body, FontId::proportional(0.0));
+    assert_eq!(style.code_font_size(&egui_style, 13.0), 13.0);
+
+    egui_style.text_styles.clear();
+    assert_eq!(style.code_font_size(&egui_style, 13.0), 13.0);
   }
 }

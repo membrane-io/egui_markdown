@@ -53,11 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Inline code uses `FontFamily::Monospace`, as a code block does. It keeps the size of the text
-  around it. Bold inline code uses the `"mono-bold"` family when the app registers one.
-- **Breaking:** `MarkdownStyle::code_font_size` is an `Option<f32>`. `None`, the default, uses the
-  size of `TextStyle::Monospace` in the egui style, as `ui.code()` does. `Some(size)` sets a fixed
-  size. Version 0.1.0 used a fixed `10.0`.
+- Inline code uses `FontFamily::Monospace`, as a code block does. Its size is the size of the text
+  around it times the ratio of the code block size to the label font size, so inline code in a heading
+  is larger by the heading scale. Bold inline code uses the `"mono-bold"` family when the app registers
+  one.
+- **Breaking:** `MarkdownStyle::code_font_size` is an `Option<f32>`. `None`, the default, gives the
+  label font size times the ratio of `TextStyle::Monospace` to `TextStyle::Body` in the egui style. In
+  a label with the body font, that is the size of `ui.code()`. `Some(size)` sets a fixed size.
+  Version 0.1.0 used a fixed `10.0`.
+- **Breaking:** `table::render_table` takes the code block font size of the label.
 - **Breaking:** the crates need egui 0.37 from the egui `main` branch, for
   `LayoutSection::wrap_indent` and `TextFormat::background_stroke`. Patch egui to `main` until the
   next egui release. Version 0.1.0 needed egui 0.33.
