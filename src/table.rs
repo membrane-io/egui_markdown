@@ -24,9 +24,24 @@ pub fn render_table(
   table_style: &TableStyle,
   link_handler: Option<&dyn LinkHandler>,
 ) {
+  show_table(ui, id, data, font_id, color, inline_code_style, table_style, link_handler);
+}
+
+/// [`render_table`], and return the rect that the table allocated.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn show_table(
+  ui: &mut Ui,
+  id: Id,
+  data: &TableData<'_>,
+  font_id: &FontId,
+  color: Color32,
+  inline_code_style: &InlineCodeStyle,
+  table_style: &TableStyle,
+  link_handler: Option<&dyn LinkHandler>,
+) -> Rect {
   let num_cols = data.alignments.len();
   if num_cols == 0 {
-    return;
+    return Rect::NOTHING;
   }
 
   let hyperlink_color = ui.visuals().hyperlink_color;
@@ -117,6 +132,9 @@ pub fn render_table(
     });
 
   paint_table_chrome(ui, output.inner, output.inner_rect, stroke, radius);
+  // The scroll area shrinks `inner_rect` to the content before it allocates.
+  let size = Vec2::new(output.inner_rect.width().min(output.content_size.x), output.content_size.y);
+  Rect::from_min_size(output.inner_rect.min, size)
 }
 
 fn padded_cell(ui: &mut Ui, margin: Margin, add: impl FnOnce(&mut Ui)) {
