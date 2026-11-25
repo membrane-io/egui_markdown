@@ -650,9 +650,9 @@ impl<'a> MarkdownLabel<'a> {
   fn render(&self, ui: &mut Ui, out: &mut MarkdownLabelOutput) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
     let style = self.style.unwrap_or(context_style.as_ref());
-    let code_font_size = style.code_font_size(ui.style());
     let color = ui.visuals().text_color();
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
+    let code_font_size = style.code_font_size(ui.style(), font.size);
 
     let cache_id = self.id.with("md_cache");
     // Check if we have a cached layout for this text.
@@ -832,6 +832,7 @@ impl<'a> MarkdownLabel<'a> {
             font,
             color,
             &style.inline_code,
+            code_font_size,
             &style.table,
             self.link_handler,
           );
@@ -1663,9 +1664,9 @@ pub fn last_non_whitespace_glyph(row: &Row) -> Option<&Glyph> {
 mod tests {
   use super::*;
 
-  /// A code block has the size of `TextStyle::Monospace` by default, and follows a change of that size,
-  /// also after the label caches its layout. `Some(size)` keeps a fixed size. The blockquote makes the
-  /// label lay out each range of text on its own, with its own cache.
+  /// A code block in a label with the body font has the size of `TextStyle::Monospace` by default, and
+  /// follows a change of that size, also after the label caches its layout. `Some(size)` keeps a fixed
+  /// size. The blockquote makes the label lay out each range of text on its own, with its own cache.
   #[test]
   fn code_block_font_size_follows_egui_monospace() {
     for markdown in ["```\nfn main() {}\n```", "> Quote\n\n```\nfn main() {}\n```"] {

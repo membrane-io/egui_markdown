@@ -93,7 +93,7 @@ use egui_markdown::{MarkdownLabel, MarkdownStyle};
 
 let mut style = MarkdownStyle::default();
 style.heading.scales[0] = 2.0; // Bigger H1
-style.code_font_size = Some(14.0); // `None` uses egui's monospace size
+style.code_font_size = Some(14.0); // `None` scales code with the label font
 MarkdownLabel::new(id, text).style(&style).show(ui);
 ```
 

@@ -13,6 +13,10 @@ use crate::style::{InlineCodeStyle, TableStyle};
 use crate::types::{Alignment, TableData, Token, TokenStyle};
 
 /// Render a markdown table using `egui_extras::TableBuilder`.
+///
+/// `code_font_size` is the code block size of the label, from
+/// [`MarkdownStyle::code_font_size()`](crate::MarkdownStyle::code_font_size()). Inline code in a cell has
+/// that size.
 #[allow(clippy::too_many_arguments)]
 pub fn render_table(
   ui: &mut Ui,
@@ -21,6 +25,7 @@ pub fn render_table(
   font_id: &FontId,
   color: Color32,
   inline_code_style: &InlineCodeStyle,
+  code_font_size: f32,
   table_style: &TableStyle,
   link_handler: Option<&dyn LinkHandler>,
 ) {
@@ -42,6 +47,7 @@ pub fn render_table(
     strong_color,
     has_bold,
     inline_code_style,
+    code_scale: crate::layout::inline_code_scale(code_font_size, font_id.size),
     link_handler,
     max_image_width: (ui.available_width() - pad[0] - pad[2]).max(0.0),
   };
@@ -209,6 +215,7 @@ struct CellStyle<'a> {
   strong_color: Color32,
   has_bold: bool,
   inline_code_style: &'a InlineCodeStyle,
+  code_scale: f32,
   link_handler: Option<&'a dyn LinkHandler>,
   max_image_width: f32,
 }
@@ -225,6 +232,7 @@ impl CellStyle<'_> {
       self.has_bold,
       is_header,
       self.inline_code_style,
+      self.code_scale,
       self.link_handler,
     )
   }
@@ -348,6 +356,7 @@ fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_head
           is_header,
           ui,
           style.inline_code_style,
+          style.code_scale,
         );
         let mut job = LayoutJob::default();
         job.append(text, 0.0, format);
@@ -438,14 +447,24 @@ fn tokens_to_layout_job(
   has_bold: bool,
   is_header: bool,
   inline_code_style: &InlineCodeStyle,
+  code_scale: f32,
   link_handler: Option<&dyn LinkHandler>,
 ) -> LayoutJob {
   let mut job = LayoutJob::default();
   for token in tokens {
     match token {
       Token::Text { text, style } => {
-        let format =
-          token_style_to_format(style, font_id, color, strong_color, has_bold, is_header, ui, inline_code_style);
+        let format = token_style_to_format(
+          style,
+          font_id,
+          color,
+          strong_color,
+          has_bold,
+          is_header,
+          ui,
+          inline_code_style,
+          code_scale,
+        );
         job.append(text, 0.0, format);
       }
       Token::Link { text, href, .. } => {
@@ -492,6 +511,7 @@ fn token_style_to_format(
   is_header: bool,
   ui: &Ui,
   inline_code_style: &InlineCodeStyle,
+  code_scale: f32,
 ) -> TextFormat {
   let mut format = TextFormat { font_id: font_id.clone(), color, ..Default::default() };
   if style.bold || is_header {
@@ -505,7 +525,7 @@ fn token_style_to_format(
   }
   if style.inline_code {
     crate::layout::apply_inline_code_bg(&mut format, ui.visuals(), inline_code_style);
-    crate::layout::apply_inline_code_font(&mut format, ui, style.bold || is_header);
+    crate::layout::apply_inline_code_font(&mut format, ui, style.bold || is_header, code_scale);
   }
   format
 }
@@ -532,7 +552,7 @@ mod tests {
       let font = FontId::proportional(14.0);
       let color = ui.visuals().text_color();
       let style = InlineCodeStyle::default();
-      let job = tokens_to_layout_job(ui, &tokens, &font, color, color, color, false, false, &style, None);
+      let job = tokens_to_layout_job(ui, &tokens, &font, color, color, color, false, false, &style, 1.0, None);
       assert_eq!(job.text, "Behind the images feature");
       let code_section = job.sections.iter().find(|s| &job.text[s.byte_range.as_usize()] == "images");
       assert_eq!(code_section.map(|s| s.format.background_margin), Some(ui.visuals().code.margin));

@@ -72,13 +72,23 @@ pub fn apply_inline_code_bg(format: &mut TextFormat, visuals: &egui::Visuals, in
   format.background_stroke = visuals.code.stroke;
 }
 
-/// Set the font family of inline code to [`FontFamily::Monospace`], as a code block has. When `bold` is
-/// true, inline code uses the `"mono-bold"` family if the app registers one. Without it, bold inline
-/// code keeps the regular monospace family. The size does not change, so inline code in a heading has
-/// the size of the heading.
-pub(crate) fn apply_inline_code_font(format: &mut TextFormat, ui: &Ui, bold: bool) {
+/// Set the font of inline code: the [`FontFamily::Monospace`] family, as a code block has, and the size
+/// of the text around it times `code_scale`. When `bold` is true, inline code uses the `"mono-bold"`
+/// family if the app registers one. Without it, bold inline code keeps the regular monospace family.
+pub(crate) fn apply_inline_code_font(format: &mut TextFormat, ui: &Ui, bold: bool, code_scale: f32) {
+  format.font_id.size *= code_scale;
   let mono_bold = if bold { registered_family(ui, "mono-bold") } else { None };
   format.font_id.family = mono_bold.unwrap_or(FontFamily::Monospace);
+}
+
+/// The size of inline code divided by the size of the text around it: the code block size divided by the
+/// label font size. It is 1.0 when the label font size is not positive.
+pub(crate) fn inline_code_scale(code_font_size: f32, label_font_size: f32) -> f32 {
+  if label_font_size > 0.0 {
+    code_font_size / label_font_size
+  } else {
+    1.0
+  }
 }
 
 /// The family `name` when the app registers it with egui, else `None`.
@@ -281,6 +291,7 @@ fn styled_format(
   bold_available: bool,
   color: Color32,
   markdown_style: &MarkdownStyle,
+  code_scale: f32,
 ) -> TextFormat {
   let mut format = base_format.clone();
   if style.bold {
@@ -300,7 +311,7 @@ fn styled_format(
   }
   if style.inline_code {
     apply_inline_code_bg(&mut format, ui.visuals(), &markdown_style.inline_code);
-    apply_inline_code_font(&mut format, ui, style.bold || style.heading.is_some());
+    apply_inline_code_font(&mut format, ui, style.bold || style.heading.is_some(), code_scale);
   }
   format
 }
@@ -418,7 +429,8 @@ pub fn build_layout(
   style: &MarkdownStyle,
   code_theme: CodeThemeArg<'_>,
 ) -> LayoutResult {
-  let code_font_size = style.code_font_size(ui.style());
+  let code_font_size = style.code_font_size(ui.style(), font_id.size);
+  let code_scale = inline_code_scale(code_font_size, font_id.size);
   let style_ref = style;
   let hyperlink_color = ui.visuals().hyperlink_color;
   let bold_available = has_bold_font(ui);
@@ -464,7 +476,7 @@ pub fn build_layout(
         if text.is_empty() {
           continue;
         }
-        let format = styled_format(&base_format, style, ui, bold_available, color, style_ref);
+        let format = styled_format(&base_format, style, ui, bold_available, color, style_ref, code_scale);
         push_section(&mut job, text, 0.0, format);
         section_to_token.push(token_index);
       }
@@ -540,7 +552,7 @@ pub fn build_layout(
       }
       Token::Link { text, href, style, .. } => {
         // A link takes the size, weight and slant of the text around it, and keeps its own color.
-        let link_base = styled_format(&base_format, style, ui, bold_available, color, style_ref);
+        let link_base = styled_format(&base_format, style, ui, bold_available, color, style_ref, code_scale);
         let link_font = link_base.font_id.clone();
         let info = append_link_to_job(ui, &mut job, text, href, &link_font, &link_base, hyperlink_color, link_handler);
         if info.is_block_widget {
