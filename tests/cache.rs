@@ -383,3 +383,26 @@ fn calculate_size_follows_a_change_of_overflow_wrap() {
   assert_ne!(normal, fresh, "the break flag does not change the size");
   assert_eq!(cached, fresh, "the label measures with the break flag from before the change");
 }
+
+/// A bold token of the code theme uses the "mono-bold" family when the app registers one, in a code block that
+/// scrolls and in one that does not.
+#[cfg(feature = "syntax_highlighting")]
+#[test]
+fn a_code_block_follows_a_mono_bold_family_that_the_app_registers_later() {
+  let theme = syntect::highlighting::ThemeSet::load_defaults().themes["InspiredGitHub"].clone();
+  for scroll in [true, false] {
+    let show = |ui: &mut egui::Ui| {
+      MarkdownLabel::new(Id::NULL.with("label"), "```rust\nstruct A;\nimpl A {}\n```")
+        .scroll_code_blocks(scroll)
+        .code_theme(&theme)
+        .show(ui);
+    };
+    let change = |ctx: &Context| {
+      let mut fonts = egui::FontDefinitions::default();
+      let monospace = fonts.families[&egui::FontFamily::Monospace].clone();
+      fonts.families.insert(egui::FontFamily::Name("mono-bold".into()), monospace);
+      ctx.set_fonts(fonts);
+    };
+    assert_follows_change(&format!("scroll_code_blocks={scroll}"), show, change, show);
+  }
+}

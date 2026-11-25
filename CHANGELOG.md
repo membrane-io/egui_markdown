@@ -169,6 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `scroll_code_blocks`. Before, it kept the layout of an earlier frame.
 - After a change of `overflow_wrap` or of the wrap mode, `calculate_size` and the culling of text off the
   screen used a size from before the change.
+- A scrolling code block now follows a "mono-bold" family that the app registers later. Before, its bold
+  tokens kept the regular monospace family.
 
 ## [0.1.0] - 2026-03-23
 

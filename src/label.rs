@@ -177,6 +177,7 @@ fn hash_code_block_identity(
   dark_mode.hash(&mut hasher);
   pixels_per_point.to_bits().hash(&mut hasher);
   crate::layout::theme_identity_ptr(ui, code_theme).hash(&mut hasher);
+  crate::layout::registered_family(ui, "mono-bold").is_some().hash(&mut hasher);
   hasher.finish()
 }
 
