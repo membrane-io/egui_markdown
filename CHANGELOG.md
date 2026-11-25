@@ -93,8 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A table measured shorter in a sizing pass than it shows, by the bottom padding of each row. A
-  `Harness::fit_contents` or an auto-sized `Area` cut off the end of the label.
+- A table measured smaller in a sizing pass than it shows: each cell lost its right and bottom
+  padding. A `Harness::fit_contents` or an auto-sized `Area` cut off the end of the label.
 - Without the `syntax_highlighting` feature, a code block was gray and hard to read in light mode.
   It now takes the text color of `egui::Visuals::code`.
 - The rendered text was invisible to screen readers and other accessibility tools. Each galley now

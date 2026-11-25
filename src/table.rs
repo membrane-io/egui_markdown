@@ -122,8 +122,8 @@ pub fn render_table(
 fn padded_cell(ui: &mut Ui, margin: Margin, add: impl FnOnce(&mut Ui)) {
   let cell = ui.max_rect();
   ui.scope_builder(UiBuilder::new().max_rect(cell - margin), add);
-  // In a sizing pass, `egui_extras` allocates only the rect that the cell used, and the next row starts below it.
-  // The cell uses its whole rect, so a sizing pass measures the padding and the row height that a normal pass shows.
+  // In a sizing pass, `egui_extras` allocates only the rect that the cell contents used. The cell uses its whole rect,
+  // so a sizing pass measures the size that a normal pass shows.
   ui.expand_to_include_rect(cell);
 }
 
