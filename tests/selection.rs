@@ -1,4 +1,4 @@
-//! A shift-click extends the selection of a label, as it does on `egui::Label`.
+//! Text selection, as on `egui::Label`.
 
 use egui::{pos2, vec2, Context, Event, Id, Modifiers, OutputCommand, PointerButton, Pos2, RawInput, Rect, UiBuilder};
 use egui_markdown::MarkdownLabel;
@@ -41,4 +41,44 @@ fn shift_click_and_copy() -> Option<String> {
 fn a_shift_click_extends_the_selection() {
   let copied = shift_click_and_copy().expect("a selection to copy");
   assert!(copied.starts_with("alpha beta gamma delt"), "copied {copied:?}");
+}
+
+/// Drag across a code block shown with `scroll_code_blocks`, and copy. Returns the copied text.
+fn drag_across_scrolling_code_block_and_copy() -> Option<String> {
+  let ctx = Context::default();
+  let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+  let frame = |events: Vec<Event>| {
+    let mut rect = Rect::NOTHING;
+    let input = RawInput { screen_rect: Some(screen), events, ..Default::default() };
+    let mut output = ctx.run_ui(input, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      MarkdownLabel::new(Id::NULL.with("scrolling_code"), "```\nlet answer = 42;\n```")
+        .scroll_code_blocks(true)
+        .show(&mut child);
+      rect = child.min_rect();
+    });
+    output.textures_delta.clear();
+    let copied = output.platform_output.commands.into_iter().find_map(|command| match command {
+      OutputCommand::CopyText(text) => Some(text),
+      _ => None,
+    });
+    (rect, copied)
+  };
+  let button =
+    |pos, pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+
+  let (rect, _) = frame(Vec::new());
+  let start = pos2(rect.left() + 12.0, rect.center().y);
+  let end = pos2(rect.left() + 200.0, rect.center().y);
+  frame(vec![Event::PointerMoved(start)]);
+  frame(vec![button(start, true)]);
+  frame(vec![Event::PointerMoved(end)]);
+  frame(vec![button(end, false)]);
+  frame(vec![Event::Copy]).1
+}
+
+#[test]
+fn a_scrolling_code_block_is_selectable() {
+  let copied = drag_across_scrolling_code_block_and_copy().expect("a selection to copy");
+  assert!(copied.contains("answer = 42"), "copied {copied:?}");
 }

@@ -851,6 +851,7 @@ impl<'a> MarkdownLabel<'a> {
             self.code_block_buttons,
             self.shrink_code_blocks,
             self.code_block_min_width,
+            self.selectable && self.interactable,
             style,
             self.code_theme_arg(),
           );
@@ -1477,6 +1478,7 @@ fn render_code_block(
   code_block_buttons: Option<&dyn Fn(&mut Ui, &str, &str)>,
   shrink_to_content: bool,
   min_width: Option<f32>,
+  selectable: bool,
   style: &MarkdownStyle,
   code_theme: CodeThemeArg<'_>,
 ) {
@@ -1542,9 +1544,15 @@ fn render_code_block(
       ui.set_min_width((width - p[0] - p[2]).min(ui.available_width()));
     }
     egui::ScrollArea::horizontal().id_salt(id).show(ui, |ui| {
-      let (rect, response) = ui.allocate_exact_size(epaint::vec2(galley_width, galley_height), Sense::hover());
+      let sense = if selectable { Sense::click_and_drag() } else { Sense::hover() };
+      let (rect, response) = ui.allocate_exact_size(epaint::vec2(galley_width, galley_height), sense);
       set_label_widget_info(ui, &response, &galley);
-      ui.painter().galley(rect.min, galley, ui.visuals().text_color());
+      let color = ui.visuals().text_color();
+      if selectable {
+        LabelSelectionState::label_text_selection(ui, &response, rect.min, galley, color, Stroke::NONE);
+      } else {
+        ui.painter().galley(rect.min, galley, color);
+      }
     });
   });
 
