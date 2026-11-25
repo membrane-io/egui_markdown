@@ -113,8 +113,8 @@ impl Revision {
 
 /// The inputs other than the tokens that a cached layout or height depends on: the style, the size of
 /// code blocks, the link handler, the font, the color, the egui visuals that [`build_layout`] reads, the
-/// font families that the app registers, and the code theme. It costs the same on every frame, whatever
-/// the length of the document.
+/// code theme, and the [`fonts_epoch`]. It costs the same on every frame, whatever the length of the
+/// document.
 ///
 /// Each value that [`build_layout`] reads from `ui` must be here. The wrap width and the break flag are
 /// not, because the label applies them to the job on each frame.
@@ -129,12 +129,11 @@ fn frame_key(
 ) -> u64 {
   let visuals = ui.visuals();
   let code = &visuals.code;
-  let families = ["bold", "mono-bold"].map(|name| crate::layout::registered_family(ui, name).is_some());
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
   (style, code_font_size.to_bits(), handler.map(|h| h.id()), font, color).hash(&mut hasher);
   (visuals.dark_mode, visuals.hyperlink_color, visuals.strong_text_color()).hash(&mut hasher);
   (code.text_color, code.stroke, code.corner_radius, code.margin).hash(&mut hasher);
-  (families, code_theme_identity(ui, code_theme)).hash(&mut hasher);
+  (code_theme_identity(ui, code_theme), fonts_epoch(ui.ctx())).hash(&mut hasher);
   hasher.finish()
 }
 
@@ -160,59 +159,55 @@ fn hash_block(token: &Token<'_>, style: &MarkdownStyle, font: &FontId) -> u64 {
   hasher.finish()
 }
 
-/// The value of [`fonts_epoch`] in a pass of one viewport.
-#[derive(Clone, Copy)]
+/// The state of [`fonts_epoch`] in one viewport.
+#[derive(Clone)]
 struct FontsEpoch {
+  /// The pass that last laid out `probe`.
   pass: u64,
   epoch: u64,
+  probe: Arc<Galley>,
 }
 
-/// The probe galley of [`fonts_epoch`] from the last pass that laid it out.
-#[derive(Clone)]
-struct FontsProbe(Arc<Galley>);
-
-/// A number that changes when the fonts or the font atlas of the viewport change.
+/// A number that changes when the fonts change or egui resets the font atlas.
 ///
-/// A code block keeps its galley, and a galley holds the position of each glyph in the font atlas. After
-/// `Context::set_fonts` or an atlas reset, which egui does when the atlas is more than 80% full, a kept galley
-/// paints the wrong glyphs. egui has no public signal for these changes (egui issue #3023). But egui clears its
-/// galley cache on each of them. So on the first call in a pass, this lays out a small fixed job and compares the
-/// galley with the galley of the last pass. A different galley gives a new epoch, and the code blocks lay out
-/// again. A later call in the same pass reads only the epoch.
+/// A layout depends on the fonts: a cached [`LayoutResult`] holds the width of list markers and of code
+/// indents, and a scrolling code block keeps its galley, which holds the position of each glyph in the font
+/// atlas. After `Context::set_fonts` or an atlas reset, which egui does when the atlas is more than 80% full,
+/// these values are wrong. egui has no public signal for these changes, but it clears its galley cache on each
+/// of them. So on the first call in a pass, this lays out a small fixed job and compares the galley with the
+/// galley of the last pass. A different galley gives a new epoch. A later call in the same pass reads only the
+/// epoch.
 ///
-/// egui also drops a galley that a pass did not use. A label calls this function for each scrolling code block,
-/// also for one that it culls, so the probe stays in the cache while a code block shows or is culled. After a
-/// pass with no scrolling code block, the epoch changes one time more than it must.
+/// egui also drops a galley that a pass did not use. Each label calls this function in each pass through
+/// [`frame_key`], so the probe stays in the cache while a label shows. After a pass in which no label of the
+/// viewport shows, the epoch changes one time more than it must, and each label lays out again one time.
 ///
-/// The cost is one small layout lookup per pass, shared by all labels.
-fn fonts_epoch(ui: &Ui) -> u64 {
-  let ctx = ui.ctx();
+/// The cost is one small layout lookup per pass, shared by all labels of the viewport. The font atlas is shared
+/// by all viewports, but egui keeps a galley cache for each viewport, so each viewport has its own probe.
+///
+/// TODO(egui#3023): read a generation counter of the fonts if egui adds one, and remove the probe.
+fn fonts_epoch(ctx: &Context) -> u64 {
   let id = fonts_epoch_id(ctx);
   let pass = ctx.cumulative_pass_nr();
   let previous = ctx.data(|d| d.get_temp::<FontsEpoch>(id));
-  if let Some(previous) = previous.filter(|previous| previous.pass == pass) {
+  if let Some(previous) = previous.as_ref().filter(|previous| previous.pass == pass) {
     return previous.epoch;
   }
   let job = LayoutJob::simple("x".to_owned(), FontId::monospace(8.0), Color32::WHITE, f32::INFINITY);
-  let galley = ctx.fonts_mut(|f| f.layout_job(job));
-  let probe_id = id.with("probe");
-  let same =
-    ctx.data(|d| d.get_temp::<FontsProbe>(probe_id)).is_some_and(|FontsProbe(probe)| Arc::ptr_eq(&probe, &galley));
+  let probe = ctx.fonts_mut(|f| f.layout_job(job));
+  // The stored probe keeps the old galley alive, so a new galley cannot have its address.
   let epoch = match previous {
-    Some(previous) if same => previous.epoch,
+    Some(previous) if Arc::ptr_eq(&previous.probe, &probe) => previous.epoch,
     Some(previous) => previous.epoch.wrapping_add(1),
     None => 0,
   };
-  ctx.data_mut(|d| {
-    d.insert_temp(id, FontsEpoch { pass, epoch });
-    d.insert_temp(probe_id, FontsProbe(galley));
-  });
+  ctx.data_mut(|d| d.insert_temp(id, FontsEpoch { pass, epoch, probe }));
   epoch
 }
 
 /// Where [`fonts_epoch`] keeps its [`FontsEpoch`] for the current viewport.
 fn fonts_epoch_id(ctx: &Context) -> Id {
-  Id::NULL.with("egui_markdown_fonts_epoch").with(ctx.viewport_id())
+  Id::unique(("egui_markdown_fonts_epoch", ctx.viewport_id()))
 }
 
 /// Identity of everything a scrolling code-block galley depends on except the source text.
@@ -233,7 +228,6 @@ fn hash_code_block_identity(
   dark_mode.hash(&mut hasher);
   pixels_per_point.to_bits().hash(&mut hasher);
   crate::layout::theme_identity_ptr(ui, code_theme).hash(&mut hasher);
-  crate::layout::registered_family(ui, "mono-bold").is_some().hash(&mut hasher);
   fonts_epoch.hash(&mut hasher);
   hasher.finish()
 }
@@ -244,7 +238,7 @@ fn hash_code_block_context(
   text: &str,
   language: &str,
   code_font_size: f32,
-  dark_mode: bool,
+  color: Color32,
   pixels_per_point: f32,
   code_theme: CodeThemeArg<'_>,
   fonts_epoch: u64,
@@ -253,7 +247,7 @@ fn hash_code_block_context(
   text.hash(&mut hasher);
   language.hash(&mut hasher);
   code_font_size.to_bits().hash(&mut hasher);
-  dark_mode.hash(&mut hasher);
+  color.hash(&mut hasher);
   pixels_per_point.to_bits().hash(&mut hasher);
   fonts_epoch.hash(&mut hasher);
   let _ = code_theme;
@@ -906,8 +900,6 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::CodeBlock { text, language } if self.scroll_code_blocks => {
-          // Keep the probe of `fonts_epoch` in the egui galley cache, also when the block is culled.
-          fonts_epoch(ui);
           // The empty marker that the parser puts before a code block in a list item gives the x of the
           // block. It is not text, so the flush leaves it out.
           let previous = i.checked_sub(1).filter(|&p| p >= text_start).map(|p| &tokens[p]);
@@ -1597,7 +1589,7 @@ fn render_code_block(
       ui.visuals().dark_mode,
       ui.ctx().pixels_per_point(),
       code_theme,
-      fonts_epoch(ui),
+      fonts_epoch(ui.ctx()),
     );
     let cached = ui.data(|d| d.get_temp::<StreamingCodeCache>(cache_id));
     let updated = scrolling_code_galley(ui, text.as_ref(), lang, code_font_size, identity_hash, code_theme, cached);
@@ -1612,10 +1604,10 @@ fn render_code_block(
       text.as_ref(),
       lang,
       code_font_size,
-      ui.visuals().dark_mode,
+      crate::layout::plain_code_color(ui.visuals()),
       ui.ctx().pixels_per_point(),
       code_theme,
-      fonts_epoch(ui),
+      fonts_epoch(ui.ctx()),
     );
     match ui.data(|d| d.get_temp::<CachedCodeBlock>(cache_id)) {
       Some(cached) if cached.ctx_hash == ctx_hash => cached.galley,
@@ -1731,8 +1723,8 @@ pub fn last_non_whitespace_glyph(row: &Row) -> Option<&Glyph> {
 mod tests {
   use super::*;
 
-  /// While the label culls its only scrolling code block, the probe of `fonts_epoch` stays in the egui galley
-  /// cache. So the epoch does not change, and the code block does not lay out again when it shows again.
+  /// While the label culls its only scrolling code block, the label keeps the probe of `fonts_epoch` in the egui
+  /// galley cache. So the epoch does not change, and the code block does not lay out again when it shows again.
   #[test]
   fn a_culled_code_block_keeps_the_fonts_probe() {
     let ctx = Context::default();

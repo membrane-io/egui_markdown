@@ -473,3 +473,44 @@ fn a_scrolling_code_block_follows_an_atlas_reset() {
   };
   assert_eq!(uv(&painted), uv(&fresh), "the code block paints glyphs from before the atlas reset");
 }
+
+/// A font definition that swaps the proportional and the monospace families, so every glyph gets a new width.
+fn swap_font_families(ctx: &Context) {
+  let mut fonts = egui::FontDefinitions::default();
+  let proportional = fonts.families[&egui::FontFamily::Proportional].clone();
+  let monospace = fonts.families[&egui::FontFamily::Monospace].clone();
+  fonts.families.insert(egui::FontFamily::Proportional, monospace);
+  fonts.families.insert(egui::FontFamily::Monospace, proportional);
+  ctx.set_fonts(fonts);
+}
+
+/// The label measures the width of a list marker with the fonts, and keeps the result in its layout.
+#[test]
+fn a_list_follows_set_fonts() {
+  for doc in ["- item\n- other\n  - nested", "- item\n- other\n  - nested\n\n| a |\n|---|\n| 1 |"] {
+    let show = move |ui: &mut egui::Ui| {
+      MarkdownLabel::new(Id::NULL.with("label"), doc).show(ui);
+    };
+    assert_follows_change(&format!("{doc:?}"), show, swap_font_families, show);
+  }
+}
+
+/// The label measures the indent of each line of a code block with the fonts, and keeps the result in its layout.
+#[test]
+fn an_indented_code_line_follows_set_fonts() {
+  let show = |ui: &mut egui::Ui| {
+    MarkdownLabel::new(Id::NULL.with("label"), "Intro.\n\n```rust\nfn main() {\n        x();\n}\n```").show(ui);
+  };
+  assert_follows_change("set_fonts", show, swap_font_families, show);
+}
+
+/// Without syntax highlighting, a scrolling code block has the color of `Visuals::code`.
+#[cfg(not(feature = "syntax_highlighting"))]
+#[test]
+fn a_plain_scrolling_code_block_follows_the_code_color() {
+  let show = |ui: &mut egui::Ui| {
+    MarkdownLabel::new(Id::NULL.with("label"), "```rust\nfn main() {}\n```").scroll_code_blocks(true).show(ui);
+  };
+  let change = |ctx: &Context| ctx.all_styles_mut(|style| style.visuals.code.text_color = Some(Color32::RED));
+  assert_follows_change("code color", show, change, show);
+}

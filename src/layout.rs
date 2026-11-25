@@ -82,7 +82,7 @@ pub(crate) fn apply_inline_code_font(format: &mut TextFormat, ui: &Ui, bold: boo
 }
 
 /// The family `name` when the app registers it with egui, else `None`.
-pub(crate) fn registered_family(ui: &Ui, name: &str) -> Option<FontFamily> {
+fn registered_family(ui: &Ui, name: &str) -> Option<FontFamily> {
   let family = FontFamily::Name(name.into());
   ui.ctx().fonts(|f| f.families().contains(&family)).then_some(family)
 }
@@ -1128,11 +1128,16 @@ pub fn highlight_code(
   code_font_size: f32,
   _code_theme: CodeThemeArg<'_>,
 ) -> LayoutJob {
-  let visuals = ui.visuals();
-  let color = visuals.code.text_color.unwrap_or_else(|| visuals.text_color());
+  let color = plain_code_color(ui.visuals());
   let mut job = LayoutJob::default();
   job.append(body, 0.0, TextFormat { font_id: FontId::monospace(code_font_size), color, ..Default::default() });
   job
+}
+
+/// The color of the code in [`highlight_code`] without syntax highlighting.
+#[cfg(not(feature = "syntax_highlighting"))]
+pub(crate) fn plain_code_color(visuals: &egui::Visuals) -> Color32 {
+  visuals.code.text_color.unwrap_or_else(|| visuals.text_color())
 }
 
 #[cfg(test)]
