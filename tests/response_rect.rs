@@ -91,3 +91,26 @@ fn the_pointer_on_a_table_hovers_the_label() {
   let (released, _) = frame(&ctx, Pos2::ZERO, vec![button(false)], label);
   assert!(!released.clicked());
 }
+
+/// In a wrapping layout, a label that does not fit after a widget goes to the next row, and takes the full width.
+#[test]
+fn a_label_in_a_wrapping_layout_goes_to_the_next_row() {
+  let ctx = Context::default();
+  let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 400.0));
+  let mut rects = None;
+  for _ in 0..2 {
+    let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      ui.horizontal_wrapped(|ui| {
+        let before = ui.button("A button before the label").rect;
+        let response = MarkdownLabel::new(Id::NULL.with("wrapped"), "Hello world").show(ui).response;
+        let after = ui.button("After").rect;
+        rects = Some((before, response.rect, after));
+      });
+    });
+    output.textures_delta.clear();
+  }
+  let (before, label, after) = rects.unwrap();
+  assert_eq!((label.left(), label.width()), (0.0, 300.0), "{label:?}");
+  assert!(label.top() >= before.bottom(), "{label:?} is on the row of {before:?}");
+  assert!(after.top() >= label.bottom(), "{after:?} is on the row of {label:?}");
+}

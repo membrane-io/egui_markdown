@@ -236,6 +236,7 @@ fn cached_block_height(
 /// Width is not cached so a panel shrink cannot leave a stale wider min-size.
 fn try_cull_block(
   ui: &mut Ui,
+  out: &mut Rendered,
   block_sz_id: Id,
   revision: Revision,
   index: usize,
@@ -250,7 +251,7 @@ fn try_cull_block(
   if ui.is_rect_visible(est_rect) {
     return false;
   }
-  ui.allocate_space(size);
+  out.add(ui.allocate_space(size).1);
   true
 }
 
@@ -317,6 +318,33 @@ pub struct MarkdownLabelOutput {
   /// True when the user clicked a link in this frame. The label handles that click itself, so a parent
   /// that reacts to `response.clicked()` must ignore it.
   pub link_clicked: bool,
+}
+
+/// What the render collects for [`MarkdownLabelOutput`].
+struct Rendered {
+  /// The union of the responses of the text.
+  text: Option<Response>,
+  link_clicked: bool,
+  /// The union of the rects that the label allocated.
+  rect: Rect,
+}
+
+impl Rendered {
+  fn new() -> Self {
+    Self { text: None, link_clicked: false, rect: Rect::NOTHING }
+  }
+
+  fn add(&mut self, rect: Rect) {
+    self.rect = self.rect.union(rect);
+  }
+
+  fn add_text(&mut self, response: Response) {
+    self.add(response.rect);
+    self.text = Some(match self.text.take() {
+      Some(text) => text.union(response),
+      None => response,
+    });
+  }
 }
 
 /// An interactive markdown-rendered label widget for egui.
@@ -578,23 +606,16 @@ impl<'a> MarkdownLabel<'a> {
 
   /// Render the markdown into the UI.
   pub fn show(self, ui: &mut Ui) -> MarkdownLabelOutput {
-    // The label renders in a child Ui, so that one rect holds the text and every block.
-    let mut child = ui.new_child(UiBuilder::new().scope_id(self.id.with("ui")));
-    let mut out = MarkdownLabelOutput {
-      response: child.interact(Rect::NOTHING, self.id.with("text"), Sense::hover()),
-      link_clicked: false,
-    };
-    let start = child.cursor();
-    self.render(&mut child, &mut out);
-    let rect = child.min_rect();
-    // A label that allocates nothing adds no item spacing.
-    if child.cursor() != start {
-      ui.advance_cursor_after_rect(rect);
-    }
+    let mut out = Rendered::new();
+    self.render(ui, &mut out);
     // As in `Frame::show`, the hover sense comes after the contents, so it is on top of them. The pointer on a
     // table cell or a code block then hovers the label, and the cell or the block still gets the click.
-    out.response = ui.interact(rect, self.id, Sense::hover()).union(out.response);
-    out
+    let hover = ui.interact(out.rect, self.id, Sense::hover());
+    let response = match out.text {
+      Some(text) => hover.union(text),
+      None => hover,
+    };
+    MarkdownLabelOutput { response, link_clicked: out.link_clicked }
   }
 
   /// The size of the rendered markdown, measured without painting or interaction.
@@ -607,8 +628,7 @@ impl<'a> MarkdownLabel<'a> {
   /// one measures that wide.
   pub fn calculate_size(&self, ui: &mut Ui) -> Vec2 {
     let measure_id = self.id.with("calculate_size");
-    let mut out =
-      MarkdownLabelOutput { response: ui.interact(Rect::NOTHING, measure_id, Sense::hover()), link_clicked: false };
+    let mut out = Rendered::new();
     let builder = UiBuilder::new().id_salt(measure_id).max_rect(ui.available_rect_before_wrap()).invisible();
     let mut child = ui.new_child(builder);
     self.render(&mut child, &mut out);
@@ -662,7 +682,7 @@ impl<'a> MarkdownLabel<'a> {
     (galley_pos, galley, response)
   }
 
-  fn render(&self, ui: &mut Ui, out: &mut MarkdownLabelOutput) {
+  fn render(&self, ui: &mut Ui, out: &mut Rendered) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
     let style = self.style.unwrap_or(context_style.as_ref());
     let code_font_size = style.code_font_size(ui.style());
@@ -783,7 +803,7 @@ impl<'a> MarkdownLabel<'a> {
     style: &MarkdownStyle,
     code_font_size: f32,
     revision: Revision,
-    out: &mut MarkdownLabelOutput,
+    out: &mut Rendered,
   ) {
     self.render_token_range(ui, tokens, font, color, 0, tokens.len(), style, code_font_size, revision, out);
   }
@@ -801,7 +821,7 @@ impl<'a> MarkdownLabel<'a> {
     style: &MarkdownStyle,
     code_font_size: f32,
     revision: Revision,
-    out: &mut MarkdownLabelOutput,
+    out: &mut Rendered,
   ) {
     let mut text_start = start;
     let mut i = start;
@@ -833,14 +853,14 @@ impl<'a> MarkdownLabel<'a> {
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
+          if try_cull_block(ui, out, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
             continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          table::render_table(
+          let rect = table::show_table(
             ui,
             self.id.with(("table", i)),
             data,
@@ -850,6 +870,7 @@ impl<'a> MarkdownLabel<'a> {
             &style.table,
             self.link_handler,
           );
+          out.add(rect);
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
@@ -865,7 +886,7 @@ impl<'a> MarkdownLabel<'a> {
           self.flush_text_range(ui, tokens, font, color, text_start, text_end, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
+          if try_cull_block(ui, out, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -885,15 +906,16 @@ impl<'a> MarkdownLabel<'a> {
               style,
               code_font_size,
               self.code_theme_arg(),
-            );
+            )
           };
-          if let Some(indent) = indent {
+          let rect = if let Some(indent) = indent {
             let mut block_rect = ui.available_rect_before_wrap();
             block_rect.min.x += indent;
-            ui.scope_builder(UiBuilder::new().max_rect(block_rect), show);
+            ui.scope_builder(UiBuilder::new().max_rect(block_rect), show).inner
           } else {
-            show(ui);
-          }
+            show(ui)
+          };
+          out.add(rect);
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
@@ -905,7 +927,7 @@ impl<'a> MarkdownLabel<'a> {
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
+          if try_cull_block(ui, out, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -918,7 +940,7 @@ impl<'a> MarkdownLabel<'a> {
           } else {
             egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true)
           };
-          ui.add(image);
+          out.add(ui.add(image).rect);
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
@@ -930,7 +952,7 @@ impl<'a> MarkdownLabel<'a> {
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
-          if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
+          if try_cull_block(ui, out, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
             i += 1;
             text_start = i;
             after_block(&mut i, &mut text_start, end, ui);
@@ -938,7 +960,9 @@ impl<'a> MarkdownLabel<'a> {
           }
           let before_y = ui.available_rect_before_wrap().min.y;
           let text = if alt.is_empty() { url.as_ref() } else { alt.as_ref() };
-          if ui.link(text).clicked() {
+          let response = ui.link(text);
+          out.add(response.rect);
+          if response.clicked() {
             ui.ctx().open_url(OpenUrl::new_tab(url.to_string()));
           }
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
@@ -951,7 +975,9 @@ impl<'a> MarkdownLabel<'a> {
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let handler = self.link_handler.unwrap();
-          handler.block_widget(ui, text, href);
+          if let Some(response) = handler.block_widget(ui, text, href) {
+            out.add(response.rect);
+          }
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
@@ -1010,7 +1036,9 @@ impl<'a> MarkdownLabel<'a> {
 
           // Advance parent UI past the child content.
           let child_min_rect = child_ui.min_rect();
-          ui.allocate_rect(child_min_rect, Sense::hover());
+          let response = ui.allocate_rect(child_min_rect, Sense::hover());
+          // The bar is in the indent, which the label does not allocate.
+          out.add(Rect::from_min_max(pos2(child_rect.min.x - indent, top), response.rect.max));
 
           i = bq_end + 1; // skip past BlockquoteEnd
           text_start = i;
@@ -1044,7 +1072,7 @@ impl<'a> MarkdownLabel<'a> {
     style: &MarkdownStyle,
     code_font_size: f32,
     revision: Revision,
-    out: &mut MarkdownLabelOutput,
+    out: &mut Rendered,
   ) {
     if start >= end {
       return;
@@ -1087,7 +1115,7 @@ impl<'a> MarkdownLabel<'a> {
       if cached_hash == ctx_hash && cached_width == max_width {
         let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, cached_size);
         if !ui.is_rect_visible(est_rect) {
-          ui.allocate_space(cached_size);
+          out.add(ui.allocate_space(cached_size).1);
           return;
         }
       }
@@ -1180,7 +1208,7 @@ impl<'a> MarkdownLabel<'a> {
     color: Color32,
     style: &MarkdownStyle,
     apply_map_job: bool,
-    out: &mut MarkdownLabelOutput,
+    out: &mut Rendered,
   ) -> Vec2 {
     let wrap = self.resolve_wrap(ui);
     let mut job = job;
@@ -1224,7 +1252,7 @@ impl<'a> MarkdownLabel<'a> {
     if !self.interactable || !ui.is_visible() {
       let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
       set_label_widget_info(ui, &response, &galley);
-      out.response = out.response.union(response);
+      out.add_text(response);
       paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
       ui.painter().galley(rect.min, galley.clone(), color);
       if let Some(handler) = self.link_handler {
@@ -1257,7 +1285,7 @@ impl<'a> MarkdownLabel<'a> {
     if self.interactable && response.clicked() {
       out.link_clicked |= self.handle_click(ui, tokens, section_to_token, hovered_section);
     }
-    out.response = out.response.union(response);
+    out.add_text(response);
     size
   }
 
@@ -1533,7 +1561,7 @@ fn render_code_block(
   style: &MarkdownStyle,
   code_font_size: f32,
   code_theme: CodeThemeArg<'_>,
-) {
+) -> Rect {
   let lang = language.unwrap_or(style.default_code_language.as_str());
   let cache_id = id.with("code_galley");
 
@@ -1616,6 +1644,7 @@ fn render_code_block(
     child_ui.add_space(4.0);
     button_fn(&mut child_ui, text, lang);
   }
+  frame_response.response.rect
 }
 
 #[cfg(not(feature = "syntax_highlighting"))]
