@@ -41,8 +41,8 @@ pub struct MarkdownStyle {
   pub table: TableStyle,
   /// Vertical spacing between block elements in pixels.
   pub block_spacing: f32,
-  /// Font size for code blocks. Default: `12.0`, the size of egui's default
-  /// [`egui::TextStyle::Monospace`], which sits beside its 12.5 point body text.
+  /// Font size for code blocks. Default: `13.0`, the size of egui's default
+  /// [`egui::TextStyle::Monospace`] and of inline code in egui's default body text.
   pub code_font_size: f32,
   /// Language used for syntax highlighting when no language is specified.
   pub default_code_language: String,
@@ -59,7 +59,7 @@ impl Default for MarkdownStyle {
       list: ListStyle::default(),
       table: TableStyle::default(),
       block_spacing: 8.0,
-      code_font_size: 12.0,
+      code_font_size: 13.0,
       default_code_language: String::new(),
     }
   }

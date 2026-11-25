@@ -55,6 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Inline code uses `FontFamily::Monospace`, as a code block does. It keeps the size of the text
   around it. Bold inline code uses the `"mono-bold"` family when the app registers one.
+- The default `code_font_size` is 13, the size of egui's default `TextStyle::Monospace`, so a code
+  block has the size of inline code. It was 12. A code block is about 1.5 points taller per line.
 - **Breaking:** the crates need egui 0.37 from the egui `main` branch, for
   `LayoutSection::wrap_indent` and `TextFormat::background_stroke`. Patch egui to `main` until the
   next egui release. Version 0.1.0 needed egui 0.33.
