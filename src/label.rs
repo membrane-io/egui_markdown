@@ -1665,8 +1665,8 @@ mod tests {
   use super::*;
 
   /// A code block in a label with the body font has the size of `TextStyle::Monospace` by default, and
-  /// follows a change of that size, also after the label caches its layout. `Some(size)` keeps a fixed size. The blockquote makes the
-  /// label lay out each range of text on its own, with its own cache.
+  /// follows a change of that size, also after the label caches its layout. `Some(size)` keeps a fixed
+  /// size. The blockquote makes the label lay out each range of text on its own, with its own cache.
   #[test]
   fn code_block_font_size_follows_egui_monospace() {
     for markdown in ["```\nfn main() {}\n```", "> Quote\n\n```\nfn main() {}\n```"] {

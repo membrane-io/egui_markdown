@@ -85,22 +85,22 @@ impl Hash for MarkdownStyle {
   }
 }
 
-/// The size of [`egui::TextStyle::Monospace`] divided by the size of [`egui::TextStyle::Body`] in
-/// `style`. It is 1.0 when `style` does not have one of them, or when a size is not positive.
-fn monospace_ratio(style: &egui::Style) -> f32 {
-  let size = |text_style| style.text_styles.get(&text_style).map(|font| font.size);
-  match (size(egui::TextStyle::Monospace), size(egui::TextStyle::Body)) {
-    (Some(mono), Some(body)) if mono > 0.0 && body > 0.0 => mono / body,
-    _ => 1.0,
-  }
-}
-
 impl MarkdownStyle {
   /// The font size of code blocks in a label with the font size `label_font_size`:
   /// [`Self::code_font_size`], or, when it is `None`, `label_font_size` times the ratio of
-  /// [`egui::TextStyle::Monospace`] to [`egui::TextStyle::Body`] in `style`.
+  /// [`egui::TextStyle::Monospace`] to [`egui::TextStyle::Body`] in `style`. When `style` does not have a
+  /// positive size for both of them, the ratio is 1.0.
   pub fn code_font_size(&self, style: &egui::Style, label_font_size: f32) -> f32 {
-    self.code_font_size.unwrap_or_else(|| label_font_size * monospace_ratio(style))
+    self.code_font_size.unwrap_or_else(|| {
+      let size = |text_style| style.text_styles.get(&text_style).map_or(0.0, |font| font.size);
+      let (mono, body) = (size(egui::TextStyle::Monospace), size(egui::TextStyle::Body));
+      // Multiply before the division, so that a label with the body font gets exactly the monospace size.
+      if mono > 0.0 && body > 0.0 {
+        label_font_size * mono / body
+      } else {
+        label_font_size
+      }
+    })
   }
 
   /// Show an interactive editor for all style fields, plus a dark/light switch.
@@ -139,8 +139,7 @@ impl MarkdownStyle {
       ui.separator();
       let mut scale_with_label = self.code_font_size.is_none();
       if ui.checkbox(&mut scale_with_label, "Scale with the label font").changed() {
-        let body_size = egui::TextStyle::Body.resolve(ui.style()).size;
-        self.code_font_size = (!scale_with_label).then(|| self.code_font_size(ui.style(), body_size));
+        self.code_font_size = (!scale_with_label).then(|| egui::TextStyle::Monospace.resolve(ui.style()).size);
       }
       if let Some(size) = &mut self.code_font_size {
         ui.horizontal(|ui| {
@@ -554,5 +553,15 @@ mod tests {
 
     egui_style.text_styles.clear();
     assert_eq!(style.code_font_size(&egui_style, 13.0), 13.0);
+  }
+
+  /// A code block in a label with the body font has exactly the size of `TextStyle::Monospace`.
+  #[test]
+  fn code_font_size_with_the_body_font_is_the_monospace_size() {
+    let style = MarkdownStyle::default();
+    let mut egui_style = egui::Style::default();
+    egui_style.text_styles.insert(TextStyle::Body, FontId::proportional(11.0));
+    egui_style.text_styles.insert(TextStyle::Monospace, FontId::monospace(13.0));
+    assert_eq!(style.code_font_size(&egui_style, 11.0), 13.0);
   }
 }

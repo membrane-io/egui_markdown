@@ -61,7 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   label font size times the ratio of `TextStyle::Monospace` to `TextStyle::Body` in the egui style. In
   a label with the body font, that is the size of `ui.code()`. `Some(size)` sets a fixed size.
   Version 0.1.0 used a fixed `10.0`.
-- **Breaking:** `table::render_table` takes the code block font size of the label.
+- **Breaking:** `table::render_table` takes three new arguments: `code_font_size` (the code block size
+  of the label, from `MarkdownStyle::code_font_size()`), `table_style` and `link_handler`.
 - **Breaking:** the crates need egui 0.37 from the egui `main` branch, for
   `LayoutSection::wrap_indent` and `TextFormat::background_stroke`. Patch egui to `main` until the
   next egui release. Version 0.1.0 needed egui 0.33.
