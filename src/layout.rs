@@ -72,6 +72,17 @@ pub fn apply_inline_code_bg(format: &mut TextFormat, visuals: &egui::Visuals, in
   format.background_stroke = visuals.code.stroke;
 }
 
+/// Set the font family of inline code to [`FontFamily::Monospace`], as a code block has. Bold inline
+/// code uses the `"mono-bold"` family when the app registers one. Without it, bold inline code keeps
+/// the regular monospace family. The size does not change, so inline code in a heading has the size
+/// of the heading.
+pub(crate) fn apply_inline_code_font(format: &mut TextFormat, ui: &Ui) {
+  let mono_bold = FontFamily::Name("mono-bold".into());
+  let bold = format.font_id.family == FontFamily::Name("bold".into());
+  format.font_id.family =
+    if bold && ui.ctx().fonts(|f| f.families().contains(&mono_bold)) { mono_bold } else { FontFamily::Monospace };
+}
+
 #[inline]
 fn text_format(font_id: FontId, color: Color32) -> TextFormat {
   TextFormat { font_id, color, valign: Align::BOTTOM, line_height: MARKDOWN_LINE_HEIGHT_POINTS, ..Default::default() }
@@ -286,6 +297,7 @@ fn styled_format(
   }
   if style.inline_code {
     apply_inline_code_bg(&mut format, ui.visuals(), &markdown_style.inline_code);
+    apply_inline_code_font(&mut format, ui);
   }
   format
 }
@@ -1091,6 +1103,39 @@ mod section_tests {
       assert_eq!(size_of("link"), heading);
       checked = true;
     });
+    assert!(checked);
+  }
+
+  /// Inline code uses the monospace family, as a code block does. Bold inline code uses the
+  /// `"mono-bold"` family when the app registers it.
+  #[test]
+  fn inline_code_is_monospace() {
+    let markdown = crate::parse("Plain `code`, **bold `strong`**.\n\n# Title `heading`");
+    let ctx = egui::Context::default();
+    let mut fonts = egui::FontDefinitions::default();
+    let proportional = fonts.families[&FontFamily::Proportional].clone();
+    let mono = fonts.families[&FontFamily::Monospace].clone();
+    fonts.families.insert(FontFamily::Name("bold".into()), proportional);
+    fonts.families.insert(FontFamily::Name("mono-bold".into()), mono);
+    ctx.set_fonts(fonts);
+    let mut checked = false;
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+      let style = MarkdownStyle::default();
+      let font = FontId::proportional(14.0);
+      let color = ui.visuals().text_color();
+      let layout =
+        build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+      let family_of = |text: &str| {
+        let section = layout.job.sections.iter().find(|s| &layout.job.text[s.byte_range.as_usize()] == text).unwrap();
+        section.format.font_id.family.clone()
+      };
+      assert_eq!(family_of("Plain "), FontFamily::Proportional);
+      assert_eq!(family_of("code"), FontFamily::Monospace);
+      assert_eq!(family_of("strong"), FontFamily::Name("mono-bold".into()));
+      assert_eq!(family_of("heading"), FontFamily::Name("mono-bold".into()));
+      checked = true;
+    });
+    output.textures_delta.clear();
     assert!(checked);
   }
 
