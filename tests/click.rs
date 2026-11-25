@@ -76,7 +76,7 @@ fn click_label(text: &str, split: Option<usize>, heal: bool, at: impl Fn(Rect) -
 #[test]
 fn a_click_off_a_link_is_a_click_on_the_label() {
   for text in [PLAIN_THEN_LINK, WITH_TABLE] {
-    assert_eq!(click(text, |rect| pos2(rect.left() + 4.0, rect.center().y)), (true, false), "{text:?}");
+    assert_eq!(click(text, |rect| pos2(rect.left() + 4.0, rect.top() + 6.0)), (true, false), "{text:?}");
   }
 }
 

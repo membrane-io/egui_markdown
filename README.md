@@ -158,9 +158,9 @@ and scrolling code blocks.
 
 ### Clicks
 
-`show()` returns a `MarkdownLabelOutput`. Its `response` covers the text of the label, and
-`link_clicked` is true when the click was on a link, which the label has already handled. A
-parent that reacts to a click on the label checks both:
+`show()` returns a `MarkdownLabelOutput`. Its `response` covers all of the label, and it is clicked
+when the click is on the text. `link_clicked` is true when the click was on a link, which the label
+has already handled. A parent that reacts to a click on the label checks both:
 
 ```rust
 let output = MarkdownLabel::new(id, text).show(ui);
