@@ -308,8 +308,10 @@ struct ResolvedWrap {
 
 /// What [`MarkdownLabel::show`] returns.
 pub struct MarkdownLabelOutput {
-  /// The union of the responses of the text in the label. A table, a scrolled code block and an image
-  /// have their own responses, which this response does not include.
+  /// The response of the whole label. Its rect is all the space that the label allocated: the text, the
+  /// tables, the images, the code blocks and the block widgets. It is hovered when the pointer is anywhere on
+  /// the label. It is clicked only when the click is on the text. A table, an image, a scrolling code block
+  /// and a block widget handle their own clicks.
   pub response: Response,
 
   /// True when the user clicked a link in this frame. The label handles that click itself, so a parent
@@ -576,9 +578,22 @@ impl<'a> MarkdownLabel<'a> {
 
   /// Render the markdown into the UI.
   pub fn show(self, ui: &mut Ui) -> MarkdownLabelOutput {
-    let mut out =
-      MarkdownLabelOutput { response: ui.interact(Rect::NOTHING, self.id, Sense::hover()), link_clicked: false };
-    self.render(ui, &mut out);
+    // The label renders in a child Ui, so that one rect holds the text and every block.
+    let mut child = ui.new_child(UiBuilder::new().scope_id(self.id.with("ui")));
+    let mut out = MarkdownLabelOutput {
+      response: child.interact(Rect::NOTHING, self.id.with("text"), Sense::hover()),
+      link_clicked: false,
+    };
+    let start = child.cursor();
+    self.render(&mut child, &mut out);
+    let rect = child.min_rect();
+    // A label that allocates nothing adds no item spacing.
+    if child.cursor() != start {
+      ui.advance_cursor_after_rect(rect);
+    }
+    // As in `Frame::show`, the hover sense comes after the contents, so it is on top of them. The pointer on a
+    // table cell or a code block then hovers the label, and the cell or the block still gets the click.
+    out.response = ui.interact(rect, self.id, Sense::hover()).union(out.response);
     out
   }
 
