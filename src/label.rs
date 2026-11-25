@@ -63,25 +63,15 @@ struct CachedCodeBlock {
 }
 
 #[inline]
-fn hash_text(text: &str, style: &MarkdownStyle, handler: Option<&dyn LinkHandler>) -> u64 {
+fn hash_text(text: &str, style: &MarkdownStyle, code_font_size: f32, handler: Option<&dyn LinkHandler>) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
   text.hash(&mut hasher);
   style.hash(&mut hasher);
+  code_font_size.to_bits().hash(&mut hasher);
   if let Some(h) = handler {
     h.id().hash(&mut hasher);
   }
   hasher.finish()
-}
-
-/// `style` with [`MarkdownStyle::code_font_size`] set to the size that it resolves to in `egui_style`. Each
-/// cache key hashes the style, so a cached layout changes when the app changes the size of
-/// [`egui::TextStyle::Monospace`].
-fn with_code_font_size<'s>(style: &'s MarkdownStyle, egui_style: &egui::Style) -> std::borrow::Cow<'s, MarkdownStyle> {
-  if style.code_font_size.is_some() {
-    std::borrow::Cow::Borrowed(style)
-  } else {
-    std::borrow::Cow::Owned(MarkdownStyle { code_font_size: Some(style.code_font_size(egui_style)), ..style.clone() })
-  }
 }
 
 /// Identity of everything a [`LayoutResult`] depends on.
@@ -93,6 +83,7 @@ fn with_code_font_size<'s>(style: &'s MarkdownStyle, egui_style: &egui::Style) -
 fn hash_flush_context(
   tokens: &[Token<'_>],
   style: &MarkdownStyle,
+  code_font_size: f32,
   font: &FontId,
   color: Color32,
   dark_mode: bool,
@@ -103,6 +94,7 @@ fn hash_flush_context(
   // can change a range's content while leaving its start index and length untouched.
   tokens.hash(&mut hasher);
   style.hash(&mut hasher);
+  code_font_size.to_bits().hash(&mut hasher);
   font.hash(&mut hasher);
   color.hash(&mut hasher);
   dark_mode.hash(&mut hasher);
@@ -134,18 +126,19 @@ impl Revision {
   }
 }
 
-/// The inputs other than the tokens that a cached layout or height depends on: the style, the link
-/// handler, the font, the color and the theme. It costs the same on every frame, whatever the length of
-/// the document.
+/// The inputs other than the tokens that a cached layout or height depends on: the style, the size of
+/// code blocks, the link handler, the font, the color and the theme. It costs the same on every frame,
+/// whatever the length of the document.
 fn frame_key(
   style: &MarkdownStyle,
+  code_font_size: f32,
   handler: Option<&dyn LinkHandler>,
   font: &FontId,
   color: Color32,
   dark_mode: bool,
 ) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
-  (style, handler.map(|h| h.id()), font, color, dark_mode).hash(&mut hasher);
+  (style, code_font_size.to_bits(), handler.map(|h| h.id()), font, color, dark_mode).hash(&mut hasher);
   hasher.finish()
 }
 
@@ -654,8 +647,8 @@ impl<'a> MarkdownLabel<'a> {
 
   fn render(&self, ui: &mut Ui, out: &mut MarkdownLabelOutput) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
-    let style = with_code_font_size(self.style.unwrap_or(context_style.as_ref()), ui.style());
-    let style = style.as_ref();
+    let style = self.style.unwrap_or(context_style.as_ref());
+    let code_font_size = style.code_font_size(ui.style());
     let color = ui.visuals().text_color();
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
 
@@ -676,8 +669,8 @@ impl<'a> MarkdownLabel<'a> {
       self.text
     };
 
-    let text_hash = hash_text(text, style, self.link_handler);
-    let frame_key = frame_key(style, self.link_handler, &font, color, ui.visuals().dark_mode);
+    let text_hash = hash_text(text, style, code_font_size, self.link_handler);
+    let frame_key = frame_key(style, code_font_size, self.link_handler, &font, color, ui.visuals().dark_mode);
     let revision =
       |parse: &parser::ParseState| Revision { generation: parse.generation, kept_from: parse.kept_from, frame_key };
 
@@ -687,7 +680,7 @@ impl<'a> MarkdownLabel<'a> {
         let revision = revision(&cached.parse);
 
         let Some(layout) = cached.layout.clone() else {
-          self.render_segmented(ui, &tokens, &font, color, style, revision, out);
+          self.render_segmented(ui, &tokens, &font, color, style, code_font_size, revision, out);
           return;
         };
 
@@ -721,7 +714,7 @@ impl<'a> MarkdownLabel<'a> {
     // to the segmented path, and building one per keystroke doubles the cost of every edit.
     if needs_segmentation(&tokens, self.scroll_code_blocks, self.link_handler) {
       ui.data_mut(|d| d.insert_temp(cache_id, CachedMarkdownLayout { text_hash, layout: None, parse }));
-      self.render_segmented(ui, &tokens, &font, color, style, revision, out);
+      self.render_segmented(ui, &tokens, &font, color, style, code_font_size, revision, out);
       return;
     }
 
@@ -771,10 +764,11 @@ impl<'a> MarkdownLabel<'a> {
     font: &FontId,
     color: Color32,
     style: &MarkdownStyle,
+    code_font_size: f32,
     revision: Revision,
     out: &mut MarkdownLabelOutput,
   ) {
-    self.render_token_range(ui, tokens, font, color, 0, tokens.len(), style, revision, out);
+    self.render_token_range(ui, tokens, font, color, 0, tokens.len(), style, code_font_size, revision, out);
   }
 
   /// Recursively render a range of tokens, handling blockquotes and tables as sub-regions.
@@ -788,6 +782,7 @@ impl<'a> MarkdownLabel<'a> {
     start: usize,
     end: usize,
     style: &MarkdownStyle,
+    code_font_size: f32,
     revision: Revision,
     out: &mut MarkdownLabelOutput,
   ) {
@@ -818,7 +813,7 @@ impl<'a> MarkdownLabel<'a> {
       match &tokens[i] {
         Token::Table(data) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -845,7 +840,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::CodeBlock { text, language } if self.scroll_code_blocks => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -865,6 +860,7 @@ impl<'a> MarkdownLabel<'a> {
             self.code_block_min_width,
             self.selectable && self.interactable,
             style,
+            code_font_size,
             self.code_theme_arg(),
           );
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
@@ -875,7 +871,7 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(feature = "images")]
         Token::Image { url, width, height, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -900,7 +896,7 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(not(feature = "images"))]
         Token::Image { alt, url, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -921,7 +917,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::Link { text, href, .. } if self.link_handler.is_some_and(|h| h.is_block_widget(href)) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
           let handler = self.link_handler.unwrap();
           handler.block_widget(ui, text, href);
@@ -931,7 +927,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::BlockquoteStart => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           before_block(had_content, ui);
 
           // Find the matching BlockquoteEnd.
@@ -961,7 +957,18 @@ impl<'a> MarkdownLabel<'a> {
           child_rect.min.x += indent;
 
           let mut child_ui = ui.new_child(UiBuilder::new().id_salt(self.id.with(("bq", i))).max_rect(child_rect));
-          self.render_token_range(&mut child_ui, tokens, font, color, bq_content_start, bq_end, style, revision, out);
+          self.render_token_range(
+            &mut child_ui,
+            tokens,
+            font,
+            color,
+            bq_content_start,
+            bq_end,
+            style,
+            code_font_size,
+            revision,
+            out,
+          );
 
           let bq_stroke =
             Stroke::new(style.blockquote.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
@@ -979,7 +986,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::BlockquoteEnd => {
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
           i += 1;
           text_start = i;
         }
@@ -990,7 +997,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     // Flush remaining text.
-    self.flush_text_range(ui, tokens, font, color, text_start, end, style, revision, out);
+    self.flush_text_range(ui, tokens, font, color, text_start, end, style, code_font_size, revision, out);
   }
 
   /// Render a range of non-break tokens as an interactive galley.
@@ -1004,6 +1011,7 @@ impl<'a> MarkdownLabel<'a> {
     start: usize,
     end: usize,
     style: &MarkdownStyle,
+    code_font_size: f32,
     revision: Revision,
     out: &mut MarkdownLabelOutput,
   ) {
@@ -1038,7 +1046,7 @@ impl<'a> MarkdownLabel<'a> {
       Some(cached) if cached.end == trimmed_end && revision.unchanged(cached.generation, cached.frame_key, end) => {
         cached.ctx_hash
       }
-      _ => hash_flush_context(token_slice, style, font, color, dark_mode, self.link_handler),
+      _ => hash_flush_context(token_slice, style, code_font_size, font, color, dark_mode, self.link_handler),
     };
     let (generation, frame_key) = (revision.generation, revision.frame_key);
 
@@ -1492,10 +1500,10 @@ fn render_code_block(
   min_width: Option<f32>,
   selectable: bool,
   style: &MarkdownStyle,
+  code_font_size: f32,
   code_theme: CodeThemeArg<'_>,
 ) {
   let lang = language.unwrap_or(style.default_code_language.as_str());
-  let code_font_size = style.code_font_size(ui.style());
   let cache_id = id.with("code_galley");
 
   #[cfg(feature = "syntax_highlighting")]
@@ -1640,40 +1648,42 @@ mod tests {
   use super::*;
 
   /// A code block has the size of `TextStyle::Monospace` by default, and follows a change of that size,
-  /// also after the label caches its layout. `Some(size)` keeps a fixed size.
+  /// also after the label caches its layout. `Some(size)` keeps a fixed size. The blockquote makes the
+  /// label lay out each range of text on its own, with its own cache.
   #[test]
   fn code_block_font_size_follows_egui_monospace() {
-    let markdown = "```\nfn main() {}\n```";
-    let ctx = Context::default();
-    // The size of the code block section in the layout, and the height of the label.
-    let run = |style: &MarkdownStyle| {
-      let mut result = (0.0, 0.0);
-      let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-        let tokens = crate::parse(markdown).tokens;
-        let font = FontId::proportional(13.0);
-        let layout =
-          build_layout(ui, &tokens, font, Color32::WHITE, None, f32::INFINITY, false, None, false, style, None);
-        let code = layout.job.sections.iter().find(|s| layout.job.text[s.byte_range.as_usize()].contains("main"));
-        let height = MarkdownLabel::new(Id::NULL.with("md"), markdown).style(style).calculate_size(ui).y;
-        result = (code.unwrap().format.font_id.size, height);
+    for markdown in ["```\nfn main() {}\n```", "> Quote\n\n```\nfn main() {}\n```"] {
+      let ctx = Context::default();
+      // The size of the code block section in the layout, and the height of the label.
+      let run = |style: &MarkdownStyle| {
+        let mut result = (0.0, 0.0);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+          let tokens = crate::parse(markdown).tokens;
+          let font = FontId::proportional(13.0);
+          let layout =
+            build_layout(ui, &tokens, font, Color32::WHITE, None, f32::INFINITY, false, None, false, style, None);
+          let code = layout.job.sections.iter().find(|s| layout.job.text[s.byte_range.as_usize()].contains("main"));
+          let height = MarkdownLabel::new(Id::NULL.with("md"), markdown).style(style).calculate_size(ui).y;
+          result = (code.unwrap().format.font_id.size, height);
+        });
+        output.textures_delta.clear();
+        result
+      };
+
+      let default = MarkdownStyle::default();
+      let (size, height) = run(&default);
+      assert_eq!(size, egui::TextStyle::Monospace.resolve(&ctx.global_style()).size);
+
+      ctx.all_styles_mut(|style| {
+        style.text_styles.insert(egui::TextStyle::Monospace, FontId::monospace(16.0));
       });
-      output.textures_delta.clear();
-      result
-    };
+      let (size, taller) = run(&default);
+      assert_eq!(size, 16.0);
+      assert!(taller > height, "{markdown:?}: the cached layout keeps the old size: {taller} <= {height}");
 
-    let default = MarkdownStyle::default();
-    let (size, height) = run(&default);
-    assert_eq!(size, egui::TextStyle::Monospace.resolve(&ctx.global_style()).size);
-
-    ctx.all_styles_mut(|style| {
-      style.text_styles.insert(egui::TextStyle::Monospace, FontId::monospace(16.0));
-    });
-    let (size, taller) = run(&default);
-    assert_eq!(size, 16.0);
-    assert!(taller > height, "the cached layout of the label keeps the old size: {taller} <= {height}");
-
-    let (size, _) = run(&MarkdownStyle { code_font_size: Some(11.0), ..Default::default() });
-    assert_eq!(size, 11.0);
+      let (size, _) = run(&MarkdownStyle { code_font_size: Some(11.0), ..Default::default() });
+      assert_eq!(size, 11.0);
+    }
   }
 
   /// A block's cached height stays valid while text elsewhere in the document changes, as it does on
