@@ -163,6 +163,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two tables in one label no longer share a scroll id.
 - The published package now includes the streaming test fixtures, and `egui_markdown_style` ships
   its license files.
+- A label that keeps its id and its text now follows a change of its font, of the egui text style that
+  it uses, of the egui visuals (dark or light mode, the hyperlink color, the strong text color and
+  `Visuals::code`), of the "bold" and "mono-bold" font families, of the code theme, of `max_lines` and
+  of `scroll_code_blocks`. Before, it kept the layout of an earlier frame.
+- After a change of `overflow_wrap` or of the wrap mode, `calculate_size` and the culling of text off the
+  screen used a size from before the change.
 
 ## [0.1.0] - 2026-03-23
 

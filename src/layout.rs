@@ -82,7 +82,7 @@ pub(crate) fn apply_inline_code_font(format: &mut TextFormat, ui: &Ui, bold: boo
 }
 
 /// The family `name` when the app registers it with egui, else `None`.
-fn registered_family(ui: &Ui, name: &str) -> Option<FontFamily> {
+pub(crate) fn registered_family(ui: &Ui, name: &str) -> Option<FontFamily> {
   let family = FontFamily::Name(name.into());
   ui.ctx().fonts(|f| f.families().contains(&family)).then_some(family)
 }

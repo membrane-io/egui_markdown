@@ -1,5 +1,5 @@
 use egui::{vec2, Color32, Context, FontId, Id, RawInput, Rect, UiBuilder};
-use egui_markdown::{layout, MarkdownLabel, MarkdownStyle};
+use egui_markdown::{layout, MarkdownLabel, MarkdownStyle, OverflowWrap};
 
 /// Render `text` into `ctx` and return every string painted as text.
 fn painted_text(ctx: &Context, text: &str) -> Vec<String> {
@@ -183,4 +183,203 @@ fn a_streamed_reply_paints_what_a_fresh_label_paints() {
   let from_stream = render(&streamed, reply);
   let fresh = render(&Context::default(), reply);
   assert_eq!(from_stream, fresh);
+}
+
+/// A document that the label renders as one galley.
+const WHOLE: &str = "Hello **bold** [link](https://example.com) and `code`.\n\n- item";
+/// The same document with a table, which makes the label render each range of text on its own.
+const SEGMENTED: &str = "Hello **bold** [link](https://example.com) and `code`.\n\n- item\n\n| a |\n|---|\n| 1 |";
+
+/// The job and the size of each galley that a frame paints.
+type Painted = Vec<(egui::text::LayoutJob, egui::Vec2)>;
+
+fn painted_jobs(ctx: &Context, show: &dyn Fn(&mut egui::Ui)) -> Painted {
+  let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(500.0, 2000.0));
+  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+    let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+    show(&mut child);
+  });
+  output.textures_delta.clear();
+  let mut galleys = Vec::new();
+  for clipped in &output.shapes {
+    collect_galleys(&clipped.shape, &mut galleys);
+  }
+  galleys.iter().map(|galley| ((*galley.job).clone(), galley.size())).collect()
+}
+
+fn collect_galleys(shape: &egui::epaint::Shape, out: &mut Vec<std::sync::Arc<egui::Galley>>) {
+  match shape {
+    egui::epaint::Shape::Text(t) => out.push(t.galley.clone()),
+    egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| collect_galleys(s, out)),
+    _ => {}
+  }
+}
+
+/// Two frames of `show`. The last frame is what the label paints when nothing changes.
+fn settled_jobs(ctx: &Context, show: &dyn Fn(&mut egui::Ui)) -> Painted {
+  painted_jobs(ctx, show);
+  painted_jobs(ctx, show)
+}
+
+/// Render `before` in a context, apply `change` to the context, and render `after`. A fresh context that gets
+/// only `change` and `after` builds each layout again. The two contexts must paint the same jobs at the same
+/// sizes, so no cache of the label keeps a layout from before the change. The change must also change what the
+/// label paints, so that the test checks something.
+fn assert_follows_change(
+  name: &str,
+  before: impl Fn(&mut egui::Ui),
+  change: impl Fn(&Context),
+  after: impl Fn(&mut egui::Ui),
+) {
+  let ctx = Context::default();
+  let painted_before = settled_jobs(&ctx, &before);
+  change(&ctx);
+  let cached = settled_jobs(&ctx, &after);
+
+  let fresh_ctx = Context::default();
+  change(&fresh_ctx);
+  let fresh = settled_jobs(&fresh_ctx, &after);
+
+  assert_ne!(painted_before, fresh, "{name}: the change does not change what the label paints");
+  assert_eq!(cached, fresh, "{name}: the label paints a layout from before the change");
+}
+
+fn show_doc(doc: &'static str, font: FontId, style: MarkdownStyle) -> impl Fn(&mut egui::Ui) {
+  move |ui| {
+    MarkdownLabel::new(Id::NULL.with("label"), doc).font(font.clone()).style(&style).show(ui);
+  }
+}
+
+#[test]
+fn a_label_follows_a_change_of_its_font() {
+  for doc in [WHOLE, SEGMENTED] {
+    let fixed = MarkdownStyle { code_font_size: Some(11.0), ..Default::default() };
+    assert_follows_change(
+      &format!("size, {doc:?}"),
+      show_doc(doc, FontId::proportional(20.0), fixed.clone()),
+      |_| {},
+      show_doc(doc, FontId::proportional(24.0), fixed),
+    );
+    assert_follows_change(
+      &format!("family, {doc:?}"),
+      show_doc(doc, FontId::proportional(14.0), MarkdownStyle::default()),
+      |_| {},
+      show_doc(doc, FontId::monospace(14.0), MarkdownStyle::default()),
+    );
+  }
+}
+
+#[test]
+fn a_label_follows_a_change_of_the_egui_body_style() {
+  for doc in [WHOLE, SEGMENTED] {
+    let show = move |ui: &mut egui::Ui| {
+      MarkdownLabel::new(Id::NULL.with("label"), doc).show(ui);
+    };
+    let change = |ctx: &Context| {
+      ctx.all_styles_mut(|style| {
+        style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(22.0));
+      });
+    };
+    assert_follows_change(&format!("{doc:?}"), show, change, show);
+  }
+}
+
+#[test]
+fn a_label_follows_a_change_of_the_visuals() {
+  type Change = fn(&mut egui::Visuals);
+  let changes: [(&str, Change); 3] = [
+    ("light mode", |visuals| *visuals = egui::Visuals::light()),
+    ("hyperlink color", |visuals| visuals.hyperlink_color = Color32::from_rgb(1, 2, 3)),
+    ("code corner radius", |visuals| visuals.code.corner_radius = egui::CornerRadius::same(9)),
+  ];
+  for doc in [WHOLE, SEGMENTED] {
+    for (name, change) in changes {
+      let show = show_doc(doc, FontId::proportional(14.0), MarkdownStyle::default());
+      assert_follows_change(
+        &format!("{name}, {doc:?}"),
+        &show,
+        |ctx| ctx.all_styles_mut(|s| change(&mut s.visuals)),
+        &show,
+      );
+    }
+  }
+}
+
+#[test]
+fn a_label_follows_a_bold_family_that_the_app_registers_later() {
+  for doc in [WHOLE, SEGMENTED] {
+    let show = show_doc(doc, FontId::proportional(14.0), MarkdownStyle::default());
+    let change = |ctx: &Context| {
+      let mut fonts = egui::FontDefinitions::default();
+      let proportional = fonts.families[&egui::FontFamily::Proportional].clone();
+      fonts.families.insert(egui::FontFamily::Name("bold".into()), proportional);
+      ctx.set_fonts(fonts);
+    };
+    assert_follows_change(&format!("{doc:?}"), &show, change, &show);
+  }
+}
+
+#[test]
+fn a_label_follows_a_change_of_max_lines() {
+  let show = |max_lines: u32| {
+    move |ui: &mut egui::Ui| {
+      MarkdownLabel::new(Id::NULL.with("label"), "one\n\ntwo\n\nthree\n\nfour").max_lines(max_lines).show(ui);
+    }
+  };
+  assert_follows_change("max_lines", show(1), |_| {}, show(3));
+}
+
+#[test]
+fn a_label_follows_a_change_of_scroll_code_blocks() {
+  let show = |scroll: bool| {
+    move |ui: &mut egui::Ui| {
+      MarkdownLabel::new(Id::NULL.with("label"), "Intro.\n\n```rust\nfn main() {}\n```")
+        .scroll_code_blocks(scroll)
+        .show(ui);
+    }
+  };
+  assert_follows_change("scroll_code_blocks", show(false), |_| {}, show(true));
+}
+
+#[cfg(feature = "syntax_highlighting")]
+#[test]
+fn a_label_follows_a_code_theme_that_the_app_installs_later() {
+  let show = |ui: &mut egui::Ui| {
+    MarkdownLabel::new(Id::NULL.with("label"), "Intro.\n\n```rust\nfn main() {}\n```").show(ui);
+  };
+  let change = |ctx: &Context| {
+    let theme = syntect::highlighting::ThemeSet::load_defaults().themes["InspiredGitHub"].clone();
+    egui_markdown::set_code_themes(ctx, theme.clone(), theme);
+  };
+  assert_follows_change("code theme", show, change, show);
+}
+
+/// `calculate_size` measures in an invisible `Ui`, so it uses the cached size of each range of text that it
+/// measured before. A change of the break flag changes the rows of a range, so it must measure the range again.
+#[test]
+fn calculate_size_follows_a_change_of_overflow_wrap() {
+  let doc =
+    "alpha bravissimo charlie deltadeltadelta echo foxtrotfoxtrot golf hotelhotelhotel india julietjuliet kilo \
+             limalimalima mike novembernovember\n\n| a |\n|---|\n| 1 |";
+  let size = |ctx: &Context, overflow_wrap: OverflowWrap| {
+    let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(120.0, 2000.0));
+    let mut size = egui::Vec2::ZERO;
+    let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      size = MarkdownLabel::new(Id::NULL.with("label"), doc).overflow_wrap(overflow_wrap).calculate_size(&mut child);
+    });
+    output.textures_delta.clear();
+    size
+  };
+  let settled = |ctx: &Context, overflow_wrap| {
+    size(ctx, overflow_wrap);
+    size(ctx, overflow_wrap)
+  };
+
+  let ctx = Context::default();
+  let normal = settled(&ctx, OverflowWrap::Normal);
+  let cached = settled(&ctx, OverflowWrap::BreakAll);
+  let fresh = settled(&Context::default(), OverflowWrap::BreakAll);
+  assert_ne!(normal, fresh, "the break flag does not change the size");
+  assert_eq!(cached, fresh, "the label measures with the break flag from before the change");
 }
