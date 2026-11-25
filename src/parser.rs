@@ -907,13 +907,11 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           }
         }
         Tag::CodeBlock(code_block_kind) => {
-          let last = tokens.last();
-          if matches!(last, Some(Token::ListMarker { .. })) {
-          } else if item_depth > 0 {
-            // A code block after the text of an item starts on its own row.
-            ensure_newline(tokens);
-          } else {
-            ensure_double_newline(tokens);
+          ensure_double_newline(tokens);
+          if item_depth > 0 {
+            // A code block in an item starts a row of its own, at the x of the item text, as a later
+            // paragraph of the item does. A marker with no text sets that x.
+            tokens.push(Token::ListMarker { marker: CowStr::Borrowed(""), indent_level: list_stack.len() });
           }
 
           current_code_language = match code_block_kind {
@@ -934,7 +932,7 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           list_stack.push(ListInfo { is_ordered, number });
 
           if !is_last_token_list_marker(tokens) {
-            if list_stack.len() == 1 {
+            if list_stack.len() == 1 || matches!(tokens.last(), Some(Token::CodeBlock { .. })) {
               ensure_double_newline(tokens);
             } else {
               ensure_newline(tokens);
@@ -942,7 +940,10 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           }
         }
         Tag::Item => {
-          if !tokens.is_empty() {
+          if matches!(tokens.last(), Some(Token::CodeBlock { .. })) {
+            // A blank row separates a code block from the next item, as it separates two blocks.
+            ensure_double_newline(tokens);
+          } else if !tokens.is_empty() {
             ensure_newline(tokens);
           }
           item_depth += 1;
@@ -2082,7 +2083,12 @@ mod tests {
   fn a_code_block_in_an_item_starts_its_own_row() {
     let md = parse("- item\n\n  ```\n  code\n  ```\n- next");
     let code = md.tokens.iter().position(|t| matches!(t, Token::CodeBlock { .. })).unwrap();
-    assert!(md.tokens[code - 1].is_newline(), "{:?}", md.tokens);
+    // A blank row separates the block from the item text, and an empty marker sets the x of the block
+    // to the x of the item text.
+    assert!(md.tokens[code - 3].is_newline() && md.tokens[code - 2].is_newline(), "{:?}", md.tokens);
+    assert!(matches!(&md.tokens[code - 1], Token::ListMarker { marker, indent_level: 1 } if marker.is_empty()));
+    // A blank row separates the block from the next item.
+    assert!(md.tokens[code + 1].is_newline() && md.tokens[code + 2].is_newline(), "{:?}", md.tokens);
   }
 
   #[test]

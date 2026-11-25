@@ -92,3 +92,26 @@ fn two_measures_under_one_id_do_not_clash() {
   }
   assert!(!painted.iter().any(|t| t.contains("🔥")), "egui reported an id clash: {painted:?}");
 }
+
+/// The rect of a frame with a margin around the label, after one frame that is a sizing pass or a normal pass.
+fn framed_rect(ctx: &Context, md: &str, sizing_pass: bool) -> Rect {
+  let mut rect = Rect::NOTHING;
+  frame(ctx, vec2(300.0, 600.0), |ui| {
+    let builder = if sizing_pass { UiBuilder::new().sizing_pass() } else { UiBuilder::new() };
+    let framed = egui::Frame::new().inner_margin(8).show(&mut ui.new_child(builder), |ui| {
+      MarkdownLabel::new(Id::NULL.with(md), md).hug_content(true).show(ui);
+    });
+    rect = framed.response.rect;
+  });
+  rect
+}
+
+#[test]
+fn a_sizing_pass_measures_the_size_of_a_table() {
+  let one_table = "Text before\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n";
+  let two_tables = "| a | b |\n|---|---|\n| 1 | 2 |\n\nText between\n\n| c | d |\n|---|---|\n| 3 | 4 |\n";
+  for md in [one_table, two_tables] {
+    let ctx = Context::default();
+    assert_eq!(framed_rect(&ctx, md, true), framed_rect(&ctx, md, false), "{md:?}");
+  }
+}
