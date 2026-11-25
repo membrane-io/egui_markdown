@@ -838,7 +838,7 @@ impl<'a> MarkdownLabel<'a> {
           // block. It is not text, so the flush leaves it out.
           let previous = i.checked_sub(1).filter(|&p| p >= text_start).map(|p| &tokens[p]);
           let indent = code_block_indent(ui, previous, font, 0, style);
-          let text_end = if indent > 0.0 { i - 1 } else { i };
+          let text_end = if indent.is_some() { i - 1 } else { i };
           let had_content = text_start < text_end;
           self.flush_text_range(ui, tokens, font, color, text_start, text_end, style, revision, out);
           before_block(had_content, ui);
@@ -850,9 +850,7 @@ impl<'a> MarkdownLabel<'a> {
             continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          let mut block_rect = ui.available_rect_before_wrap();
-          block_rect.min.x += indent;
-          ui.scope_builder(UiBuilder::new().max_rect(block_rect), |ui| {
+          let show = |ui: &mut Ui| {
             render_code_block(
               ui,
               self.id.with(("code_block", i)),
@@ -865,7 +863,14 @@ impl<'a> MarkdownLabel<'a> {
               style,
               self.code_theme_arg(),
             );
-          });
+          };
+          if let Some(indent) = indent {
+            let mut block_rect = ui.available_rect_before_wrap();
+            block_rect.min.x += indent;
+            ui.scope_builder(UiBuilder::new().max_rect(block_rect), show);
+          } else {
+            show(ui);
+          }
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;

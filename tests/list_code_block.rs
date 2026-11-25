@@ -5,6 +5,7 @@ use egui_markdown::{MarkdownLabel, MarkdownStyle};
 
 const IN_LIST: &str = "1. An item with a code block:\n\n   ```\n   let x = 42;\n   ```\n2. A second item\n";
 const IN_QUOTE: &str = "> - A list in a quote\n>\n>   ```\n>   let x = 42;\n>   ```\n";
+const FIRST_IN_ITEM: &str = "- An item\n- ```\n  let x = 42;\n  let y = 7;\n  ```\n- A second item\n";
 
 /// A row of text that the label painted, in screen coordinates.
 struct PaintedRow {
@@ -49,10 +50,10 @@ fn paint(md: &str, scroll_code_blocks: bool) -> (Vec<Rect>, Vec<PaintedRow>) {
   (backgrounds, rows)
 }
 
-/// The code block of `md` lies below the row that starts with `item`, starts no further left than the
-/// item text, and ends above the row that starts with `next`, if there is one.
+/// The code block of `md` covers no text but its own, and it and each of its lines start no further left
+/// than the text of the row that holds `item`. The code lines are the rows that hold `let `.
 #[track_caller]
-fn assert_code_block_in_item(md: &str, item: &str, next: Option<&str>) {
+fn assert_code_block_in_item(md: &str, item: &str) {
   let left_padding = MarkdownStyle::default().code_block.padding[0];
   for scroll in [false, true] {
     let (backgrounds, rows) = paint(md, scroll);
@@ -62,34 +63,36 @@ fn assert_code_block_in_item(md: &str, item: &str, next: Option<&str>) {
     let text_x = item_row.xs[item_row.text[..text_index].chars().count()];
 
     assert!(
-      code.min.y >= item_row.rect.max.y,
-      "scroll={scroll}: the code block (top {}) overlaps the item text (bottom {})",
-      code.min.y,
-      item_row.rect.max.y
-    );
-    assert!(
       code.min.x + left_padding >= text_x - 1.0,
       "scroll={scroll}: the code block starts at x {} with padding {left_padding}, left of the item text at x {text_x}",
       code.min.x
     );
-    if let Some(next) = next {
-      let next_row = rows.iter().find(|r| r.text.contains(next)).expect("next item row");
-      assert!(
-        code.max.y <= next_row.rect.min.y,
-        "scroll={scroll}: the code block (bottom {}) overlaps the next item (top {})",
-        code.max.y,
-        next_row.rect.min.y
-      );
+    for row in &rows {
+      if row.text.contains("let ") {
+        assert!(
+          row.xs[0] >= text_x - 1.0,
+          "scroll={scroll}: the code line {:?} starts at x {}, left of the item text at x {text_x}",
+          row.text,
+          row.xs[0]
+        );
+      } else if !row.text.trim().is_empty() {
+        assert!(!row.rect.intersects(code), "scroll={scroll}: the code block {code:?} covers {:?}", row.text);
+      }
     }
   }
 }
 
 #[test]
 fn code_block_in_a_list_item() {
-  assert_code_block_in_item(IN_LIST, "An item", Some("A second item"));
+  assert_code_block_in_item(IN_LIST, "An item");
 }
 
 #[test]
 fn code_block_in_a_list_in_a_quote() {
-  assert_code_block_in_item(IN_QUOTE, "A list in a quote", None);
+  assert_code_block_in_item(IN_QUOTE, "A list in a quote");
+}
+
+#[test]
+fn code_block_that_starts_a_list_item() {
+  assert_code_block_in_item(FIRST_IN_ITEM, "An item");
 }

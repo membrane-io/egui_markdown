@@ -907,15 +907,11 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           }
         }
         Tag::CodeBlock(code_block_kind) => {
-          let last = tokens.last();
-          if matches!(last, Some(Token::ListMarker { .. })) {
-          } else if item_depth > 0 {
-            // A code block after the text of an item starts a row of its own, at the x of the item text,
-            // as a later paragraph of the item does.
-            ensure_double_newline(tokens);
+          ensure_double_newline(tokens);
+          if item_depth > 0 {
+            // A code block in an item starts a row of its own, at the x of the item text, as a later
+            // paragraph of the item does. A marker with no text sets that x.
             tokens.push(Token::ListMarker { marker: CowStr::Borrowed(""), indent_level: list_stack.len() });
-          } else {
-            ensure_double_newline(tokens);
           }
 
           current_code_language = match code_block_kind {

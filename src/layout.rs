@@ -301,20 +301,20 @@ fn code_line_indents(ui: &Ui, text: &str, code_font_size: f32) -> Vec<f32> {
   })
 }
 
-/// The horizontal layout of a list marker: the space before it, its width, and the space after it.
+/// The horizontal layout of a list marker: the space before it, its font and width, and the space after it.
 pub(crate) struct MarkerLayout {
   pub leading: f32,
+  pub marker_font: FontId,
   pub marker_width: f32,
   pub trailing: f32,
 }
 
-/// Lay out `marker`, set in `marker_font`, for an item at `indent_level` inside `blockquote_depth` quotes.
-/// `body_font` sets the width of the marker slot.
+/// Lay out `marker` for an item at `indent_level` inside `blockquote_depth` quotes, in a label that
+/// sets its text in `font_id`.
 pub(crate) fn marker_layout(
   ui: &Ui,
   marker: &str,
-  marker_font: &FontId,
-  body_font: &FontId,
+  font_id: &FontId,
   indent_level: usize,
   blockquote_depth: u32,
   style: &MarkdownStyle,
@@ -322,9 +322,13 @@ pub(crate) fn marker_layout(
   let list = &style.list;
   let is_ordered = marker.trim_start().starts_with(|c: char| c.is_ascii_digit());
   let nudge = if is_ordered { list.number_nudge } else { list.bullet_nudge };
+  let mut marker_font = font_id.clone();
+  if !is_ordered {
+    marker_font.size *= list.bullet_scale;
+  }
   let (marker_width, slot_width) = ui.ctx().fonts_mut(|f| {
-    let marker_width: f32 = marker.chars().map(|c| f.glyph_width(marker_font, c)).sum();
-    let slot_width: f32 = MARKER_SLOT_REFERENCE.chars().map(|c| f.glyph_width(body_font, c)).sum();
+    let marker_width: f32 = marker.chars().map(|c| f.glyph_width(&marker_font, c)).sum();
+    let slot_width: f32 = MARKER_SLOT_REFERENCE.chars().map(|c| f.glyph_width(font_id, c)).sum();
     (marker_width, slot_width)
   });
   // `indent_level` is 1-based, so a top-level item gets no nesting indent. Each level starts its
@@ -337,25 +341,25 @@ pub(crate) fn marker_layout(
   let leading = (nesting + slot_width - nudge - marker_width).max(0.0);
   // The nudge and the gap are made up after the marker, so moving a marker never moves text.
   let trailing = nesting + slot_width + list.gap - leading - marker_width;
-  MarkerLayout { leading, marker_width, trailing }
+  MarkerLayout { leading, marker_font, marker_width, trailing }
 }
 
-/// The x of the item text that a code block in a list item starts at. The parser puts an empty
-/// [`Token::ListMarker`] before such a code block. Any other code block starts at 0.
+/// The x of the item text, when `previous` is the empty [`Token::ListMarker`] that the parser puts
+/// before a code block in a list item. `None` for any other token.
 pub(crate) fn code_block_indent(
   ui: &Ui,
   previous: Option<&Token<'_>>,
   font_id: &FontId,
   blockquote_depth: u32,
   style: &MarkdownStyle,
-) -> f32 {
+) -> Option<f32> {
   match previous {
     Some(Token::ListMarker { marker, indent_level }) if marker.is_empty() => {
-      let MarkerLayout { leading, marker_width, trailing } =
-        marker_layout(ui, "", font_id, font_id, *indent_level, blockquote_depth, style);
-      leading + marker_width + trailing.max(0.0)
+      let MarkerLayout { leading, marker_width, trailing, .. } =
+        marker_layout(ui, "", font_id, *indent_level, blockquote_depth, style);
+      Some(leading + marker_width + trailing.max(0.0))
     }
-    _ => 0.0,
+    _ => None,
   }
 }
 
@@ -467,7 +471,8 @@ pub fn build_layout(
             &font_id,
             blockquote_depth,
             style_ref,
-          );
+          )
+          .unwrap_or(0.0);
 
           {
             // Each source line is its own paragraph. The section that starts a line indents the
@@ -499,13 +504,9 @@ pub fn build_layout(
         }
       }
       Token::ListMarker { marker, indent_level } => {
-        let is_ordered = marker.trim_start().starts_with(|c: char| c.is_ascii_digit());
-        let mut marker_format = base_format.clone();
-        if !is_ordered {
-          marker_format.font_id.size *= style_ref.list.bullet_scale;
-        }
-        let MarkerLayout { leading, marker_width, trailing } =
-          marker_layout(ui, marker, &marker_format.font_id, &font_id, *indent_level, blockquote_depth, style_ref);
+        let MarkerLayout { leading, marker_font, marker_width, trailing } =
+          marker_layout(ui, marker, &font_id, *indent_level, blockquote_depth, style_ref);
+        let marker_format = TextFormat { font_id: marker_font, ..base_format.clone() };
 
         // Wrapped rows of the item resume where its text starts.
         let text_start = leading + marker_width + trailing.max(0.0);
