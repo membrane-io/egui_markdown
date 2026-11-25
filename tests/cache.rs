@@ -194,6 +194,11 @@ const SEGMENTED: &str = "Hello **bold** [link](https://example.com) and `code`.\
 type Painted = Vec<(egui::text::LayoutJob, egui::Vec2)>;
 
 fn painted_jobs(ctx: &Context, show: &dyn Fn(&mut egui::Ui)) -> Painted {
+  painted_galleys(ctx, show).iter().map(|galley| ((*galley.job).clone(), galley.size())).collect()
+}
+
+/// The galleys that a frame paints.
+fn painted_galleys(ctx: &Context, show: &dyn Fn(&mut egui::Ui)) -> Vec<std::sync::Arc<egui::Galley>> {
   let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(500.0, 2000.0));
   let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
     let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
@@ -204,7 +209,7 @@ fn painted_jobs(ctx: &Context, show: &dyn Fn(&mut egui::Ui)) -> Painted {
   for clipped in &output.shapes {
     collect_galleys(&clipped.shape, &mut galleys);
   }
-  galleys.iter().map(|galley| ((*galley.job).clone(), galley.size())).collect()
+  galleys
 }
 
 fn collect_galleys(shape: &egui::epaint::Shape, out: &mut Vec<std::sync::Arc<egui::Galley>>) {
@@ -405,4 +410,66 @@ fn a_code_block_follows_a_mono_bold_family_that_the_app_registers_later() {
     };
     assert_follows_change(&format!("scroll_code_blocks={scroll}"), show, change, show);
   }
+}
+
+/// A galley from before `set_fonts` has the glyph advances and the atlas positions of the old fonts, so a scrolling
+/// code block lays out again.
+#[test]
+fn a_scrolling_code_block_follows_set_fonts() {
+  let show = |ui: &mut egui::Ui| {
+    MarkdownLabel::new(Id::NULL.with("label"), "```rust\nfn main() {}\n```").scroll_code_blocks(true).show(ui);
+  };
+  let change = |ctx: &Context| {
+    let mut fonts = egui::FontDefinitions::default();
+    let proportional = fonts.families[&egui::FontFamily::Proportional].clone();
+    fonts.families.insert(egui::FontFamily::Monospace, proportional);
+    ctx.set_fonts(fonts);
+  };
+  assert_follows_change("set_fonts", show, change, show);
+}
+
+/// egui clears the font atlas when it is more than 80% full, and a galley from before the reset paints parts of
+/// other glyphs. The size of the galley does not change, so the test compares the atlas position of each glyph
+/// with a galley that egui lays out after the reset.
+#[test]
+fn a_scrolling_code_block_follows_an_atlas_reset() {
+  let ctx = Context::default();
+  let large = |ctx: &Context, text: &str, size: f32| {
+    let job = egui::text::LayoutJob::simple(text.to_owned(), FontId::proportional(size), Color32::WHITE, f32::INFINITY);
+    ctx.fonts_mut(|f| f.layout_job(job));
+  };
+  // Each frame shows the label. `fill` lays out large glyphs that fill the atlas.
+  let frame = |fill: Option<usize>| {
+    let show = |ui: &mut egui::Ui| {
+      if let Some(n) = fill {
+        for i in 0..20 {
+          large(ui.ctx(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 200.0 + (n * 20 + i) as f32);
+        }
+      }
+      MarkdownLabel::new(Id::NULL.with("label"), "```rust\nfn main() {}\n```").scroll_code_blocks(true).show(ui);
+    };
+    let painted = painted_galleys(&ctx, &show);
+    painted.into_iter().find(|galley| galley.text().contains("main")).expect("the code block is painted")
+  };
+  // Glyphs before the first code block, so that the code glyphs are not at the start of the atlas.
+  painted_galleys(&ctx, &|ui| large(ui.ctx(), "abcdefghij", 150.0));
+  frame(None);
+  frame(None);
+
+  let fill_ratio = || ctx.fonts(|f| f.font_atlas_fill_ratio());
+  let mut n = 0;
+  while fill_ratio() <= 0.8 {
+    frame(Some(n));
+    n += 1;
+    assert!(n < 50, "the atlas does not fill");
+  }
+  // egui resets the atlas at the start of this frame.
+  let painted = frame(None);
+  assert!(fill_ratio() < 0.8, "egui did not reset the atlas");
+
+  let fresh = ctx.fonts_mut(|f| f.layout_job((*painted.job).clone()));
+  let uv = |galley: &egui::Galley| -> Vec<_> {
+    galley.rows.iter().flat_map(|row| row.glyphs.iter().map(|g| g.uv_rect)).collect()
+  };
+  assert_eq!(uv(&painted), uv(&fresh), "the code block paints glyphs from before the atlas reset");
 }

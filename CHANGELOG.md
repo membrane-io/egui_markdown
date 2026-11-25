@@ -171,6 +171,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   screen used a size from before the change.
 - A scrolling code block now follows a "mono-bold" family that the app registers later. Before, its bold
   tokens kept the regular monospace family.
+- A scrolling code block now follows `Context::set_fonts` and a reset of the font atlas. Before, it painted
+  the glyphs of the old fonts, or parts of other glyphs.
 
 ## [0.1.0] - 2026-03-23
 
