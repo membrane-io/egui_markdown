@@ -99,29 +99,13 @@ impl MarkdownStyle {
     self.code_font_size.unwrap_or_else(|| egui::TextStyle::Monospace.resolve(style).size)
   }
 
-  /// Show an editor for each field of the style, with buttons that set the dark or the light egui visuals for
-  /// the whole context, and a button that resets the style.
+  /// Show an editor for each field of the style, and a button that resets the style.
   pub fn ui(&mut self, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-      let dark_mode = ui.visuals().dark_mode;
-      if ui.selectable_label(dark_mode, "Dark").clicked() {
-        ui.ctx().set_visuals(egui::Visuals::dark());
-      }
-      if ui.selectable_label(!dark_mode, "Light").clicked() {
-        ui.ctx().set_visuals(egui::Visuals::light());
-      }
-      ui.separator();
-      if ui.button("Reset").clicked() {
-        *self = Self::default();
-      }
-    });
+    if ui.button("Reset").clicked() {
+      *self = Self::default();
+    }
 
     ui.separator();
-    self.render_style(ui);
-  }
-
-  /// Show an editor for each field of the style, without the buttons of [`Self::ui`].
-  pub fn render_style(&mut self, ui: &mut Ui) {
     ui.label("Block spacing:");
     ui.add(DragValue::new(&mut self.block_spacing).range(0.0..=40.0).speed(0.5));
     ui.label("Line height ratio:");

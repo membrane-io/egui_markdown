@@ -201,6 +201,15 @@ impl eframe::App for AdvancedApp {
     if self.show_style_editor {
       egui::Panel::right("style_editor").default_size(280.0).show(ui, |ui| {
         ui.heading("Style");
+        ui.horizontal(|ui| {
+          let dark_mode = ui.visuals().dark_mode;
+          if ui.selectable_label(dark_mode, "Dark").clicked() {
+            ui.ctx().set_visuals(egui::Visuals::dark());
+          }
+          if ui.selectable_label(!dark_mode, "Light").clicked() {
+            ui.ctx().set_visuals(egui::Visuals::light());
+          }
+        });
         ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
           self.markdown_style.ui(ui);
