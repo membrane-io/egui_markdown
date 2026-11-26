@@ -235,19 +235,19 @@ fn hash_code_block_context(
   text: &str,
   language: &str,
   code_font_size: f32,
+  theme: &egui_extras::syntax_highlighting::CodeTheme,
   color: Color32,
   pixels_per_point: f32,
-  code_theme: CodeThemeArg<'_>,
   fonts_epoch: u64,
 ) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
   text.hash(&mut hasher);
   language.hash(&mut hasher);
   code_font_size.to_bits().hash(&mut hasher);
+  theme.hash(&mut hasher);
   color.hash(&mut hasher);
   pixels_per_point.to_bits().hash(&mut hasher);
   fonts_epoch.hash(&mut hasher);
-  let _ = code_theme;
   hasher.finish()
 }
 
@@ -1656,9 +1656,9 @@ fn render_code_block(
       text.as_ref(),
       lang,
       code_font_size,
+      &crate::layout::plain_code_theme(ui.style()),
       crate::layout::plain_code_color(ui.visuals()),
       ui.ctx().pixels_per_point(),
-      code_theme,
       fonts_epoch(ui.ctx()),
     );
     match ui.data(|d| d.get_temp::<CachedCodeBlock>(cache_id)) {
