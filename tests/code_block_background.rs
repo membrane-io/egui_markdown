@@ -57,7 +57,7 @@ fn the_background_of_a_code_block_is_inside_the_label() {
         let (label, rects) = backgrounds(md, scroll, hug);
         assert_eq!(rects.len(), 1, "{name}, scroll {scroll}, hug {hug}");
         let bg = rects[0];
-        let inside = label.min.y <= bg.min.y && bg.max.y <= label.max.y;
+        let inside = label.min.y <= bg.min.y && bg.max.y <= label.max.y && bg.max.x <= label.max.x;
         assert!(inside, "{name}, scroll {scroll}, hug {hug}: label {label:?}, background {bg:?}");
       }
     }

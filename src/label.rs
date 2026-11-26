@@ -1304,11 +1304,22 @@ impl<'a> MarkdownLabel<'a> {
     if !hug_content && wrap.mode != TextWrapMode::Extend {
       size.x = size.x.max(available_width);
     }
+    let padding = &style.code_block.padding;
+    if hug_content {
+      // The label that hugs its content is wide enough for the right padding of each code block.
+      let code_right = code_block_rects.iter().map(|r| r.max.x + padding[2]).fold(0.0, f32::max);
+      size.x = size.x.max(code_right);
+    }
     let decoration_width = if hug_content { size.x } else { available_width };
+    // The background of a code block ends at the right edge of the label, as the frame of a scrolling code
+    // block does.
+    let mut code_block_rects = code_block_rects;
+    for r in &mut code_block_rects {
+      r.max.x = size.x - padding[2];
+    }
     // A code block grows its background by its padding past its rows. In the galley, a blank row above and
     // below the block holds that padding. A block at the top or at the bottom of the galley has no blank row
     // there, so the label allocates the padding, as a `Frame` allocates its inner margin.
-    let padding = &style.code_block.padding;
     let pad_top = if code_block_rects.iter().any(|r| r.min.y <= 0.0) { padding[1] } else { 0.0 };
     let pad_bottom = if code_block_rects.iter().any(|r| r.max.y >= size.y) { padding[3] } else { 0.0 };
     size.y += pad_top + pad_bottom;

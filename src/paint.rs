@@ -8,19 +8,25 @@ use epaint::{pos2, Galley};
 use crate::style::{CodeBlockStyle, HorizontalRuleStyle};
 
 /// Compute the background rectangles for code blocks from character offset spans.
-pub fn compute_code_block_rects(ui: &mut Ui, code_blocks: &[(usize, usize)], galley: &Arc<Galley>) -> Vec<Rect> {
+///
+/// A rect starts at the x of the first glyph of the block and ends at the right edge of the widest row of the
+/// block. [`crate::MarkdownLabel`] then moves the right edge to the right edge of the space that it allocates.
+/// `_ui` is not used.
+pub fn compute_code_block_rects(_ui: &mut Ui, code_blocks: &[(usize, usize)], galley: &Arc<Galley>) -> Vec<Rect> {
   let mut code_block_rects = Vec::new();
-  let available_width = ui.available_width() - 16.0;
   for &(start, end) in code_blocks {
     debug_assert!(start <= end);
     let mut start_row = None;
+    let mut right = 0.0_f32;
     let mut offset = 0;
     for (row_index, row) in galley.rows.iter().enumerate() {
       let row_range = offset..=offset + row.char_count_including_newline().0;
       if row_range.contains(&start) {
         start_row = Some(row_index);
+        right = 0.0;
       }
       if let Some(start_row) = start_row {
+        right = right.max(row.rect().max.x);
         if row_range.contains(&end) || row_index == galley.rows.len() - 1 {
           let first = &galley.rows[start_row];
           let mut bg_rect = Rect::from_min_max(first.rect().min, row.rect().max);
@@ -28,7 +34,7 @@ pub fn compute_code_block_rects(ui: &mut Ui, code_blocks: &[(usize, usize)], gal
           if let Some(glyph) = first.glyphs.first() {
             bg_rect.min.x = first.pos.x + glyph.pos.x;
           }
-          bg_rect.max.x = available_width;
+          bg_rect.max.x = right;
           code_block_rects.push(bg_rect);
           break;
         }

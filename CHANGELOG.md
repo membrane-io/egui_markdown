@@ -179,6 +179,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   background 6 pt outside the label, over the widget above or below it. The label now allocates the
   padding of that block, as an egui `Frame` allocates its inner margin, and the quote bar runs to the
   bottom of the background. A code block between two paragraphs keeps its place.
+- The background of a code block now ends at the right edge of the label. Before, it ended 4 pt before
+  that edge, and with `hug_content` it filled the available width past the label.
 - The code block buttons now use the padding of `CodeBlockStyle`. Before, they used fixed values.
 
 ## [0.1.0] - 2026-03-23
