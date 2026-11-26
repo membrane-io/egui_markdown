@@ -207,6 +207,7 @@ fn a_click_on_a_link_with_an_empty_href_in_a_table_cell_opens_nothing() {
   let text = table_with_link("[cell link]()");
   let result = hover_and_click(&text, None, false, on_cell_link);
   assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(result.link_clicked);
   assert!(result.urls.is_empty(), "{:?}", result.urls);
 }
 
@@ -257,4 +258,27 @@ fn a_link_in_a_table_cell_shows_the_hover_text_of_the_link_handler() {
   assert_eq!(result.cursor, CursorIcon::PointingHand);
   assert!(result.tooltip);
   assert!(handler.hrefs.borrow().iter().any(|href| href == "https://cell.example"), "{:?}", handler.hrefs.borrow());
+}
+
+/// A handler that records the href of each call to `click`, and lets the label open the href.
+#[derive(Default)]
+struct ClickRecorder {
+  hrefs: RefCell<Vec<String>>,
+}
+
+impl LinkHandler for ClickRecorder {
+  fn click(&self, _text: &str, href: &str, _ui: &mut egui::Ui) -> bool {
+    self.hrefs.borrow_mut().push(href.to_owned());
+    false
+  }
+}
+
+#[test]
+fn a_click_on_a_link_with_an_empty_href_in_a_table_cell_does_not_call_the_link_handler() {
+  let text = table_with_link("[cell link]()");
+  let handler = ClickRecorder::default();
+  let result = hover_and_click(&text, Some(&handler), false, on_cell_link);
+  assert!(handler.hrefs.borrow().is_empty(), "{:?}", handler.hrefs.borrow());
+  assert!(result.urls.is_empty(), "{:?}", result.urls);
+  assert!(result.link_clicked);
 }

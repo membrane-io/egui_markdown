@@ -13,7 +13,7 @@ use crate::style::{InlineCodeStyle, TableStyle};
 use crate::types::{Alignment, TableData, Token, TokenStyle};
 
 /// Render a markdown table using `egui_extras::TableBuilder`. Return the rect that the table allocated, and
-/// whether a link in a cell got a click.
+/// whether a link in a cell received a click.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show_table(
   ui: &mut Ui,
@@ -300,7 +300,7 @@ fn cell_size(lines: &[CellLine]) -> Vec2 {
 }
 
 /// Paint the rows of a cell, centered in the height of the cell, at the x that `align` gives. Return whether a
-/// link in the cell got a click.
+/// link in the cell received a click.
 fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: bool, align: Alignment) -> bool {
   let lines = layout_cell(ui, tokens, style, is_header);
   let mut link_clicked = false;
@@ -329,7 +329,7 @@ fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: 
   link_clicked
 }
 
-/// Paint a run of text and links in a row of a cell. Return whether a link in the run got a click.
+/// Paint a run of text and links in a row of a cell. Return whether a link in the run received a click.
 fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: bool) -> bool {
   let has_links = tokens.iter().any(|t| matches!(t, Token::Link { .. } | Token::Image { .. }));
   if !has_links {
@@ -346,15 +346,13 @@ fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_head
   for token in tokens {
     match token {
       Token::Link { text, href, title, .. } => {
-        let (_, clicked) =
+        link_clicked |=
           render_link_in_ui(ui, text, href, title.as_deref(), &link_font, &base_format, link_color, style.link_handler);
-        link_clicked |= clicked;
       }
       // An image link uses no link handler and no title.
       Token::Image { alt, url, .. } => {
-        let (_, clicked) =
+        link_clicked |=
           render_link_in_ui(ui, image_link_text(alt, url), url, None, &link_font, &base_format, link_color, None);
-        link_clicked |= clicked;
       }
       Token::Text { text, style: text_style } => {
         let format = token_style_to_format(

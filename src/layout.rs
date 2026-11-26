@@ -1,8 +1,6 @@
 //! The [`LayoutJob`] of a list of tokens.
 
-use egui::{
-  text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,
-};
+use egui::{text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Sense, Stroke, TextFormat, Ui};
 
 use egui::epaint::text::ByteRangeExt as _;
 
@@ -228,12 +226,12 @@ pub(crate) fn open_link(ui: &mut Ui, handler: Option<&dyn LinkHandler>, text: &s
   }
 }
 
-/// Render one link as a separate widget in `ui`, as a table cell does. Return its response, and whether
-/// the response is a click on the link.
+/// Render one link as a separate widget in `ui`, as a table cell does. Return whether the link received a
+/// click. A block widget handles its own click, so the return value for a block widget is `false`.
 ///
 /// The link uses the [`LinkHandler`]: a block widget, an inline widget, the sections of `layout_link`,
 /// `link_style`, the hover underline, the tooltip and the click. The tooltip and the click are the same as
-/// for a link in a galley. A block widget handles its own hover and click.
+/// for a link in a galley.
 #[allow(clippy::too_many_arguments)]
 pub fn render_link_in_ui(
   ui: &mut Ui,
@@ -244,12 +242,10 @@ pub fn render_link_in_ui(
   base_format: &TextFormat,
   link_color: Color32,
   link_handler: Option<&dyn LinkHandler>,
-) -> (Response, bool) {
+) -> bool {
   if let Some(handler) = link_handler {
-    if handler.is_block_widget(href) {
-      if let Some(resp) = handler.block_widget(ui, text, href) {
-        return (resp, false);
-      }
+    if handler.is_block_widget(href) && handler.block_widget(ui, text, href).is_some() {
+      return false;
     }
   }
 
@@ -288,8 +284,7 @@ pub fn render_link_in_ui(
   if clicked {
     open_link(ui, link_handler, text, href);
   }
-
-  (response, clicked)
+  clicked
 }
 
 /// Whether the app registers a `"bold"` font family.
