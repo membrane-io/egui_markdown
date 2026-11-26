@@ -181,7 +181,7 @@ if output.response.clicked() && !output.link_clicked {
 |---------|-------------|
 | `hello_world` | One label in a scroll area. Start here. |
 | `editor` | A text editor and the rendered output. |
-| `streaming` | Text that arrives a few characters at a time, with `.heal(true)` and a fade-in through `.map_job()`. |
+| `streaming` | Text that arrives a few characters at a time. The label heals the text while it is incomplete, and `.map_job()` fades in the newest characters. |
 | `links` | A `LinkHandler`: link colors, tooltips, clicks, an inline widget and a block widget. |
 | `code_blocks` | A Copy button on each code block, horizontal scrolling, and a dark and a light syntect theme. |
 | `style` | The `MarkdownStyle` editor, `set_style`, and the theme buttons. |

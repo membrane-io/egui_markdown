@@ -1,6 +1,9 @@
 //! Code blocks: a Copy button and the language on each block, horizontal scrolling, and a syntect theme
 //! for dark mode and one for light mode.
 //!
+//! The themes come from `syntect`, so the example needs the `syntax_highlighting` feature. A copy of the example
+//! in your own crate needs `syntect = "5"` in its `Cargo.toml`.
+//!
 //! ```sh
 //! cargo run --example code_blocks
 //! ```
@@ -64,5 +67,7 @@ fn code_block_buttons(ui: &mut egui::Ui, code: &str, language: &str) {
   if ui.button("Copy").clicked() {
     ui.ctx().copy_text(code.to_owned());
   }
-  ui.weak(language);
+  if !language.is_empty() {
+    ui.weak(language);
+  }
 }

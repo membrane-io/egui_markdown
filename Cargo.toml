@@ -13,7 +13,7 @@ repository = "https://github.com/membrane-io/egui_markdown"
 documentation = "https://docs.rs/egui_markdown"
 categories = ["gui"]
 keywords = ["egui", "markdown", "gui", "commonmark"]
-include = ["**/*.rs", "examples/markdown/*.md", "tests/fixtures/*.json", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
+include = ["**/*.rs", "examples/markdown/*.md", "tests/fixtures/*.json", "tests/fixtures/*.md", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
 
 [dependencies]
 egui = { version = "0.37", default-features = false }

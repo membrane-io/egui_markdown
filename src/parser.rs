@@ -2185,7 +2185,7 @@ mod tests {
       .collect()
   }
 
-  /// The markdown of each example and of each streaming fixture.
+  /// The markdown of each example, of each markdown fixture and of each streaming fixture.
   fn stream_documents() -> Vec<String> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut docs = vec![
@@ -2198,8 +2198,13 @@ mod tests {
     }
     for entry in std::fs::read_dir(root.join("tests/fixtures")).unwrap() {
       let path = entry.unwrap().path();
-      let deltas: Vec<String> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-      docs.push(deltas.concat());
+      let text = std::fs::read_to_string(&path).unwrap();
+      if path.extension().is_some_and(|ext| ext == "md") {
+        docs.push(text);
+      } else {
+        let deltas: Vec<String> = serde_json::from_str(&text).unwrap();
+        docs.push(deltas.concat());
+      }
     }
     docs
   }
