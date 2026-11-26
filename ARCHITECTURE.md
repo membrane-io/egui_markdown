@@ -25,7 +25,7 @@ galley (`flush_text_range`), and renders each block as a separate egui widget. A
 tokens in a child `Ui`, so a quote can hold blocks too.
 
 `needs_segmentation` reads the tokens only. It must agree with each `segment_breaks.push` in
-`build_layout`. `tests/cache.rs::needs_segmentation_matches_build_layout` checks this. A `debug_assert!` in
+`build_layout`. `needs_segmentation_matches_build_layout` (`src/layout.rs`) checks this. A `debug_assert!` in
 `render` also fails when `needs_segmentation` chooses the whole-document path for a document that has a
 segment break.
 

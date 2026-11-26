@@ -12,22 +12,7 @@ use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, TableStyle};
 use crate::types::{Alignment, TableData, Token, TokenStyle};
 
-/// Render a markdown table using `egui_extras::TableBuilder`.
-#[allow(clippy::too_many_arguments)]
-pub fn render_table(
-  ui: &mut Ui,
-  id: Id,
-  data: &TableData<'_>,
-  font_id: &FontId,
-  color: Color32,
-  inline_code_style: &InlineCodeStyle,
-  table_style: &TableStyle,
-  link_handler: Option<&dyn LinkHandler>,
-) {
-  show_table(ui, id, data, font_id, color, inline_code_style, table_style, link_handler);
-}
-
-/// [`render_table`], and return the rect that the table allocated.
+/// Render a markdown table using `egui_extras::TableBuilder`, and return the rect that the table allocated.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show_table(
   ui: &mut Ui,

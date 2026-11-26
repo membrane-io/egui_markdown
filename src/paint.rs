@@ -46,21 +46,10 @@ pub fn compute_code_block_rects(code_blocks: &[(usize, usize)], galley: &Arc<Gal
   code_block_rects
 }
 
-/// Paint the background and the border of a code block. `bg_rect` is relative to `origin`, and the painted
-/// rect is larger by the padding of `code_style`.
+/// Paint the background and the border of a code block in `r`.
 ///
 /// The fill and corner radius come from [`egui::Visuals::code`], as for the frame that
 /// [`crate::MarkdownLabel`] gives a scrolling code block, so both render paths show one code surface.
-pub fn paint_code_block_bg(ui: &Ui, bg_rect: Rect, origin: Pos2, code_style: &CodeBlockStyle) {
-  let mut r = bg_rect.translate(origin.to_vec2());
-  r.min.x -= code_style.padding[0];
-  r.min.y -= code_style.padding[1];
-  r.max.x += code_style.padding[2];
-  r.max.y += code_style.padding[3];
-  paint_code_block_rect(ui, r, code_style);
-}
-
-/// Paint the background and the border of a code block in `r`.
 pub(crate) fn paint_code_block_rect(ui: &Ui, r: Rect, code_style: &CodeBlockStyle) {
   let code = &ui.visuals().code;
   ui.painter().rect_filled(r, code.corner_radius, code.bg_color);

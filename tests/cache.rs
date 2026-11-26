@@ -1,5 +1,5 @@
 use egui::{vec2, Color32, Context, FontId, Id, RawInput, Rect, UiBuilder};
-use egui_markdown::{layout, MarkdownLabel, MarkdownStyle, OverflowWrap};
+use egui_markdown::{MarkdownLabel, MarkdownStyle, OverflowWrap};
 
 /// Render `text` into `ctx` and return every string painted as text.
 fn painted_text(ctx: &Context, text: &str) -> Vec<String> {
@@ -101,55 +101,6 @@ fn non_prefix_edit_scrolling_code_block_is_reflected() {
   let after = painted_text_with(&ctx, second, true);
   assert!(after.iter().any(|t| t.contains("bravo")), "non-prefix edit missing 'bravo': {after:?}");
   assert!(!after.iter().any(|t| t.contains("alpha")), "stale fence still painted: {after:?}");
-}
-
-/// `needs_segmentation` decides the render path without laying out; it must agree with the
-/// segment breaks `build_layout` would have produced.
-#[test]
-fn needs_segmentation_matches_build_layout() {
-  let docs = [
-    "Just **plain** text with `code` and a [link](https://example.com).",
-    "# Heading\n\nParagraph.\n\n---\n\nAfter the rule.",
-    "- one\n- two\n  - nested\n\n1. first\n2. second",
-    "Intro.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nOutro.",
-    "> quoted **text**\n>\n> > nested",
-    "Text\n\n```rust\nfn main() {}\n```\n\nMore.",
-    "![alt](https://example.com/x.png)",
-    "A footnote[^1].\n\n[^1]: body.",
-    "- [x] done\n- [ ] todo",
-  ];
-
-  let ctx = Context::default();
-  let screen = Rect::from_min_size(egui::pos2(0.0, 0.0), vec2(500.0, 2000.0));
-  let style = MarkdownStyle::default();
-
-  let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
-    for doc in docs {
-      for scroll_code_blocks in [false, true] {
-        let md = egui_markdown::parse(doc);
-        let predicted = layout::needs_segmentation(&md.tokens, scroll_code_blocks, None);
-        let built = layout::build_layout(
-          ui,
-          &md.tokens,
-          FontId::proportional(14.0),
-          Color32::WHITE,
-          None,
-          ui.available_width(),
-          false,
-          None,
-          scroll_code_blocks,
-          &style,
-          Default::default(),
-        );
-        assert_eq!(
-          predicted,
-          !built.segment_breaks.is_empty(),
-          "scroll_code_blocks={scroll_code_blocks} disagreement on:\n{doc}"
-        );
-      }
-    }
-  });
-  output.textures_delta.clear();
 }
 
 /// A label that saw a reply stream in, one piece at a time with heal on, keeps tokens from earlier

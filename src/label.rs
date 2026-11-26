@@ -28,9 +28,6 @@ use crate::style::MarkdownStyle;
 use crate::table;
 use crate::types::{tokens_to_owned, Token};
 
-#[cfg(feature = "syntax_highlighting")]
-pub use crate::theme::default_code_theme;
-
 /// The parse of the text and, on the whole-document path, its layout, in egui temp data.
 #[derive(Clone, Default)]
 struct CachedMarkdownLayout {
