@@ -1,8 +1,3 @@
-// The fork deprecates `Panel::show_inside` in favour of `show`, and published egui
-// deprecates `show` in favour of `show_inside`. Both spellings compile against both,
-// so this picks one rather than cfg-ing between them.
-#![allow(deprecated)]
-
 use std::collections::VecDeque;
 use std::time::Instant;
 
@@ -247,7 +242,7 @@ impl eframe::App for AdvancedApp {
         egui::Frame::new().inner_margin(egui::Margin::symmetric(24, 8)).fill(ui.visuals().faint_bg_color).show(
           ui,
           |ui| {
-            MarkdownLabel::new(ui.id().with("md"), &self.markdown_input)
+            MarkdownLabel::new(ui.make_persistent_id("md"), &self.markdown_input)
               .font(FontId::proportional(14.0))
               .selectable(self.selectable)
               .interactable(self.interactable)
@@ -345,7 +340,7 @@ Regular, **bold**, *italic*, ***bold italic***, ~~strikethrough~~, and `inline c
 use egui_markdown::MarkdownLabel;
 
 fn render(ui: &mut egui::Ui) {
-    MarkdownLabel::new(ui.id().with("md"), "**Hello**")
+    MarkdownLabel::new(ui.make_persistent_id("md"), "**Hello**")
         .selectable(true)
         .show(ui);
 }

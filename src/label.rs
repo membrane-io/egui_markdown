@@ -416,7 +416,7 @@ impl Rendered {
 /// ```no_run
 /// # use eframe::egui;
 /// fn ui(ui: &mut egui::Ui) {
-///     egui_markdown::MarkdownLabel::new(ui.id().with("md"), "**Hello** world")
+///     egui_markdown::MarkdownLabel::new(ui.make_persistent_id("md"), "**Hello** world")
 ///         .show(ui);
 /// }
 /// ```

@@ -14,7 +14,7 @@
 //! # use eframe::egui;
 //! fn show_markdown(ui: &mut egui::Ui) {
 //!     let text = "# Hello\n\nThis is **bold** and *italic*.";
-//!     egui_markdown::MarkdownLabel::new(ui.id().with("md"), text).show(ui);
+//!     egui_markdown::MarkdownLabel::new(ui.make_persistent_id("md"), text).show(ui);
 //! }
 //! ```
 //!
@@ -22,7 +22,9 @@
 //!
 //! - `syntax_highlighting` (default) - Syntax-highlighted code blocks via `syntect`.
 //! - `extra_syntaxes` - The syntaxes of `bat` through `two-face`, with TypeScript, TSX and JSX.
-//! - `images` - Render images inline using `egui_extras` image support.
+//! - `images` - Render images through the `egui_extras` image loaders. Call
+//!   `egui_extras::install_image_loaders(ctx)` once at startup. The feature also turns on the HTTP
+//!   loader, so an image URL can be remote.
 //! - `svg` - SVG image support.
 //!
 // TODO: Math/LaTeX support. pulldown-cmark already supports `Options::ENABLE_MATH` which

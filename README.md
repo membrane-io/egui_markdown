@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/egui_markdown.svg)](https://crates.io/crates/egui_markdown)
 [![docs.rs](https://docs.rs/egui_markdown/badge.svg)](https://docs.rs/egui_markdown)
-[![license](https://img.shields.io/crates/l/egui_markdown.svg)](https://github.com/iamseeley/egui_markdown#license)
+[![license](https://img.shields.io/crates/l/egui_markdown.svg)](https://github.com/membrane-io/egui_markdown#license)
 ![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-brightgreen.svg)
 
 A markdown parser and renderer for [egui](https://github.com/emilk/egui).
@@ -27,7 +27,7 @@ use egui_markdown::MarkdownLabel;
 
 fn show_markdown(ui: &mut egui::Ui) {
     let text = "# Hello\n\nThis is **bold** and *italic*.";
-    MarkdownLabel::new(ui.id().with("md"), text).show(ui);
+    MarkdownLabel::new(ui.make_persistent_id("md"), text).show(ui);
 }
 ```
 
@@ -45,7 +45,7 @@ footnotes.
 ## Features
 
 - **Text selection** - rendered markdown is selectable in the same way as normal egui text.
-- **Scrollable code blocks** - a long line scrolls horizontally and does not wrap.
+- **Scrollable code blocks** - with `.scroll_code_blocks(true)`, a long line scrolls horizontally and does not wrap.
 - **Code block overlays** - a callback attaches buttons, such as a copy button or a language badge, to a code block.
 - **Syntax highlighting** - highlighting through `syntect`, with built-in base16-ocean dark and light themes, and support for custom themes.
 - **Custom link handlers** - the `LinkHandler` trait lets you style links, respond to clicks, and override the layout. It can also render a link as an inline or block-level widget.
@@ -61,7 +61,7 @@ footnotes.
 |---------|---------|-------------|
 | `syntax_highlighting` | Yes | Syntax-highlighted code blocks through `syntect`. |
 | `extra_syntaxes` | No | The syntaxes of `bat` through `two-face`, with TypeScript, TSX and JSX. It makes the binary larger. |
-| `images` | No | Inline image rendering through the `egui_extras` image support. |
+| `images` | No | Image rendering through the `egui_extras` image loaders. Call `egui_extras::install_image_loaders(ctx)` once at startup. The feature also turns on the HTTP loader, so an image URL can be remote. |
 | `svg` | No | SVG image support through `egui_extras`. |
 
 ### egui version

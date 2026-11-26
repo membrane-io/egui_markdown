@@ -1,8 +1,3 @@
-// The fork deprecates `Panel::show_inside` in favour of `show`, and published egui
-// deprecates `show` in favour of `show_inside`. Both spellings compile against both,
-// so this picks one rather than cfg-ing between them.
-#![allow(deprecated)]
-
 use eframe::egui;
 use egui_markdown::MarkdownLabel;
 
@@ -54,7 +49,7 @@ impl eframe::App for DemoApp {
       ui.heading("Rendered Output");
       ui.separator();
       egui::ScrollArea::vertical().show(ui, |ui| {
-        MarkdownLabel::new(ui.id().with("md"), &self.markdown_input).show(ui);
+        MarkdownLabel::new(ui.make_persistent_id("md"), &self.markdown_input).show(ui);
       });
     });
   }
