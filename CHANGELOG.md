@@ -113,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   does. Before, every click asked for a new tab. On the web, a plain click now opens the link in the same tab.
   ([#43])
 - Without the `images` feature, an image link shows the title of the image as its tooltip, in the text and
-  in a table cell. ([#NN])
+  in a table cell. ([#47])
 
 ### Fixed
 
@@ -150,8 +150,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   egui fonts do not have. A copy of the item gives `[ ]` or `[x]`, so that the copy keeps the state of the
   box. ([#44])
 - Without the `images` feature, an image link in the text showed no tooltip, opened an empty URL, did not
-  set `MarkdownLabelOutput::link_clicked`, and used the body font, not the font of the label. ([#NN])
-- With `url_in_tooltip`, a link with an empty href showed an empty tooltip. ([#NN])
+  set `MarkdownLabelOutput::link_clicked`, and used the body font, not the font of the label. ([#47])
+- With `url_in_tooltip`, a link with an empty href showed an empty tooltip. ([#47])
 
 ### Performance
 
@@ -222,4 +222,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#42]: https://github.com/membrane-io/egui_markdown/pull/42
 [#43]: https://github.com/membrane-io/egui_markdown/pull/43
 [#44]: https://github.com/membrane-io/egui_markdown/pull/44
-[#NN]: https://github.com/membrane-io/egui_markdown/pull/NN
+[#47]: https://github.com/membrane-io/egui_markdown/pull/47
