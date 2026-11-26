@@ -40,7 +40,7 @@ fn main() {
 const TABLE: &str = "\
 | Element | Count | Notes |
 |:--------|------:|:-----:|
-| Heading | 6 | Levels |
+| Heading | 6 | Six levels |
 | List | 3 | Nested |
 ";
 

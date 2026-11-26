@@ -1,8 +1,8 @@
 //! The screenshots of the README.
 //!
 //! Regenerate them with `README_SCREENSHOTS=1 cargo test --test readme_screenshots`. Without
-//! `README_SCREENSHOTS`, the tests do nothing. CI has no GPU adapter, and the text raster can differ between
-//! the wgpu backends, so the tests do not compare the images.
+//! `README_SCREENSHOTS`, the tests do nothing. The README images stay in plain git, so the tests do not compare
+//! them. `tests/elements.rs` holds the snapshot tests.
 // The screenshots show the syntect colors of the code block, so the test needs syntect.
 #![cfg(feature = "syntax_highlighting")]
 

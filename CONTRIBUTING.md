@@ -61,7 +61,8 @@ the repository:
 git lfs install
 ```
 
-`.gitattributes` puts each `.png` file in git-lfs. If you see an `InvalidSignature` error from a snapshot test,
+`.gitattributes` puts each `.png` file in git-lfs, except the README screenshots. A CI check fails when a `.png`
+file is not in git-lfs. If you see an `InvalidSignature` error from a snapshot test,
 make sure that git-lfs downloaded the images (`git lfs pull`).
 
 ## README screenshots
@@ -73,7 +74,7 @@ look of the label or to `examples/markdown/readme.md`:
 README_SCREENSHOTS=1 cargo test --test readme_screenshots
 ```
 
-Without `README_SCREENSHOTS`, the test does nothing, and it does not compare the images.
+Without `README_SCREENSHOTS`, the test does nothing.
 
 The README screenshots stay in plain git, not in git-lfs, because raw.githubusercontent.com and crates.io do not
 serve git-lfs content. `.gitattributes` excludes `docs/screenshots/` from git-lfs.
