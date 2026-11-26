@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `default_code_theme` is removed. Call `egui_extras::syntax_highlighting::CodeTheme::from_style`.
   ([#37])
 - `MarkdownStyle::ui` does not show the Dark and Light buttons. They changed the visuals of the whole
-  app. The `advanced` example shows them. ([#37])
+  app. The `style` example shows them. ([#37])
 
 ### Added
 

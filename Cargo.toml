@@ -13,7 +13,7 @@ repository = "https://github.com/membrane-io/egui_markdown"
 documentation = "https://docs.rs/egui_markdown"
 categories = ["gui"]
 keywords = ["egui", "markdown", "gui", "commonmark"]
-include = ["**/*.rs", "tests/fixtures/*.json", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
+include = ["**/*.rs", "examples/markdown/*.md", "tests/fixtures/*.json", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
 
 [dependencies]
 egui = { version = "0.37", default-features = false }
@@ -41,12 +41,12 @@ svg = ["egui_extras/svg"]
 all-features = true
 
 [[example]]
-name = "simple"
-path = "examples/simple.rs"
+name = "code_blocks"
+required-features = ["syntax_highlighting"]
 
 [[example]]
-name = "advanced"
-path = "examples/advanced.rs"
+name = "images"
+required-features = ["images"]
 
 [[bench]]
 name = "markdown"

@@ -23,16 +23,9 @@
       "problemMatcher": ["$rustc"]
     },
     {
-      "label": "Run Simple",
+      "label": "Run Editor",
       "type": "shell",
-      "command": "cargo run --example simple",
-      "group": "build",
-      "problemMatcher": ["$rustc"]
-    },
-    {
-      "label": "Run Advanced",
-      "type": "shell",
-      "command": "cargo run --example advanced",
+      "command": "cargo run --example editor",
       "group": "build",
       "problemMatcher": ["$rustc"]
     },

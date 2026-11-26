@@ -2193,11 +2193,8 @@ mod tests {
       format!("{RESUME_EDGES}\n<div>late html</div>\n\nMore."),
       format!("{RESUME_EDGES}\n[ref]: https://example.com\n"),
     ];
-    for example in ["examples/simple.rs", "examples/advanced.rs"] {
-      let source = std::fs::read_to_string(root.join(example)).unwrap();
-      let start = source.find("r#\"").unwrap() + 3;
-      let end = source[start..].find("\"#;").unwrap() + start;
-      docs.push(source[start..end].to_string());
+    for entry in std::fs::read_dir(root.join("examples/markdown")).unwrap() {
+      docs.push(std::fs::read_to_string(entry.unwrap().path()).unwrap());
     }
     for entry in std::fs::read_dir(root.join("tests/fixtures")).unwrap() {
       let path = entry.unwrap().path();
