@@ -19,6 +19,9 @@ cargo clippy --all-targets --features "$FEATURES" -- -D warnings
 echo "--- cargo test ---"
 cargo test --features "$FEATURES"
 
+echo "--- cargo test (no default features) ---"
+cargo test --no-default-features
+
 echo "--- cargo doc ---"
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --features "$FEATURES"
 
