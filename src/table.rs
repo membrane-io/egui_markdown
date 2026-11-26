@@ -349,10 +349,18 @@ fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_head
         link_clicked |=
           render_link_in_ui(ui, text, href, title.as_deref(), &link_font, &base_format, link_color, style.link_handler);
       }
-      // An image link uses no link handler and no title.
-      Token::Image { alt, url, .. } => {
-        link_clicked |=
-          render_link_in_ui(ui, image_link_text(alt, url), url, None, &link_font, &base_format, link_color, None);
+      // An image link uses no link handler. Its tooltip shows the title of the image.
+      Token::Image { alt, url, title, .. } => {
+        link_clicked |= render_link_in_ui(
+          ui,
+          image_link_text(alt, url),
+          url,
+          title.as_deref(),
+          &link_font,
+          &base_format,
+          link_color,
+          None,
+        );
       }
       Token::Text { text, style: text_style } => {
         let format = token_style_to_format(

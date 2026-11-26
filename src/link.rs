@@ -29,12 +29,15 @@ use std::ops::Range;
 ///
 /// - **Hover**: the cursor is a pointing hand, and the link is underlined unless [`LinkStyle::underline`]
 ///   is `false`. The tooltip is [`Self::hover_text`], else the title of the link, else the href when
-///   [`egui::Style::url_in_tooltip`] is set. An inline widget gets no underline and no tooltip.
+///   [`egui::Style::url_in_tooltip`] is set and the href is not empty. An inline widget gets no underline
+///   and no tooltip.
 /// - **Click**: a primary click or a middle click calls [`Self::click`]. When it returns `false`, the label
 ///   opens the href as [`egui::Hyperlink`] does: in a new tab after a middle click or a click with a modifier
 ///   key, else in the same tab. A click on a link with an empty href, which [`crate::heal`] gives until the
 ///   URL arrives, does nothing.
 /// - **Table cell**: a link in a table cell has the same hover and click as a link in the text.
+/// - **Image**: without the `images` feature, an image shows as a link with the hover and click of a link,
+///   but the label does not call the `LinkHandler` for it.
 /// - **Cache**: the label caches its layout. [`Self::id`] is part of the cache key.
 pub trait LinkHandler {
   /// The color of the link and whether it shows an underline on hover. Return `None` for the default

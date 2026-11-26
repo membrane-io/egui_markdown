@@ -112,6 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A click on a link opens it in a new tab only with a modifier key or the middle button, as `egui::Hyperlink`
   does. Before, every click asked for a new tab. On the web, a plain click now opens the link in the same tab.
   ([#43])
+- Without the `images` feature, an image link in a table cell shows the title of the image as its tooltip.
+  ([#47])
 
 ### Fixed
 
@@ -147,6 +149,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A task list item shows a checkbox that the label paints, not a `☐` or `☑` character that the default
   egui fonts do not have. A copy of the item gives `[ ]` or `[x]`, so that the copy keeps the state of the
   box. ([#44])
+- Without the `images` feature, an image link in the text showed no tooltip, opened an empty URL, did not
+  set `MarkdownLabelOutput::link_clicked`, and used the body font, not the font of the label. ([#47])
+- With `url_in_tooltip`, a link with an empty href showed an empty tooltip. ([#47])
 
 ### Performance
 
@@ -217,3 +222,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#42]: https://github.com/membrane-io/egui_markdown/pull/42
 [#43]: https://github.com/membrane-io/egui_markdown/pull/43
 [#44]: https://github.com/membrane-io/egui_markdown/pull/44
+[#47]: https://github.com/membrane-io/egui_markdown/pull/47

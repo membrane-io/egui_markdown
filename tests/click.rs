@@ -303,3 +303,92 @@ fn a_click_on_a_link_with_an_empty_href_in_a_table_cell_does_not_call_the_link_h
   assert!(result.urls.is_empty(), "{:?}", result.urls);
   assert!(result.link_clicked);
 }
+
+/// A point on the first row of a label, near its left edge.
+fn on_first_row(rect: Rect) -> Pos2 {
+  pos2(rect.left() + 12.0, rect.top() + 6.0)
+}
+
+/// Without the `images` feature, an image shows as a link. With `url_in_tooltip`, its tooltip shows the URL,
+/// also for an image in a paragraph.
+#[cfg(not(feature = "images"))]
+#[test]
+fn an_image_link_shows_its_url_in_a_tooltip_when_url_in_tooltip_is_set() {
+  for text in ["![image](https://img.example/a.png)", "![image](https://img.example/a.png) after the image"] {
+    assert!(!hover_and_click(text, None, false, on_first_row).tooltip, "{text:?}");
+    let result = hover_and_click(text, None, true, on_first_row);
+    assert_eq!(result.cursor, CursorIcon::PointingHand, "{text:?}");
+    assert!(result.tooltip, "{text:?}");
+  }
+}
+
+/// Without the `images` feature, an image link shows the title of the image as its tooltip.
+#[cfg(not(feature = "images"))]
+#[test]
+fn an_image_link_with_a_title_shows_a_tooltip() {
+  let text = "![image](https://img.example/a.png \"Image title\")";
+  let result = hover_and_click(text, None, false, on_first_row);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(result.tooltip);
+}
+
+/// Without the `images` feature, an image link in a table cell shows the title of the image as its tooltip.
+#[cfg(not(feature = "images"))]
+#[test]
+fn an_image_link_with_a_title_in_a_table_cell_shows_a_tooltip() {
+  let text = table_with_link("![image](https://img.example/a.png \"Image title\")");
+  let result = hover_and_click(&text, None, false, on_cell_link);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(result.tooltip);
+}
+
+/// Without the `images` feature, a click on an image link opens the URL and sets `link_clicked`.
+#[cfg(not(feature = "images"))]
+#[test]
+fn a_click_on_an_image_link_opens_its_url_and_reports_the_link() {
+  let result = hover_and_click("![image](https://img.example/a.png)", None, false, on_first_row);
+  assert_eq!(result.urls, ["https://img.example/a.png"]);
+  assert!(result.link_clicked);
+}
+
+/// Heal gives an image an empty URL until its URL arrives.
+#[cfg(not(feature = "images"))]
+#[test]
+fn a_click_on_an_image_link_with_an_empty_url_opens_nothing() {
+  let result = hover_and_click("![image]()", None, false, on_first_row);
+  assert!(result.urls.is_empty(), "{:?}", result.urls);
+  assert!(result.link_clicked);
+}
+
+/// Heal gives a link an empty href until its URL arrives. `url_in_tooltip` gives no tooltip for it.
+#[test]
+fn a_link_with_an_empty_href_shows_no_tooltip_when_url_in_tooltip_is_set() {
+  let result = hover_and_click("[paragraph link]()", None, true, on_first_row);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(!result.tooltip);
+  let text = table_with_link("[cell link]()");
+  let result = hover_and_click(&text, None, true, on_cell_link);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(!result.tooltip);
+}
+
+/// Without the `images` feature, an image link uses the font of the label.
+#[cfg(not(feature = "images"))]
+#[test]
+fn an_image_link_uses_the_font_of_the_label() {
+  let ctx = Context::default();
+  let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+  let mut height = 0.0;
+  for _ in 0..2 {
+    let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      let out = MarkdownLabel::new(Id::NULL.with("image_font"), "![image](https://img.example/a.png)")
+        .font(egui::FontId::proportional(40.0))
+        .hug_content(true)
+        .show(&mut child);
+      height = out.response.rect.height();
+    });
+    output.textures_delta.clear();
+  }
+  assert!(height >= 40.0, "{height}");
+}
