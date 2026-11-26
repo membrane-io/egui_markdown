@@ -18,6 +18,69 @@
 //! }
 //! ```
 //!
+//! # Supported markdown
+//!
+//! - CommonMark: headings (H1 to H6), paragraphs, bold, italic, strikethrough, inline code, fenced code
+//!   blocks, links, images, nested blockquotes, nested ordered and unordered lists, and horizontal rules.
+//! - GitHub Flavored Markdown: tables with column alignment, task lists and footnotes.
+//!
+//! # Style
+//!
+//! [`MarkdownStyle`] controls the look of each markdown element. Give a style to one label with
+//! [`MarkdownLabel::style`], or install one for all labels of a context with [`set_style`]:
+//!
+//! ```no_run
+//! # use eframe::egui;
+//! use egui_markdown::{MarkdownLabel, MarkdownStyle};
+//!
+//! fn ui(ui: &mut egui::Ui, text: &str) {
+//!     let mut style = MarkdownStyle::default();
+//!     style.heading.scales[0] = 2.0; // A bigger H1.
+//!     style.code_font_size = Some(14.0); // `None` uses the egui monospace size.
+//!     MarkdownLabel::new(ui.make_persistent_id("md"), text).style(&style).show(ui);
+//!
+//!     egui_markdown::set_style(ui.ctx(), style);
+//! }
+//! ```
+//!
+//! `MarkdownStyle::ui` shows an editor for each field of the style. The `style` example uses it.
+//!
+//! A label uses a registered `"bold"` font family for bold text. Without one, bold text has the strong
+//! text color of the egui visuals. A code block shows the italic, bold and underline that the syntect theme
+//! gives a scope. Bold code uses a registered `"mono-bold"` font family. Without one, bold code keeps the
+//! regular monospace family.
+//!
+//! # Clicks
+//!
+//! [`MarkdownLabel::show`] returns a [`MarkdownLabelOutput`]. The label handles a click on a link itself,
+//! so a parent that reacts to a click on the label checks both fields:
+//!
+//! ```no_run
+//! # use eframe::egui;
+//! # fn select_message() {}
+//! fn ui(ui: &mut egui::Ui, text: &str) {
+//!     let output = egui_markdown::MarkdownLabel::new(ui.make_persistent_id("md"), text).show(ui);
+//!     if output.response.clicked() && !output.link_clicked {
+//!         select_message();
+//!     }
+//! }
+//! ```
+//!
+//! # Other options
+//!
+//! - Links: [`LinkHandler`] changes the look of a link, its tooltip and its click. It can also show a
+//!   link as an inline widget or a block widget.
+//! - Streaming: [`MarkdownLabel::heal`] closes open constructs in incomplete text, and
+//!   [`MarkdownLabel::map_job`] changes the layout before egui shapes it, for example to fade in new text.
+//! - Wrapping: [`MarkdownLabel::wrap`], [`MarkdownLabel::truncate`], [`MarkdownLabel::extend`],
+//!   [`MarkdownLabel::max_lines`] and [`MarkdownLabel::overflow_wrap`].
+//! - Code themes: `MarkdownLabel::code_theme` sets the syntect theme of one label, and `set_code_themes`
+//!   installs a dark and a light theme for all labels of a context.
+//! - Code blocks: [`MarkdownLabel::code_block_buttons`], [`MarkdownLabel::scroll_code_blocks`] and
+//!   [`MarkdownLabel::shrink_code_blocks`].
+//! - Size: [`MarkdownLabel::hug_content`], [`MarkdownLabel::calculate_size`] and
+//!   [`MarkdownLabel::layout_in_ui`].
+//!
 //! # Feature Flags
 //!
 //! - `syntax_highlighting` (default) - Syntax-highlighted code blocks via `syntect`.

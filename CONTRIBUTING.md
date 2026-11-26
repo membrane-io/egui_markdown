@@ -29,6 +29,17 @@ This runs `cargo fmt --check`, `cargo clippy` for three feature sets, `cargo tes
 default features, `cargo doc`, and a wasm check. CI runs `cargo fmt --check`, `cargo clippy` on the library
 only, `cargo test` with and without the default features, `cargo doc` and the wasm check.
 
+## README screenshots
+
+A test renders the README screenshots in `docs/screenshots/` with wgpu. Run it again after a change to the
+look of the label or to `examples/markdown/readme.md`:
+
+```sh
+UPDATE_SNAPSHOTS=1 cargo test --test readme_screenshots
+```
+
+Without `UPDATE_SNAPSHOTS`, the test does nothing, so CI does not need a GPU.
+
 ## Pull request guidelines
 
 - Keep each pull request to a single change.
