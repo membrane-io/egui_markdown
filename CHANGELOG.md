@@ -181,6 +181,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bottom of the background. A code block between two paragraphs keeps its place.
 - The background of a code block now ends at the right edge of the label. Before, it ended 4 pt before
   that edge, and with `hug_content` it filled the available width past the label.
+- The background of a code block in a label without `scroll_code_blocks` started 4 pt left of the
+  label and of the paragraph text. It now starts at the left edge of the label, and the code text starts
+  after the left padding, as in a scrolling code block. The code text is 4 pt further right than before.
 - The code block buttons now use the padding of `CodeBlockStyle`. Before, they used fixed values.
 
 ## [0.1.0] - 2026-03-23

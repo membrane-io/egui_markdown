@@ -1311,10 +1311,12 @@ impl<'a> MarkdownLabel<'a> {
       size.x = size.x.max(code_right);
     }
     let decoration_width = if hug_content { size.x } else { available_width };
-    // The background of a code block ends at the right edge of the label, as the frame of a scrolling code
-    // block does.
+    // The background of a code block starts at the pad space that starts each row, because the layout puts
+    // the left padding after that space. It ends at the right edge of the label, as the frame of a scrolling
+    // code block does.
     let mut code_block_rects = code_block_rects;
     for r in &mut code_block_rects {
+      r.min.x += padding[0];
       r.max.x = size.x - padding[2];
     }
     // A code block grows its background by its padding past its rows. In the galley, a blank row above and
