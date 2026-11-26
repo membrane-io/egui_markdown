@@ -39,16 +39,20 @@ pub fn compute_code_block_rects(ui: &mut Ui, code_blocks: &[(usize, usize)], gal
   code_block_rects
 }
 
+/// The rect of the background of a code block: `bg_rect`, the rect of its rows relative to `origin`, grown
+/// by the padding of `code_style`.
+pub(crate) fn padded_code_block_rect(bg_rect: Rect, origin: Pos2, code_style: &CodeBlockStyle) -> Rect {
+  let p = &code_style.padding;
+  let r = bg_rect.translate(origin.to_vec2());
+  Rect::from_min_max(pos2(r.min.x - p[0], r.min.y - p[1]), pos2(r.max.x + p[2], r.max.y + p[3]))
+}
+
 /// Paint code block background and border.
 ///
 /// The fill and corner radius come from [`egui::Visuals::code`], as for the frame that
 /// [`crate::MarkdownLabel`] gives a scrolling code block, so both render paths show one code surface.
 pub fn paint_code_block_bg(ui: &Ui, bg_rect: Rect, origin: Pos2, code_style: &CodeBlockStyle) {
-  let mut r = bg_rect.translate(origin.to_vec2());
-  r.min.x -= code_style.padding[0];
-  r.min.y -= code_style.padding[1];
-  r.max.x += code_style.padding[2];
-  r.max.y += code_style.padding[3];
+  let r = padded_code_block_rect(bg_rect, origin, code_style);
   let code = &ui.visuals().code;
   ui.painter().rect_filled(r, code.corner_radius, code.bg_color);
   let stroke = Stroke::new(code_style.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);

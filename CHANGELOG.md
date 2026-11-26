@@ -175,6 +175,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   old fonts and painted parts of other glyphs.
 - After a change of `overflow_wrap` or of the wrap mode, `calculate_size` and the culling of text off the
   screen used a size from before the change.
+- A code block at the start or at the end of a label, of a blockquote or of a list item painted its
+  background 6 pt outside the label, over the widget above or below it. The label now allocates the
+  padding of that block, as an egui `Frame` allocates its inner margin, and the quote bar runs to the
+  bottom of the background. A code block between two paragraphs keeps its place.
+- The code block buttons now use the padding of `CodeBlockStyle`. Before, they used fixed values.
 
 ## [0.1.0] - 2026-03-23
 

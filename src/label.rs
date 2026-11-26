@@ -24,7 +24,7 @@ use crate::layout::{scrolling_code_galley, StreamingCodeCache};
 use crate::link::{InlineWidgetRow, LinkHandler};
 use crate::paint;
 use crate::parser;
-use crate::style::MarkdownStyle;
+use crate::style::{CodeBlockStyle, MarkdownStyle};
 use crate::table;
 use crate::types::{tokens_to_owned, Token};
 
@@ -1305,40 +1305,50 @@ impl<'a> MarkdownLabel<'a> {
       size.x = size.x.max(available_width);
     }
     let decoration_width = if hug_content { size.x } else { available_width };
+    // A code block grows its background by its padding past its rows. In the galley, a blank row above and
+    // below the block holds that padding. A block at the top or at the bottom of the galley has no blank row
+    // there, so the label allocates the padding, as a `Frame` allocates its inner margin.
+    let padding = &style.code_block.padding;
+    let pad_top = if code_block_rects.iter().any(|r| r.min.y <= 0.0) { padding[1] } else { 0.0 };
+    let pad_bottom = if code_block_rects.iter().any(|r| r.max.y >= size.y) { padding[3] } else { 0.0 };
+    size.y += pad_top + pad_bottom;
+    let galley_offset = epaint::vec2(0.0, pad_top);
 
     // An invisible Ui, such as the one calculate_size measures in, gets no hover, click or selection.
     if !self.interactable || !ui.is_visible() {
       let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+      let galley_pos = rect.min + galley_offset;
       set_label_widget_info(ui, &response, &galley);
       out.add_text(response);
-      paint_decorations(ui, hr_positions, &galley, &code_block_rects, rect.min, decoration_width, style);
-      ui.painter().galley(rect.min, galley.clone(), color);
+      paint_decorations(ui, hr_positions, &galley, &code_block_rects, galley_pos, decoration_width, style);
+      ui.painter().galley(galley_pos, galley.clone(), color);
       if let Some(handler) = self.link_handler {
-        paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, rect.min);
+        paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, galley_pos);
       }
       return size;
     }
 
     let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
+    let galley_pos = rect.min + galley_offset;
     set_label_widget_info(ui, &response, &galley);
-    paint_decorations(ui, hr_positions, &galley, &code_block_rects, response.rect.min, decoration_width, style);
+    paint_decorations(ui, hr_positions, &galley, &code_block_rects, galley_pos, decoration_width, style);
 
     if self.selectable {
-      LabelSelectionState::label_text_selection(ui, &response, rect.min, galley.clone(), color, Stroke::NONE);
+      LabelSelectionState::label_text_selection(ui, &response, galley_pos, galley.clone(), color, Stroke::NONE);
     } else {
-      ui.painter().galley(rect.min, galley.clone(), color);
+      ui.painter().galley(galley_pos, galley.clone(), color);
     }
 
     if let Some(button_fn) = self.code_block_buttons {
-      render_code_block_buttons(ui, button_fn, &code_block_rects, code_block_info, &response);
+      render_code_block_buttons(ui, button_fn, &code_block_rects, code_block_info, galley_pos, &style.code_block);
     }
 
     if let Some(handler) = self.link_handler {
-      paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, response.rect.min);
+      paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, galley_pos);
     }
 
     let hovered_section =
-      self.handle_hover(ui, tokens, &galley, section_to_token, inline_widget_spans, &response, rect, color);
+      self.handle_hover(ui, tokens, &galley, section_to_token, inline_widget_spans, &response, galley_pos, color);
 
     if self.interactable && response.clicked() {
       out.link_clicked |= self.handle_click(ui, tokens, section_to_token, hovered_section);
@@ -1356,7 +1366,7 @@ impl<'a> MarkdownLabel<'a> {
     section_to_token: &[usize],
     inline_widget_spans: &[(usize, usize, usize, FontId)],
     response: &Response,
-    rect: Rect,
+    galley_pos: Pos2,
     _color: Color32,
   ) -> Option<u32> {
     if !self.interactable || !response.hovered() {
@@ -1374,7 +1384,7 @@ impl<'a> MarkdownLabel<'a> {
       })
     });
 
-    let pos_in_galley = transformed_pointer_pos.map(|pos| pos - rect.min.to_vec2())?;
+    let pos_in_galley = transformed_pointer_pos.map(|pos| pos - galley_pos.to_vec2())?;
     let glyph_index = cursor_from_pos(galley, pos_in_galley)?;
     let index_to_section = |index: u32| -> Option<u32> { section_for_char(&galley.job, index) };
 
@@ -1420,8 +1430,8 @@ impl<'a> MarkdownLabel<'a> {
             // The row is as tall as the markdown line height, which can be taller than the font. So the
             // underline goes half way into the descent of the font, and not at the bottom of the row.
             let descent = sg.font_height - sg.font_ascent;
-            let y = ui.painter().round_to_pixel_center(rect.min.y + row.pos.y + sg.pos.y + descent * 0.5);
-            let x = rect.min.x;
+            let y = ui.painter().round_to_pixel_center(galley_pos.y + row.pos.y + sg.pos.y + descent * 0.5);
+            let x = galley_pos.x;
             ui.painter().line_segment([pos2(x + sg.pos.x, y), pos2(x + eg.pos.x + eg.advance_width, y)], stroke);
           }
         }
@@ -1544,14 +1554,11 @@ fn render_code_block_buttons(
   button_fn: &dyn Fn(&mut Ui, &str, &str),
   code_block_rects: &[Rect],
   code_block_info: &[(String, String)],
-  response: &Response,
+  galley_pos: Pos2,
+  code_style: &CodeBlockStyle,
 ) {
   for (bg_rect, (code_text, lang)) in code_block_rects.iter().zip(code_block_info.iter()) {
-    let mut bg_rect = bg_rect.translate(response.rect.min.to_vec2());
-    bg_rect.min.x -= 4.0;
-    bg_rect.min.y -= 6.0;
-    bg_rect.max.x += 12.0;
-    bg_rect.max.y += 6.0;
+    let bg_rect = paint::padded_code_block_rect(*bg_rect, galley_pos, code_style);
 
     let header_rect = Rect::from_min_max(pos2(bg_rect.min.x, bg_rect.min.y), pos2(bg_rect.max.x, bg_rect.min.y + 24.0));
     let mut child_ui =
