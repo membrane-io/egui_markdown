@@ -64,45 +64,28 @@ struct CachedCodeBlock {
   galley: Arc<Galley>,
 }
 
+/// Identity of everything the whole-document layout depends on: the text, the [`frame_key`], and the two
+/// settings that only the whole-document path uses.
 #[inline]
-fn hash_text(text: &str, style: &MarkdownStyle, code_font_size: f32, handler: Option<&dyn LinkHandler>) -> u64 {
+fn hash_text(text: &str, frame_key: u64, max_rows: Option<u32>, scroll_code_blocks: bool) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
-  text.hash(&mut hasher);
-  style.hash(&mut hasher);
-  code_font_size.to_bits().hash(&mut hasher);
-  if let Some(h) = handler {
-    h.id().hash(&mut hasher);
-  }
+  (text, frame_key, max_rows, scroll_code_blocks).hash(&mut hasher);
   hasher.finish()
 }
 
-/// Identity of everything a [`LayoutResult`] depends on.
+/// Identity of everything the [`LayoutResult`] of a flush range depends on: its tokens and the
+/// [`frame_key`].
 ///
 /// Deliberately excludes the wrap width and break flag: `build_layout` only seeds
 /// those on `job.wrap`, and `render_galley` overwrites them with the live values
 /// before shaping. Hashing them here would rebuild every job on every frame of a resize.
 #[inline]
-fn hash_flush_context(
-  tokens: &[Token<'_>],
-  style: &MarkdownStyle,
-  code_font_size: f32,
-  font: &FontId,
-  color: Color32,
-  dark_mode: bool,
-  handler: Option<&dyn LinkHandler>,
-) -> u64 {
+fn hash_flush_context(tokens: &[Token<'_>], frame_key: u64) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
   // Token content must be hashed: a flush range is keyed by its start index, and an edit
   // can change a range's content while leaving its start index and length untouched.
   tokens.hash(&mut hasher);
-  style.hash(&mut hasher);
-  code_font_size.to_bits().hash(&mut hasher);
-  font.hash(&mut hasher);
-  color.hash(&mut hasher);
-  dark_mode.hash(&mut hasher);
-  if let Some(h) = handler {
-    h.id().hash(&mut hasher);
-  }
+  frame_key.hash(&mut hasher);
   hasher.finish()
 }
 
@@ -129,19 +112,40 @@ impl Revision {
 }
 
 /// The inputs other than the tokens that a cached layout or height depends on: the style, the size of
-/// code blocks, the link handler, the font, the color and the theme. It costs the same on every frame,
-/// whatever the length of the document.
+/// code blocks, the link handler, the font, the color, the egui visuals that [`build_layout`] reads, the
+/// code theme, and the [`fonts_epoch`]. It costs the same on every frame, whatever the length of the
+/// document.
+///
+/// Each value that [`build_layout`] reads from `ui` must be here. The wrap width and the break flag are
+/// not, because the label applies them to the job on each frame.
 fn frame_key(
+  ui: &Ui,
   style: &MarkdownStyle,
   code_font_size: f32,
   handler: Option<&dyn LinkHandler>,
   font: &FontId,
   color: Color32,
-  dark_mode: bool,
+  code_theme: CodeThemeArg<'_>,
 ) -> u64 {
+  let visuals = ui.visuals();
+  let code = &visuals.code;
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
-  (style, code_font_size.to_bits(), handler.map(|h| h.id()), font, color, dark_mode).hash(&mut hasher);
+  (style, code_font_size.to_bits(), handler.map(|h| h.id()), font, color).hash(&mut hasher);
+  (visuals.dark_mode, visuals.hyperlink_color, visuals.strong_text_color()).hash(&mut hasher);
+  (code.text_color, code.stroke, code.corner_radius, code.margin).hash(&mut hasher);
+  (code_theme_identity(ui, code_theme), fonts_epoch(ui.ctx())).hash(&mut hasher);
   hasher.finish()
+}
+
+/// The identity of the syntect theme that a code block in the layout uses.
+#[cfg(feature = "syntax_highlighting")]
+fn code_theme_identity(ui: &Ui, code_theme: CodeThemeArg<'_>) -> usize {
+  crate::layout::theme_identity_ptr(ui, code_theme)
+}
+
+#[cfg(not(feature = "syntax_highlighting"))]
+fn code_theme_identity(_ui: &Ui, _code_theme: CodeThemeArg<'_>) -> usize {
+  0
 }
 
 /// Identity of everything a block's height depends on, except the width: the block token, the style
@@ -155,6 +159,57 @@ fn hash_block(token: &Token<'_>, style: &MarkdownStyle, font: &FontId) -> u64 {
   hasher.finish()
 }
 
+/// The state of [`fonts_epoch`] in one viewport.
+#[derive(Clone)]
+struct FontsEpoch {
+  /// The pass that last laid out `probe`.
+  pass: u64,
+  epoch: u64,
+  probe: Arc<Galley>,
+}
+
+/// A number that changes when the fonts change or egui resets the font atlas.
+///
+/// A layout depends on the fonts: a cached [`LayoutResult`] holds the width of list markers and of code
+/// indents, and a scrolling code block keeps its galley, which holds the position of each glyph in the font
+/// atlas. After `Context::set_fonts` or an atlas reset, which egui does when the atlas is more than 80% full,
+/// these values are wrong. egui has no public signal for these changes, but it clears its galley cache on each
+/// of them. So on the first call in a pass, this lays out a small fixed job and compares the galley with the
+/// galley of the last pass. A different galley gives a new epoch. A later call in the same pass reads only the
+/// epoch.
+///
+/// egui also drops a galley that a pass did not use. Each label calls this function in each pass through
+/// [`frame_key`], so the probe stays in the cache while a label shows. After a pass in which no label of the
+/// viewport shows, the epoch changes one time more than it must, and each label lays out again one time.
+///
+/// The cost is one small layout lookup per pass, shared by all labels of the viewport. The font atlas is shared
+/// by all viewports, but egui keeps a galley cache for each viewport, so each viewport has its own probe.
+///
+/// TODO(egui#3023): read a generation counter of the fonts if egui adds one, and remove the probe.
+fn fonts_epoch(ctx: &Context) -> u64 {
+  let id = fonts_epoch_id(ctx);
+  let pass = ctx.cumulative_pass_nr();
+  let previous = ctx.data(|d| d.get_temp::<FontsEpoch>(id));
+  if let Some(previous) = previous.as_ref().filter(|previous| previous.pass == pass) {
+    return previous.epoch;
+  }
+  let job = LayoutJob::simple("x".to_owned(), FontId::monospace(8.0), Color32::WHITE, f32::INFINITY);
+  let probe = ctx.fonts_mut(|f| f.layout_job(job));
+  // The stored probe keeps the old galley alive, so a new galley cannot have its address.
+  let epoch = match previous {
+    Some(previous) if Arc::ptr_eq(&previous.probe, &probe) => previous.epoch,
+    Some(previous) => previous.epoch.wrapping_add(1),
+    None => 0,
+  };
+  ctx.data_mut(|d| d.insert_temp(id, FontsEpoch { pass, epoch, probe }));
+  epoch
+}
+
+/// Where [`fonts_epoch`] keeps its [`FontsEpoch`] for the current viewport.
+fn fonts_epoch_id(ctx: &Context) -> Id {
+  Id::unique(("egui_markdown_fonts_epoch", ctx.viewport_id()))
+}
+
 /// Identity of everything a scrolling code-block galley depends on except the source text.
 #[cfg(feature = "syntax_highlighting")]
 #[inline]
@@ -165,6 +220,7 @@ fn hash_code_block_identity(
   dark_mode: bool,
   pixels_per_point: f32,
   code_theme: CodeThemeArg<'_>,
+  fonts_epoch: u64,
 ) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
   language.hash(&mut hasher);
@@ -172,6 +228,7 @@ fn hash_code_block_identity(
   dark_mode.hash(&mut hasher);
   pixels_per_point.to_bits().hash(&mut hasher);
   crate::layout::theme_identity_ptr(ui, code_theme).hash(&mut hasher);
+  fonts_epoch.hash(&mut hasher);
   hasher.finish()
 }
 
@@ -181,16 +238,18 @@ fn hash_code_block_context(
   text: &str,
   language: &str,
   code_font_size: f32,
-  dark_mode: bool,
+  color: Color32,
   pixels_per_point: f32,
   code_theme: CodeThemeArg<'_>,
+  fonts_epoch: u64,
 ) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
   text.hash(&mut hasher);
   language.hash(&mut hasher);
   code_font_size.to_bits().hash(&mut hasher);
-  dark_mode.hash(&mut hasher);
+  color.hash(&mut hasher);
   pixels_per_point.to_bits().hash(&mut hasher);
+  fonts_epoch.hash(&mut hasher);
   let _ = code_theme;
   hasher.finish()
 }
@@ -706,8 +765,8 @@ impl<'a> MarkdownLabel<'a> {
       self.text
     };
 
-    let text_hash = hash_text(text, style, code_font_size, self.link_handler);
-    let frame_key = frame_key(style, code_font_size, self.link_handler, &font, color, ui.visuals().dark_mode);
+    let frame_key = frame_key(ui, style, code_font_size, self.link_handler, &font, color, self.code_theme_arg());
+    let text_hash = hash_text(text, frame_key, self.resolve_wrap(ui).max_rows, self.scroll_code_blocks);
     let revision =
       |parse: &parser::ParseState| Revision { generation: parse.generation, kept_from: parse.kept_from, frame_key };
 
@@ -850,7 +909,7 @@ impl<'a> MarkdownLabel<'a> {
       match &tokens[i] {
         Token::Table(data) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, out, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -883,7 +942,7 @@ impl<'a> MarkdownLabel<'a> {
           let indent = code_block_indent(ui, previous, font, 0, style);
           let text_end = if indent.is_some() { i - 1 } else { i };
           let had_content = text_start < text_end;
-          self.flush_text_range(ui, tokens, font, color, text_start, text_end, style, code_font_size, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, text_end, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, out, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -924,7 +983,7 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(feature = "images")]
         Token::Image { url, width, height, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, out, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -949,7 +1008,7 @@ impl<'a> MarkdownLabel<'a> {
         #[cfg(not(feature = "images"))]
         Token::Image { alt, url, .. } => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let block_sz_id = self.id.with(("block_sz", i));
           if try_cull_block(ui, out, block_sz_id, revision, i, || hash_block(&tokens[i], style, font)) {
@@ -972,7 +1031,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::Link { text, href, .. } if self.link_handler.is_some_and(|h| h.is_block_widget(href)) => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
           let handler = self.link_handler.unwrap();
           if let Some(response) = handler.block_widget(ui, text, href) {
@@ -984,7 +1043,7 @@ impl<'a> MarkdownLabel<'a> {
         }
         Token::BlockquoteStart => {
           let had_content = text_start < i;
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
 
           // Find the matching BlockquoteEnd.
@@ -1045,7 +1104,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         Token::BlockquoteEnd => {
-          self.flush_text_range(ui, tokens, font, color, text_start, i, style, code_font_size, revision, out);
+          self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           i += 1;
           text_start = i;
         }
@@ -1056,7 +1115,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     // Flush remaining text.
-    self.flush_text_range(ui, tokens, font, color, text_start, end, style, code_font_size, revision, out);
+    self.flush_text_range(ui, tokens, font, color, text_start, end, style, revision, out);
   }
 
   /// Render a range of non-break tokens as an interactive galley.
@@ -1070,7 +1129,6 @@ impl<'a> MarkdownLabel<'a> {
     start: usize,
     end: usize,
     style: &MarkdownStyle,
-    code_font_size: f32,
     revision: Revision,
     out: &mut Rendered,
   ) {
@@ -1095,7 +1153,6 @@ impl<'a> MarkdownLabel<'a> {
     let apply_map_job = end == tokens.len();
     let wrap = self.resolve_wrap(ui);
     let max_width = wrap.max_width;
-    let dark_mode = ui.visuals().dark_mode;
     let cache_id = self.id.with(("flush", start));
     let size_cache_id = self.id.with(("flush_sz", start));
     // While the revision vouches for the tokens of the range, the cached entry knows their hash, and
@@ -1105,14 +1162,15 @@ impl<'a> MarkdownLabel<'a> {
       Some(cached) if cached.end == trimmed_end && revision.unchanged(cached.generation, cached.frame_key, end) => {
         cached.ctx_hash
       }
-      _ => hash_flush_context(token_slice, style, code_font_size, font, color, dark_mode, self.link_handler),
+      _ => hash_flush_context(token_slice, revision.frame_key),
     };
     let (generation, frame_key) = (revision.generation, revision.frame_key);
 
     // Viewport culling: skip layout+paint for off-screen segments. Unlike the layout, a
-    // measured size is only valid at the width it was measured at.
-    if let Some((cached_hash, cached_width, cached_size)) = ui.data(|d| d.get_temp::<(u64, f32, Vec2)>(size_cache_id)) {
-      if cached_hash == ctx_hash && cached_width == max_width {
+    // measured size is only valid at the width and the break flag it was measured at.
+    let measured_at = (ctx_hash, max_width, wrap.break_anywhere);
+    if let Some((cached_at, cached_size)) = ui.data(|d| d.get_temp::<((u64, f32, bool), Vec2)>(size_cache_id)) {
+      if cached_at == measured_at {
         let est_rect = Rect::from_min_size(ui.available_rect_before_wrap().min, cached_size);
         if !ui.is_rect_visible(est_rect) {
           out.add(ui.allocate_space(cached_size).1);
@@ -1141,7 +1199,7 @@ impl<'a> MarkdownLabel<'a> {
           apply_map_job,
           out,
         );
-        ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
+        ui.data_mut(|d| d.insert_temp(size_cache_id, (measured_at, size)));
         return;
       }
     }
@@ -1191,7 +1249,7 @@ impl<'a> MarkdownLabel<'a> {
       apply_map_job,
       out,
     );
-    ui.data_mut(|d| d.insert_temp(size_cache_id, (ctx_hash, max_width, size)));
+    ui.data_mut(|d| d.insert_temp(size_cache_id, (measured_at, size)));
   }
 
   #[allow(clippy::too_many_arguments)]
@@ -1574,6 +1632,7 @@ fn render_code_block(
       ui.visuals().dark_mode,
       ui.ctx().pixels_per_point(),
       code_theme,
+      fonts_epoch(ui.ctx()),
     );
     let cached = ui.data(|d| d.get_temp::<StreamingCodeCache>(cache_id));
     let updated = scrolling_code_galley(ui, text.as_ref(), lang, code_font_size, identity_hash, code_theme, cached);
@@ -1588,9 +1647,10 @@ fn render_code_block(
       text.as_ref(),
       lang,
       code_font_size,
-      ui.visuals().dark_mode,
+      crate::layout::plain_code_color(ui.visuals()),
       ui.ctx().pixels_per_point(),
       code_theme,
+      fonts_epoch(ui.ctx()),
     );
     match ui.data(|d| d.get_temp::<CachedCodeBlock>(cache_id)) {
       Some(cached) if cached.ctx_hash == ctx_hash => cached.galley,
@@ -1706,6 +1766,32 @@ pub fn last_non_whitespace_glyph(row: &Row) -> Option<&Glyph> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// While the label culls its only scrolling code block, the label keeps the probe of `fonts_epoch` in the egui
+  /// galley cache. So the epoch does not change, and the code block does not lay out again when it shows again.
+  #[test]
+  fn a_culled_code_block_keeps_the_fonts_probe() {
+    let ctx = Context::default();
+    let text = format!("{}```rust\nfn main() {{}}\n```", "Paragraph.\n\n".repeat(60));
+    let frame = |height: f32| {
+      let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(500.0, height));
+      let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+        MarkdownLabel::new(Id::NULL.with("md"), &text).scroll_code_blocks(true).show(&mut child);
+      });
+      output.textures_delta.clear();
+      ctx.data(|d| d.get_temp::<FontsEpoch>(fonts_epoch_id(&ctx))).expect("the label used the probe")
+    };
+    frame(4000.0);
+    let shown = frame(4000.0);
+    // The code block is below a screen of this height, so the label culls it.
+    for _ in 0..3 {
+      frame(100.0);
+    }
+    let shown_again = frame(4000.0);
+    assert!(shown_again.pass > shown.pass);
+    assert_eq!(shown_again.epoch, shown.epoch, "the probe left the egui galley cache while the code block was culled");
+  }
 
   /// A code block has the size of `TextStyle::Monospace` by default, and follows a change of that size,
   /// also after the label caches its layout. `Some(size)` keeps a fixed size. The blockquote makes the
