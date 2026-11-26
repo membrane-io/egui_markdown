@@ -109,6 +109,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code block does. ([#10])
 - Seven small examples replace the examples `simple` and `advanced`: `hello_world`, `editor`, `streaming`,
   `links`, `code_blocks`, `style` and `images`. Each example shows one topic. ([#39])
+- A click on a link opens it in a new tab only with a modifier key or the middle button, as `egui::Hyperlink`
+  does. Before, every click asked for a new tab. On the web, a plain click now opens the link in the same tab.
+  ([#43])
 
 ### Fixed
 
@@ -209,3 +212,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#37]: https://github.com/membrane-io/egui_markdown/pull/37
 [#39]: https://github.com/membrane-io/egui_markdown/pull/39
 [#42]: https://github.com/membrane-io/egui_markdown/pull/42
+[#43]: https://github.com/membrane-io/egui_markdown/pull/43

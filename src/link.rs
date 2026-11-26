@@ -1,6 +1,6 @@
 //! The [`LinkHandler`] trait, which changes how links look and what a click on a link does.
 
-use egui::{text::LayoutJob, Color32, FontId, Rect, Response, Ui, Vec2};
+use egui::{text::LayoutJob, Color32, FontId, OpenUrl, Rect, Response, Ui, Vec2};
 use std::ops::Range;
 
 /// Changes how the links of a [`crate::MarkdownLabel`] look and what a click on a link does.
@@ -30,9 +30,10 @@ use std::ops::Range;
 /// - **Hover**: the cursor is a pointing hand, and the link is underlined unless [`LinkStyle::underline`]
 ///   is `false`. The tooltip is [`Self::hover_text`], else the title of the link, else the href when
 ///   [`egui::Style::url_in_tooltip`] is set. An inline widget gets no underline and no tooltip.
-/// - **Click**: the label calls [`Self::click`]. When it returns `false`, the label opens the href in a new
-///   browser tab. A click on a link with an empty href, which [`crate::heal`] gives until the URL arrives,
-///   does nothing.
+/// - **Click**: a primary click or a middle click calls [`Self::click`]. When it returns `false`, the label
+///   opens the href as [`egui::Hyperlink`] does: in a new tab after a middle click or a click with a modifier
+///   key, else in the same tab. A click on a link with an empty href, which [`crate::heal`] gives until the
+///   URL arrives, does nothing.
 /// - **Table cell**: a link in a table cell has the same hover and click as a link in the text.
 /// - **Cache**: the label caches its layout. [`Self::id`] is part of the cache key.
 pub trait LinkHandler {
@@ -50,8 +51,8 @@ pub trait LinkHandler {
     None
   }
 
-  /// React to a click on the link. Return `true` when the handler used the click, and `false` to let the label
-  /// open the href in the browser.
+  /// React to a primary click or a middle click on the link. Return `true` when the handler used the click,
+  /// and `false` to let the label open the href, as [`egui::Hyperlink`] does.
   fn click(&self, _text: &str, _href: &str, _ui: &mut Ui) -> bool {
     false
   }
@@ -134,4 +135,16 @@ pub struct LinkStyle {
   pub color: Option<Color32>,
   /// Whether to draw an underline under the link text while the pointer is on the link.
   pub underline: bool,
+}
+
+/// Whether `response` received a click that opens a link: a primary click, or a middle click.
+pub(crate) fn link_clicked(response: &Response) -> bool {
+  response.clicked() || response.middle_clicked()
+}
+
+/// Open `url` after a [`link_clicked`] on `response`, the way [`egui::Hyperlink`] does: in a new tab after a
+/// middle-click or a click with a modifier key.
+pub(crate) fn open_clicked_url(ui: &Ui, response: &Response, url: &str) {
+  let new_tab = response.clicked_with_open_in_background();
+  ui.ctx().open_url(OpenUrl { url: url.to_owned(), new_tab });
 }
