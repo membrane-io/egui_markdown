@@ -498,27 +498,41 @@ pub fn build_layout(
             style_ref,
           )
           .unwrap_or(0.0);
+          // The left padding of the background is in the layout, after the pad space that starts each line.
+          // The pad space stays at the x where the row starts, because a leading space before the first
+          // glyph of a paragraph changes how egui wraps the paragraph.
+          let pad_left = style_ref.code_block.padding[0];
 
           {
             // Each source line is its own paragraph. The section that starts a line indents the
-            // wrapped rows of that line by its leading whitespace.
+            // wrapped rows of that line by its leading whitespace and by the left padding.
             let line_indents = code_line_indents(ui, &padded_text, code_font_size);
             let mut line_index = 0usize;
             let mut at_line_start = true;
+            // The left padding that the next text of the line starts with.
+            let mut pending_pad = 0.0;
             for section in highlighted_job.sections {
               let section_text = &highlighted_job.text[section.byte_range.as_usize()];
-              for part in section_text.split_inclusive('\n') {
-                let (leading_space, wrap_indent) = if at_line_start {
+              for mut part in section_text.split_inclusive('\n') {
+                if at_line_start {
                   let leading_space = if line_index > 0 { indent } else { 0.0 };
-                  (leading_space, indent + line_indents.get(line_index).copied().unwrap_or(0.0))
-                } else {
-                  (0.0, 0.0)
-                };
+                  let wrap_indent = indent + pad_left + line_indents.get(line_index).copied().unwrap_or(0.0);
+                  // `pad_code_body` starts each line with one space.
+                  let (pad, rest) = if part.starts_with(' ') { part.split_at(1) } else { ("", part) };
+                  push_section_with_wrap_indent(&mut job, pad, leading_space, wrap_indent, section.format.clone());
+                  section_to_token.push(token_index);
+                  pending_pad = pad_left;
+                  part = rest;
+                }
                 at_line_start = part.ends_with('\n');
                 if at_line_start {
                   line_index += 1;
                 }
-                push_section_with_wrap_indent(&mut job, part, leading_space, wrap_indent, section.format.clone());
+                if part.is_empty() {
+                  continue;
+                }
+                let leading_space = std::mem::take(&mut pending_pad);
+                push_section_with_wrap_indent(&mut job, part, leading_space, 0.0, section.format.clone());
                 section_to_token.push(token_index);
               }
             }

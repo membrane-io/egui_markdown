@@ -49,7 +49,8 @@ fn code_block_wrapped_rows_keep_line_indentation() {
   let rows = rows(md, 200.0);
 
   let unindented = rows.iter().find(|r| r.text.contains("fn main")).expect("first code line");
-  assert!(unindented.text_start() < 10.0, "an unindented line should start at the left edge");
+  // The code text starts after the pad space and the left padding of the background, 4 pt by default.
+  assert!(unindented.text_start() < 14.0, "an unindented line should start at the left edge");
 
   let start = rows.iter().position(|r| r.text.contains("let x")).expect("indented code line");
   let indent = rows[start].text_start();
