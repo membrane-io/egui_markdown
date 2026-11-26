@@ -1,4 +1,4 @@
-//! The [`LayoutJob`](egui::text::LayoutJob) of a list of tokens.
+//! The [`LayoutJob`] of a list of tokens.
 
 use egui::{
   text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,

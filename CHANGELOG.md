@@ -102,7 +102,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   right than before, and the code block buttons use the padding of `CodeBlockStyle`. ([#35])
 - A code block in the text galley gets the background fill of `egui::Visuals::code`, as a scrolling
   code block does. ([#10])
-- `egui_markdown` has no direct dependency on `epaint`. It uses `egui::epaint`. ([#37])
 
 ### Fixed
 

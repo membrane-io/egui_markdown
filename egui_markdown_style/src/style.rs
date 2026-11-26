@@ -101,9 +101,7 @@ impl MarkdownStyle {
 
   /// Show an editor for each field of the style, and a button that resets the style.
   pub fn ui(&mut self, ui: &mut Ui) {
-    if ui.button("Reset").clicked() {
-      *self = Self::default();
-    }
+    egui::reset_button(ui, self, "Reset");
 
     ui.separator();
     ui.label("Block spacing:");

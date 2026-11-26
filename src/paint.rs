@@ -10,9 +10,8 @@ use crate::style::{CodeBlockStyle, HorizontalRuleStyle};
 /// The background rect of each code block, from the character spans of the blocks in `galley`.
 ///
 /// A rect covers the rows of the block, from the x of its first glyph to the right edge of its widest row.
-/// [`paint_code_block_bg`] grows it by the padding of the style. [`crate::MarkdownLabel`] keeps its left edge,
-/// because the layout puts the left padding inside the rows, and moves its right edge to the right edge of the
-/// label.
+/// [`crate::MarkdownLabel`] keeps its left edge, moves its right edge to the right edge of the label, and grows
+/// it by the top and bottom padding of the style.
 pub fn compute_code_block_rects(code_blocks: &[(usize, usize)], galley: &Arc<Galley>) -> Vec<Rect> {
   let mut code_block_rects = Vec::new();
   for &(start, end) in code_blocks {
