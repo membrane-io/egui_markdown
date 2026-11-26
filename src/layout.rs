@@ -1,6 +1,6 @@
 //! The [`LayoutJob`] of a list of tokens.
 
-use egui::{text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Sense, Stroke, TextFormat, Ui};
+use egui::{text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, Sense, Stroke, TextFormat, Ui};
 
 use egui::epaint::text::ByteRangeExt as _;
 
@@ -212,8 +212,8 @@ pub(crate) fn link_tooltip(
   }
 }
 
-/// Open a link after a click on it. The label calls [`LinkHandler::click`], and opens the href in a new
-/// browser tab when the handler does not use the click.
+/// Open a link after a click on it. The label calls [`LinkHandler::click`], and opens the href when the handler
+/// does not use the click.
 ///
 /// A healed link has an empty href until its URL arrives, and a click on it opens nothing.
 pub(crate) fn open_link(ui: &mut Ui, handler: Option<&dyn LinkHandler>, text: &str, href: &str) {
@@ -222,7 +222,7 @@ pub(crate) fn open_link(ui: &mut Ui, handler: Option<&dyn LinkHandler>, text: &s
   }
   let handled = handler.is_some_and(|handler| handler.click(text, href, ui));
   if !handled {
-    ui.ctx().open_url(OpenUrl::new_tab(href.to_string()));
+    crate::link::open_clicked_url(ui, href);
   }
 }
 

@@ -1,6 +1,6 @@
 //! The [`LinkHandler`] trait, which changes how links look and what a click on a link does.
 
-use egui::{text::LayoutJob, Color32, FontId, Rect, Response, Ui, Vec2};
+use egui::{text::LayoutJob, Color32, FontId, OpenUrl, Rect, Response, Ui, Vec2};
 use std::ops::Range;
 
 /// Changes how the links of a [`crate::MarkdownLabel`] look and what a click on a link does.
@@ -51,7 +51,7 @@ pub trait LinkHandler {
   }
 
   /// React to a click on the link. Return `true` when the handler used the click, and `false` to let the label
-  /// open the href in the browser.
+  /// open the href, in a new tab when a modifier key is down, as [`egui::Hyperlink`] does.
   fn click(&self, _text: &str, _href: &str, _ui: &mut Ui) -> bool {
     false
   }
@@ -134,4 +134,10 @@ pub struct LinkStyle {
   pub color: Option<Color32>,
   /// Whether to draw an underline under the link text while the pointer is on the link.
   pub underline: bool,
+}
+
+/// Open `url` the way a click on an [`egui::Hyperlink`] does: in a new tab only when a modifier key is down.
+pub(crate) fn open_clicked_url(ui: &Ui, url: &str) {
+  let new_tab = ui.input(|i| i.modifiers.any());
+  ui.ctx().open_url(OpenUrl { url: url.to_owned(), new_tab });
 }

@@ -112,6 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A click on a link opens it in a new tab only when a modifier key is down, as `egui::Hyperlink` does.
+  Before, every click asked for a new tab.
 - A code block in a list item covered the item text and the next item. ([#29])
 - A table measured smaller in a sizing pass than it shows, so `Harness::fit_contents` or an auto-sized
   `Area` cut off the end of the label. ([#28])

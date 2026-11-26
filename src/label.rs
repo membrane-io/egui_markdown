@@ -1017,7 +1017,7 @@ impl<'a> MarkdownLabel<'a> {
           let response = ui.link(text);
           out.add(response.rect);
           if response.clicked() {
-            ui.ctx().open_url(egui::OpenUrl::new_tab(url.to_string()));
+            crate::link::open_clicked_url(ui, url);
           }
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
