@@ -87,7 +87,7 @@ Add `eframe` as well when you use it.
 
 ### `MarkdownStyle`
 
-Use [`MarkdownStyle`](https://docs.rs/egui_markdown/latest/egui_markdown/style/struct.MarkdownStyle.html) to control the appearance of every markdown element.
+Use [`MarkdownStyle`](https://docs.rs/egui_markdown/latest/egui_markdown/struct.MarkdownStyle.html) to control the appearance of every markdown element.
 
 ```rust
 use egui_markdown::{MarkdownLabel, MarkdownStyle};
@@ -110,7 +110,7 @@ egui_markdown::set_style(ctx, MarkdownStyle { code_font_size: Some(14.0), ..Defa
 
 ### `LinkHandler`
 
-Implement the [`LinkHandler`](https://docs.rs/egui_markdown/latest/egui_markdown/link/trait.LinkHandler.html) trait
+Implement the [`LinkHandler`](https://docs.rs/egui_markdown/latest/egui_markdown/trait.LinkHandler.html) trait
 to customize the style of a link, the tooltip, the response to a click, and the rendering.
 Implement `inline_widget_size()` and `paint_inline_widget()` to render a link as an inline widget,
 such as a user mention or a status badge. Implement `is_block_widget()` and `block_widget()` to

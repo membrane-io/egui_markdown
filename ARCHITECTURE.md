@@ -25,7 +25,7 @@ galley (`flush_text_range`), and renders each block as a separate egui widget. A
 tokens in a child `Ui`, so a quote can hold blocks too.
 
 `needs_segmentation` reads the tokens only. It must agree with each `segment_breaks.push` in
-`build_layout`. `tests/cache.rs::needs_segmentation_matches_build_layout` checks this. A `debug_assert!` in
+`build_layout`. `needs_segmentation_matches_build_layout` (`src/layout.rs`) checks this. A `debug_assert!` in
 `render` also fails when `needs_segmentation` chooses the whole-document path for a document that has a
 segment break.
 
@@ -115,8 +115,7 @@ compares each prefix with a full heal and parse.
 
 `benches/markdown.rs` holds Criterion benchmarks:
 
-- `parse_100_sections`, `hash_text_100_sections`, `hash_token_slice_100_sections` and `arc_clone_tokens`: the
-  operations that a cache hit costs.
+- `parse_100_sections` and `hash_token_slice_100_sections`: the operations that a cache hit costs.
 - `render_steady_state` and `render_steady_state_long`: frames with no change. The caches must make these
   cost almost nothing.
 - `render_resizing`: a new width on each frame. It guards the rule that the wrap width is not in a layout

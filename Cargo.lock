@@ -1182,7 +1182,6 @@ dependencies = [
  "egui_extras",
  "egui_markdown_style",
  "env_logger",
- "epaint",
  "pulldown-cmark",
  "serde_json",
  "syntect",

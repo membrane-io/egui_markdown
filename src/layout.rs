@@ -1,10 +1,10 @@
-//! The [`LayoutJob`](egui::text::LayoutJob) of a list of tokens.
+//! The [`LayoutJob`] of a list of tokens.
 
 use egui::{
   text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,
 };
 
-use epaint::text::ByteRangeExt as _;
+use egui::epaint::text::ByteRangeExt as _;
 
 use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, MarkdownStyle};
@@ -38,8 +38,6 @@ pub struct LayoutResult {
   pub segment_breaks: Vec<usize>,
   /// The character index of the space that holds each horizontal rule.
   pub hr_positions: Vec<usize>,
-  /// The blockquote depth at the end of the tokens.
-  pub blockquote_depth: u32,
   /// The inline widgets: `(start_char, end_char, token_index, font)`, with the font that
   /// [`LinkHandler::layout_link`] received. The [`LinkHandler`] paints each widget over its transparent
   /// characters after the label places the galley.
@@ -617,7 +615,6 @@ pub fn build_layout(
     code_block_info,
     segment_breaks,
     hr_positions,
-    blockquote_depth,
     inline_widget_spans,
   }
 }
@@ -650,8 +647,8 @@ pub(crate) fn pad_code_body(text: &str) -> String {
 mod syntect_code {
   use std::sync::{Arc, LazyLock};
 
+  use egui::epaint::text::Galley;
   use egui::{text::LayoutJob, Color32, FontFamily, FontId, Stroke, Ui};
-  use epaint::text::Galley;
   use syntect::easy::HighlightLines;
   use syntect::highlighting::{HighlightState, Highlighter, Style};
   use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
@@ -1046,8 +1043,8 @@ mod syntect_code {
   #[cfg(test)]
   mod tests {
     use super::*;
+    use egui::epaint::text::ByteRangeExt as _;
     use egui::{vec2, Context, RawInput, Rect, UiBuilder};
-    use epaint::text::ByteRangeExt as _;
     use std::fmt::Write as _;
 
     fn growing_body(n: usize) -> String {
@@ -1366,5 +1363,54 @@ mod section_tests {
       checked = true;
     });
     assert!(checked);
+  }
+
+  /// `needs_segmentation` decides the render path without laying out; it must agree with the
+  /// segment breaks `build_layout` would have produced.
+  #[test]
+  fn needs_segmentation_matches_build_layout() {
+    let docs = [
+      "Just **plain** text with `code` and a [link](https://example.com).",
+      "# Heading\n\nParagraph.\n\n---\n\nAfter the rule.",
+      "- one\n- two\n  - nested\n\n1. first\n2. second",
+      "Intro.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nOutro.",
+      "> quoted **text**\n>\n> > nested",
+      "Text\n\n```rust\nfn main() {}\n```\n\nMore.",
+      "![alt](https://example.com/x.png)",
+      "A footnote[^1].\n\n[^1]: body.",
+      "- [x] done\n- [ ] todo",
+    ];
+
+    let ctx = egui::Context::default();
+    let screen = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(500.0, 2000.0));
+    let style = MarkdownStyle::default();
+
+    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      for doc in docs {
+        for scroll_code_blocks in [false, true] {
+          let md = crate::parse(doc);
+          let predicted = needs_segmentation(&md.tokens, scroll_code_blocks, None);
+          let built = build_layout(
+            ui,
+            &md.tokens,
+            FontId::proportional(14.0),
+            Color32::WHITE,
+            None,
+            ui.available_width(),
+            false,
+            None,
+            scroll_code_blocks,
+            &style,
+            Default::default(),
+          );
+          assert_eq!(
+            predicted,
+            !built.segment_breaks.is_empty(),
+            "scroll_code_blocks={scroll_code_blocks} disagreement on:\n{doc}"
+          );
+        }
+      }
+    });
+    output.textures_delta.clear();
   }
 }

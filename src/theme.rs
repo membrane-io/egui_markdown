@@ -2,13 +2,7 @@
 
 use std::sync::Arc;
 
-use egui::{Context, Id, Style};
-
-/// The [`CodeTheme`](egui_extras::syntax_highlighting::CodeTheme) of `egui_extras` for the egui style `style`.
-#[cfg(feature = "syntax_highlighting")]
-pub fn default_code_theme(style: &Style) -> egui_extras::syntax_highlighting::CodeTheme {
-  egui_extras::syntax_highlighting::CodeTheme::from_style(style)
-}
+use egui::{Context, Id};
 
 /// The syntect themes that [`set_code_themes`] installs, in the temp data of the context.
 #[cfg(feature = "syntax_highlighting")]

@@ -17,7 +17,6 @@ include = ["**/*.rs", "tests/fixtures/*.json", "Cargo.toml", "LICENSE-MIT", "LIC
 
 [dependencies]
 egui = { version = "0.37", default-features = false }
-epaint = { version = "0.37", default-features = false }
 egui_extras = { version = "0.37", default-features = false }
 egui_markdown_style = { path = "./egui_markdown_style", version = "0.1.0" }
 pulldown-cmark = "0.13.0"

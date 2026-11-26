@@ -3,16 +3,16 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use egui::epaint::{
+  pos2,
+  text::{cursor::CCursor, CharIndex, Galley, Glyph, Row},
+};
 use egui::{
   text::LayoutJob, text_selection::LabelSelectionState, Align, Color32, Context, CursorIcon, FontId, FontSelection, Id,
   Layout, OpenUrl, Pos2, Rect, Response, Sense, Stroke, TextWrapMode, Ui, UiBuilder, Vec2,
 };
-use epaint::{
-  pos2,
-  text::{cursor::CCursor, CharIndex, Galley, Glyph, Row},
-};
 
-use epaint::text::ByteRangeExt as _;
+use egui::epaint::text::ByteRangeExt as _;
 
 #[cfg(not(feature = "syntax_highlighting"))]
 use crate::layout::highlight_code;
@@ -27,9 +27,6 @@ use crate::parser;
 use crate::style::MarkdownStyle;
 use crate::table;
 use crate::types::{tokens_to_owned, Token};
-
-#[cfg(feature = "syntax_highlighting")]
-pub use crate::theme::default_code_theme;
 
 /// The parse of the text and, on the whole-document path, its layout, in egui temp data.
 #[derive(Clone, Default)]
@@ -1318,7 +1315,7 @@ impl<'a> MarkdownLabel<'a> {
     let pad_top = if code_block_rects.iter().any(|r| r.min.y < 0.0) { padding[1] } else { 0.0 };
     let pad_bottom = if code_block_rects.iter().any(|r| r.max.y > size.y) { padding[3] } else { 0.0 };
     size.y += pad_top + pad_bottom;
-    let galley_offset = epaint::vec2(0.0, pad_top);
+    let galley_offset = egui::epaint::vec2(0.0, pad_top);
 
     // An invisible Ui, such as the one calculate_size measures in, gets no hover, click or selection.
     if !self.interactable || !ui.is_visible() {
@@ -1696,7 +1693,7 @@ fn render_code_block(
     }
     egui::ScrollArea::horizontal().id_salt(id).show(ui, |ui| {
       let sense = if selectable { Sense::click_and_drag() } else { Sense::hover() };
-      let (rect, response) = ui.allocate_exact_size(epaint::vec2(galley_width, galley_height), sense);
+      let (rect, response) = ui.allocate_exact_size(egui::epaint::vec2(galley_width, galley_height), sense);
       set_label_widget_info(ui, &response, &galley);
       let color = ui.visuals().text_color();
       if selectable {

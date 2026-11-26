@@ -28,34 +28,26 @@
 //! - `svg` - SVG image support.
 
 mod image;
-/// The [`MarkdownLabel`] widget.
-pub mod label;
-/// The layout job of a list of tokens.
-pub mod layout;
-/// The link handler trait and the link style.
-pub mod link;
-/// The painting of code block backgrounds and horizontal rules.
-pub mod paint;
-/// The CommonMark parser and [`heal`].
-pub mod parser;
-/// The style types, from `egui_markdown_style`.
-pub mod style;
-/// Table rendering.
-pub mod table;
-/// The syntect themes of code blocks.
+mod label;
+mod layout;
+mod link;
+mod paint;
+mod parser;
+mod style;
+mod table;
 #[cfg(feature = "syntax_highlighting")]
-pub mod theme;
-/// The token types of a parsed document.
-pub mod types;
+mod theme;
+mod types;
 
 pub use egui_markdown_style::{global_style, set_style};
-pub use label::{cursor_from_pos, glyph_at_index, last_non_whitespace_glyph, OverflowWrap};
-pub use label::{MarkdownLabel, MarkdownLabelOutput};
-pub use layout::CodeThemeArg;
+pub use label::{MarkdownLabel, MarkdownLabelOutput, OverflowWrap};
 pub use link::{InlineWidgetRow, LinkHandler, LinkStyle};
 pub use parser::{heal, parse};
-pub use style::MarkdownStyle;
+pub use style::{
+  BlockquoteStyle, CodeBlockStyle, HeadingStyle, HorizontalRuleStyle, InlineCodeStyle, ListStyle, MarkdownStyle,
+  TableStyle,
+};
 pub use types::{Alignment, Markdown, TableData, Token, TokenStyle};
 
 #[cfg(feature = "syntax_highlighting")]
-pub use theme::{code_theme, default_code_theme, set_code_themes};
+pub use theme::{code_theme, set_code_themes};

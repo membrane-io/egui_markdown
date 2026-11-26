@@ -201,6 +201,7 @@ impl eframe::App for AdvancedApp {
     if self.show_style_editor {
       egui::Panel::right("style_editor").default_size(280.0).show(ui, |ui| {
         ui.heading("Style");
+        egui::widgets::global_theme_preference_buttons(ui);
         ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
           self.markdown_style.ui(ui);
