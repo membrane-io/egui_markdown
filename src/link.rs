@@ -136,8 +136,14 @@ pub struct LinkStyle {
   pub underline: bool,
 }
 
-/// Open `url` the way a click on an [`egui::Hyperlink`] does: in a new tab only when a modifier key is down.
-pub(crate) fn open_clicked_url(ui: &Ui, url: &str) {
-  let new_tab = ui.input(|i| i.modifiers.any());
+/// Whether `response` got a click that opens a link: a primary click, or a middle-click.
+pub(crate) fn link_clicked(response: &Response) -> bool {
+  response.clicked() || response.middle_clicked()
+}
+
+/// Open `url` after a [`link_clicked`] on `response`, the way [`egui::Hyperlink`] does: in a new tab after a
+/// middle-click or a click with a modifier key.
+pub(crate) fn open_clicked_url(ui: &Ui, response: &Response, url: &str) {
+  let new_tab = response.clicked_with_open_in_background();
   ui.ctx().open_url(OpenUrl { url: url.to_owned(), new_tab });
 }
