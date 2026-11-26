@@ -199,8 +199,9 @@ fn push_section_with_wrap_indent(
 
 /// Render one link as a separate widget in `ui`, as a table cell does, and return its response.
 ///
-/// The link follows the [`LinkHandler`] as in a galley: a block widget, an inline widget, the sections of
-/// `layout_link`, `link_style`, the hover underline and the click.
+/// The link uses the [`LinkHandler`]: a block widget, an inline widget, the sections of `layout_link`,
+/// `link_style`, the hover underline and the click. Unlike a link in a galley, it shows no tooltip, and a
+/// click opens the href also when the href is empty.
 pub fn render_link_in_ui(
   ui: &mut Ui,
   text: &str,

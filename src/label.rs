@@ -35,8 +35,8 @@ pub use crate::theme::default_code_theme;
 #[derive(Clone, Default)]
 struct CachedMarkdownLayout {
   text_hash: u64,
-  /// `None` when the document takes the segmented render path, which lays out each flush
-  /// range separately and so has no use for a whole-document layout.
+  /// `None` when the document takes the segmented render path, which lays out each range of text
+  /// separately and so has no use for a whole-document layout.
   layout: Option<Arc<LayoutResult>>,
   /// The owned tokens, which hover and click read after a cache hit, and where the parse of the next text,
   /// such as the next delta of a streamed reply, can start.
@@ -73,7 +73,7 @@ fn hash_text(text: &str, frame_key: u64, max_rows: Option<u32>, scroll_code_bloc
   hasher.finish()
 }
 
-/// Identity of everything the [`LayoutResult`] of a flush range depends on: its tokens and the
+/// Identity of everything the [`LayoutResult`] of a range of text depends on: its tokens and the
 /// [`frame_key`].
 ///
 /// The wrap width and the break flag are not in the key. `build_layout` writes them into `job.wrap`, and
@@ -479,8 +479,8 @@ impl<'a> MarkdownLabel<'a> {
 
   /// The largest number of rows that the label shows.
   ///
-  /// With [`Self::truncate`], the label elides the text after this number of rows. The default is 1, so
-  /// `.truncate().max_lines(3)` shows three rows, as a CSS line clamp does.
+  /// With [`Self::truncate`], the label elides the text after this number of rows, as a CSS line clamp
+  /// does. Without `max_lines`, truncate shows one row.
   ///
   /// A document with a table, an image, a blockquote, a block widget link or a scrolling code block
   /// ignores this limit and shows all of its rows.
@@ -500,10 +500,10 @@ impl<'a> MarkdownLabel<'a> {
 
   /// Set the wrap mode to [`TextWrapMode::Truncate`].
   ///
-  /// The label elides the text after [`Self::max_lines`] rows, or after one row. Truncate always breaks a
-  /// row between any two characters, as [`OverflowWrap::BreakAll`] does, as the egui docs of
-  /// `TextWrapping::break_anywhere` advise for a row limit. [`Self::overflow_wrap`] has no effect. The
-  /// limits of [`Self::max_lines`] apply.
+  /// The label elides the text after [`Self::max_lines`] rows, or after one row. Truncate lets egui break a
+  /// row between any two characters, as [`OverflowWrap::BreakAll`] does. The egui docs of
+  /// `TextWrapping::break_anywhere` advise this when `max_rows` is 1. [`Self::overflow_wrap`] has no effect.
+  /// The limits of [`Self::max_lines`] apply.
   pub fn truncate(self) -> Self {
     self.wrap_mode(TextWrapMode::Truncate)
   }
@@ -515,7 +515,7 @@ impl<'a> MarkdownLabel<'a> {
 
   /// Where to break a run of text that is wider than the available width. The default is
   /// [`OverflowWrap::Normal`]. It has no effect with [`Self::extend`], which does not wrap, and with
-  /// [`Self::truncate`], which always breaks between any two characters.
+  /// [`Self::truncate`], which lets egui break a row between any two characters.
   pub fn overflow_wrap(self, overflow_wrap: OverflowWrap) -> Self {
     Self { overflow_wrap, ..self }
   }
@@ -591,7 +591,8 @@ impl<'a> MarkdownLabel<'a> {
   /// Change the [`LayoutJob`] just before egui shapes it into a galley. Pass `None` to keep the job.
   ///
   /// The label caches the job before the map, so the map can change on each frame. On the segmented path,
-  /// the map applies to the last range of text only.
+  /// the map applies only to a range of text that ends the document. When the document ends with a block,
+  /// the map has no effect.
   ///
   /// A map that hides the end of the text (alpha 0, as a reveal does) makes the label allocate only
   /// the rows that show. The hidden rows stay in the layout below the allocation, so the caller must

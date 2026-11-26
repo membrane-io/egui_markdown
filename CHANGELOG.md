@@ -9,26 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking
 
-- The crates need egui `main` (after egui 0.37.0) and Rust 1.95, for `LayoutSection::wrap_indent` and
-  `TextFormat::background_stroke`. Patch egui to `main`, as the README shows, until the next egui
-  release. Version 0.1.0 needed egui 0.33. ([#13], [#20])
+- The crates need egui `main` (after egui 0.37.0), for APIs that egui 0.37.0 does not have:
+  `Visuals::code`, `LayoutSection::wrap_indent`, and the `background_margin`,
+  `background_corner_radius` and `background_stroke` fields of `TextFormat`. Patch egui to `main`, as the
+  README shows, until the next egui release. Version 0.1.0 needed egui 0.33. ([#13], [#20])
+- The crates need Rust 1.95. Version 0.1.0 needed Rust 1.80. ([#14])
 - `MarkdownLabel::show` returns a `MarkdownLabelOutput`. Its `response` covers the whole label, and
   `link_clicked` is true for a click on a link. A caller that used `show` as the last expression of a
   closure that returns `()` must add a `;`. ([#11], [#32])
 - `MarkdownStyle::code_font_size` is an `Option<f32>`. `None`, the default, uses the size of
   `TextStyle::Monospace` in the egui style, as `ui.code()` does. Version 0.1.0 used a fixed `10.0`.
   ([#30])
-- `CodeBlockStyle::corner_radius` and the `InlineCodeStyle` fields `expand_bg_y`, `bg_corner_radius`,
-  `stroke_dark`, `stroke_light` and `stroke_width` are removed. Code blocks and inline code take their
-  corner radius, and inline code its margin and border, from `egui::Visuals::code`. ([#10], [#20])
+- `CodeBlockStyle::corner_radius` is removed. A code block takes its corner radius from
+  `egui::Visuals::code`. ([#20])
 - `LinkHandler::layout_link` receives the `&Ui`.
 - `LinkHandler::paint_inline_widget` runs once for each link, not once for each row. It receives the
   font of the link and an `InlineWidgetRow` for each row. ([#16])
-- `Token::Link` has a `style: TokenStyle` field. A pattern that names every field must add `style` or
-  `..`.
+- `Token::Link` has a `style: TokenStyle` field, and `Token::Image` has `width` and `height` fields. A
+  pattern that names every field must add them or `..`. ([#14], [#18])
+- `MarkdownStyle` has the new fields `list`, `table` and `line_height_ratio`, and `HorizontalRuleStyle`
+  has the new field `height`. A struct literal that names every field must add them or
+  `..Default::default()`. ([#2], [#3], [#10], [#34])
+- `LayoutResult::inline_widget_spans` holds `(start, end, token_index, FontId)`. Version 0.1.0 held
+  `(start, end, token_index)`. ([#16])
 - `layout::build_layout` takes `max_width` and `break_anywhere` and does not read `ui.wrap_mode()`.
   `layout::apply_inline_code_bg` takes `&egui::Visuals` in place of `dark_mode`.
-  `paint::compute_code_block_rects` takes no `Ui`. ([#6], [#20], [#35])
+  `paint::compute_code_block_rects` takes no `Ui`, and the right edge of each rect is the right edge of
+  the widest row of the block. Version 0.1.0 used the available width minus 16 points. ([#6], [#20],
+  [#35])
 
 ### Added
 
@@ -59,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uses a registered `"mono-bold"` font family. ([#15])
 - The HTML tags `<img>`, with `width` and `height`, and `<br>`, also in a table cell. ([#18])
 - `LinkStyle` derives `Clone`, `Copy`, `Debug`, `PartialEq` and `Eq`.
+- `MarkdownStyle::render_style`, the style editor of `MarkdownStyle::ui` without the dark, light and reset
+  buttons. ([#5])
 
 ### Changed
 
@@ -71,9 +81,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A nested list starts its marker at the x of the text of its parent item.
 - A horizontal rule has one blank row above it and one below it, and its row is
   `HorizontalRuleStyle::height` tall.
+- Inline code takes its margin, corner radius and border from `egui::Visuals::code`. With the default
+  egui visuals, inline code has rounded corners and 2 points of space on each side, and no border.
+  ([#10], [#20])
 - A shift-click extends the text selection, as on `egui::Label`. Shift no longer turns off selection.
+  An app that uses Shift for something else can pass `.selectable(!ui.input(|i| i.modifiers.shift))`.
+  ([#14])
 - `heal()` holds back a marker at the end of the text, such as `-`, `1.` or `**`, and the URL of an
-  open link, until more text shows what it is. A link with an empty href opens nothing. ([#12])
+  open link, until more text shows what it is. A click on a link with an empty href opens nothing,
+  except in a table cell. ([#12])
+- A link in a table cell uses the `LinkHandler`. Version 0.1.0 opened the URL of the link and did not
+  call the handler.
 - `MarkdownLabel::calculate_size` runs the render of `show` in an invisible child `Ui`, so it counts
   tables, blockquotes, images and scrolling code blocks. `calculate_size` and `layout_in_ui` heal the
   text when `heal` is on.
@@ -112,10 +130,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two tables in one label shared a scroll id. ([#2])
 - The scroll bar of a table was outside the border of the table. ([#17])
 - A table or an image outside the view kept its height from an old width. ([#18])
-- A `LinkHandler::layout_link` that reads the egui context in a table cell ran while the label held the
-  fonts lock. ([#19])
-- The published package did not include the test fixtures, and `egui_markdown_style` did not include
-  its license files.
 
 ### Performance
 
@@ -154,9 +168,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `render_galley` wrap-width fix - text re-wraps correctly when the container resizes.
 - Two examples: `simple` (editor + rendered output), `advanced` (style editor, custom link handlers, inline widgets, streaming simulation).
 
+[Unreleased]: https://github.com/membrane-io/egui_markdown/commits/main
+[0.1.0]: https://crates.io/crates/egui_markdown/0.1.0
 [#1]: https://github.com/membrane-io/egui_markdown/pull/1
 [#2]: https://github.com/membrane-io/egui_markdown/pull/2
 [#3]: https://github.com/membrane-io/egui_markdown/pull/3
+[#5]: https://github.com/membrane-io/egui_markdown/pull/5
 [#6]: https://github.com/membrane-io/egui_markdown/pull/6
 [#8]: https://github.com/membrane-io/egui_markdown/pull/8
 [#9]: https://github.com/membrane-io/egui_markdown/pull/9
@@ -169,7 +186,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#16]: https://github.com/membrane-io/egui_markdown/pull/16
 [#17]: https://github.com/membrane-io/egui_markdown/pull/17
 [#18]: https://github.com/membrane-io/egui_markdown/pull/18
-[#19]: https://github.com/membrane-io/egui_markdown/pull/19
 [#20]: https://github.com/membrane-io/egui_markdown/pull/20
 [#23]: https://github.com/membrane-io/egui_markdown/pull/23
 [#24]: https://github.com/membrane-io/egui_markdown/pull/24

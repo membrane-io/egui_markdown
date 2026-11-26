@@ -66,8 +66,9 @@ footnotes.
 
 ### egui version
 
-egui_markdown needs egui `main` until the next egui release, for `LayoutSection::wrap_indent`
-and `TextFormat::background_stroke`. Patch egui to it in your workspace:
+egui_markdown needs egui `main` until the next egui release, for APIs that egui 0.37.0 does not have,
+such as `Visuals::code` and `LayoutSection::wrap_indent`. It also needs Rust 1.95. Patch egui to `main`
+in your workspace:
 
 ```toml
 [patch.crates-io]

@@ -25,12 +25,15 @@ galley (`flush_text_range`), and renders each block as a separate egui widget. A
 tokens in a child `Ui`, so a quote can hold blocks too.
 
 `needs_segmentation` reads the tokens only. It must agree with each `segment_breaks.push` in
-`build_layout`. A `debug_assert!` in `render` fails when they disagree.
+`build_layout`. `tests/cache.rs::needs_segmentation_matches_build_layout` checks this. A `debug_assert!` in
+`render` also fails when `needs_segmentation` chooses the whole-document path for a document that has a
+segment break.
 
 ## Caches
 
-The label keeps its caches in egui temp data, under ids that it derives from the widget id. A streamed text
-must keep one widget id while it grows. An id that changes with the text empties all caches on each frame.
+The label keeps its caches in egui temp data. All caches except `FontsEpoch` have ids that the label
+derives from the widget id. A streamed text must keep one widget id while it grows. An id that changes with
+the text misses all caches on each frame.
 
 | Cache | Id | Key | It skips |
 |-------|----|-----|----------|
@@ -39,7 +42,7 @@ must keep one widget id while it grows. An id that changes with the text empties
 | Segment size | `id.with(("flush_sz", start))` | The `CachedFlushRange` key, the wrap width and the break flag | Layout and paint of a range outside the view. |
 | `BlockHeight` | `id.with(("block_sz", index))` | `hash_block` (the token, the style and the font), the frame key and the available width | Render and paint of a table, an image or a scrolling code block outside the view. |
 | `StreamingCodeCache` | `id.with(("code_block", index)).with("code_galley")` | The language, the code font size, dark mode, `pixels_per_point`, the code theme and the fonts epoch, and then the source | Syntect highlighting of a scrolling code block. |
-| `FontsEpoch` | one per viewport | none | Gives the number that changes when the fonts or the font atlas change. |
+| `FontsEpoch` | `Id::unique` of the viewport id | none | Nothing. It holds the fonts epoch of the viewport, which the frame key and the code block keys hold. |
 
 Without the `syntax_highlighting` feature, `CachedCodeBlock` replaces `StreamingCodeCache`, and its key holds
 the source too.
@@ -49,10 +52,11 @@ size, `LinkHandler::id`, the font, the text color, the egui visuals that `build_
 hyperlink color, the strong text color, `Visuals::code`), the identity of the code theme, and the fonts
 epoch. It costs the same on each frame, whatever the length of the document.
 
-**Scrolling code blocks.** When the identity is the same and the new source starts with the complete lines
-of the cached source, the cache keeps the syntect state after the last complete line. It highlights only the
-new complete lines and the incomplete last line. So the cost of a frame of a growing code block follows the
-length of the last line, not of the block.
+**Scrolling code blocks.** The source, the job and the galley of a `StreamingCodeCache` are each in an
+`Arc`, so the clone that `get_temp` makes on each frame copies no text. When the identity is the same and the
+new source starts with the complete lines of the cached source, the cache keeps the syntect state after the
+last complete line. It highlights only the new complete lines and the incomplete last line. So the cost of a
+frame of a growing code block follows the length of the last line, not of the block.
 
 **Skipped hashes.** Each `ParseState` has a generation. An incremental parse records the generation it
 started from and the number of tokens it kept (`kept_from`). A cache entry records the generation and the
@@ -64,21 +68,23 @@ the text once and hashes no segment.
 in the font atlas. egui gives no signal when the fonts change, but it clears its galley cache. `fonts_epoch`
 lays out a small probe job once per pass, and gives a new epoch when egui returns a new galley.
 
-## Rules that no test catches
+## Rules
 
 - **The wrap width is not in a layout key.** `build_layout` writes `max_width` and `break_anywhere` into the
   job, and `render_galley` writes the live values over them before egui shapes the job. A layout key with
   the width rebuilds each job on each frame of a resize. The size caches must hold the width, because a size
   depends on it.
 - **Each value that `build_layout` reads from `ui` is in the frame key.** A value that is not in it gives a
-  stale layout when the value changes.
+  stale layout when the value changes. The `a_label_follows_*` tests in `tests/cache.rs` check the font, the
+  visuals, the fonts and the code theme. They cannot check a value that a change adds.
 - **`max_rows` is in `hash_text`.** A change of `max_lines` or of `truncate` lays out the document again.
-  The segmented path ignores `max_rows`.
+  The segmented path ignores `max_rows`. `a_label_follows_a_change_of_max_lines` checks this.
 - **`build_layout` sets `max_rows` to `usize::MAX - 1` when there is no row limit.** A finite row count
   turns off the paragraph split of egui (egui#5411).
 - **`map_job` runs after the caches.** The cached job is the job before the map, so a map can change on
   each frame at no layout cost.
-- **`Token` is at most 88 bytes.** A test in `src/types.rs` fails when a new field makes it larger.
+- **`Token` is at most 88 bytes.** A long document has thousands of tokens, so the size of a token sets
+  the memory of the parse. `token_enum_size` in `src/types.rs` fails when a new field makes it larger.
 
 ## Incremental parse and heal
 

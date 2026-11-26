@@ -129,8 +129,8 @@ fn sentence_words(overflow: OverflowWrap, width: f32) -> Vec<String> {
   words
 }
 
-/// The default keeps words whole. An app uses `BreakAll` only for text with no spaces, so ordinary text must
-/// keep wrapping between words.
+/// The default keeps words whole. An app can use `BreakAll` only for text with no spaces, so ordinary text
+/// must keep wrapping between words.
 #[test]
 fn spaced_sentence_keeps_words_intact_by_default() {
   let words = sentence_words(OverflowWrap::Normal, 120.0);
