@@ -20,11 +20,14 @@ rules that a change must keep. The rustdoc of the public API describes how to us
    the code block backgrounds and the rules, then the galley, then the task list boxes, then the inline
    widgets of the `LinkHandler`. It handles hover, click and text selection on the galley.
 
-A task list item holds a transparent `[x]` or `[ ]` in the middle of a slot that is as wide for both, so
-that the text of a checked item and of an unchecked item starts at the same x. The default egui fonts have
-no checkbox glyph. The label paints the box over the placeholder with the look of an `egui::Checkbox` that
-is not interactive. The label paints the box after the galley. A text selection paints the placeholder in
-the selection text color, and the fill of the box covers it. A copy of the item gives the placeholder.
+A task list item holds a transparent `[x]` or `[ ]` in the middle of a slot that is as wide as the box, so
+that the text of a checked item and of an unchecked item starts at the same x. When a placeholder is wider
+than the box, as in a monospace font, the placeholder gets a smaller font with the same row height. The
+default egui fonts have no checkbox glyph. The label paints the box in the slot with the look of an
+`egui::Checkbox` that is not interactive. It finds the slot from the ` ` after the placeholder, because
+egui rounds the x of each glyph, and `[x]` and `[ ]` round differently. The label paints the box after the
+galley. A text selection paints the placeholder in the selection text color, and the fill of the box covers
+it. A copy of the item gives the placeholder, so that the copy keeps the state of each box.
 
 On the segmented path, `render_token_range` walks the tokens. It flushes the text between two blocks as one
 galley (`flush_text_range`), and renders each block as a separate egui widget. A blockquote renders its

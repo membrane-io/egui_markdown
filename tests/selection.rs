@@ -51,7 +51,7 @@ fn a_shift_click_extends_the_selection() {
   assert!(copied.starts_with("alpha beta gamma delt"), "copied {copied:?}");
 }
 
-/// A copy of a task list gives the markdown of each box, so that a paste is a task list again.
+/// A copy of a task list gives `[x]` or `[ ]` for each box, so that the copy keeps the state of each box.
 #[test]
 fn a_copy_of_a_task_list_gives_the_markdown_of_each_box() {
   let ends = |rect: Rect| (pos2(rect.left() + 1.0, rect.top() + 4.0), pos2(rect.right() - 1.0, rect.bottom() - 4.0));

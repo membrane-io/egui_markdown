@@ -695,8 +695,9 @@ impl<'a> MarkdownLabel<'a> {
   /// the galley, and the response. The caller paints the galley.
   ///
   /// The galley holds text only. A table, an image, a block widget and a scrolling code block have no
-  /// text to lay out, so they are left out, and a blockquote shows its text without its bar. Use
-  /// [`Self::show`] to render those. The text is healed when [`Self::heal`] is on.
+  /// text to lay out, so they are left out. A blockquote shows its text without its bar. A task list item
+  /// shows no box, because the caller paints only the galley. Use [`Self::show`] to render those. The text
+  /// is healed when [`Self::heal`] is on.
   pub fn layout_in_ui(self, ui: &mut Ui) -> (Pos2, Arc<Galley>, Response) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
     let style = self.style.unwrap_or(context_style.as_ref());

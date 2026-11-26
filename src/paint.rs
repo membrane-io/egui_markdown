@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use egui::epaint::{pos2, vec2, Galley};
-use egui::{Pos2, Rect, Stroke, StrokeKind, Ui, Vec2};
+use egui::{Pos2, Rect, Shape, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::style::{CodeBlockStyle, HorizontalRuleStyle};
 
@@ -86,9 +86,10 @@ pub fn paint_horizontal_rules(
 /// Paint the task list box of each `(char_index, checked, scale)` in `task_boxes` over its placeholder in
 /// `galley`, with `origin` as the position of the galley.
 ///
-/// The box has the look of a [`egui::Checkbox`] that is not interactive, at `scale` times its size. It is
-/// centered on the glyphs of the placeholder. The label does not paint a box whose placeholder wraps onto a
-/// second row.
+/// The box has the look of a [`egui::Checkbox`] that is not interactive, at `scale` times its size. The
+/// function puts the box in the slot that ends at the ` ` after the placeholder, not on the glyphs of the
+/// placeholder. egui rounds the x of each glyph to a pixel, and `[x]` and `[ ]` round differently. The label
+/// does not paint a box whose placeholder or ` ` wraps onto a second row.
 pub fn paint_task_boxes(ui: &Ui, task_boxes: &[(usize, bool, f32)], galley: &Galley, origin: Pos2) {
   if task_boxes.is_empty() {
     return;
@@ -101,8 +102,8 @@ pub fn paint_task_boxes(ui: &Ui, task_boxes: &[(usize, bool, f32)], galley: &Gal
     let row_chars = row_start..row_start + row.glyphs.len();
     row_start += row.char_count_including_newline().0;
     while let Some(&&(start, checked, scale)) = boxes.peek() {
-      // The placeholder `[x]` or `[ ]` has three characters.
-      let last = start + 2;
+      // The placeholder `[x]` or `[ ]` has three characters, and a ` ` follows it.
+      let last = start + 3;
       if last >= row_chars.end && start < row_start {
         // The placeholder wraps, or it is on a row that holds no glyph for it.
         boxes.next();
@@ -112,10 +113,10 @@ pub fn paint_task_boxes(ui: &Ui, task_boxes: &[(usize, bool, f32)], galley: &Gal
         break;
       }
       boxes.next();
-      // The layout puts the placeholder in the center of its slot.
-      let left = row.glyphs[start - row_chars.start].pos.x;
-      let right = row.glyphs[last - row_chars.start].max_x();
-      let center = origin + vec2((left + right) / 2.0, (row.min_y() + row.max_y()) / 2.0);
+      // The layout makes the slot as wide as the box, and the ` ` starts where the slot ends.
+      let side = spacing.icon_width * scale;
+      let slot_end = row.glyphs[last - row_chars.start].pos.x;
+      let center = origin + vec2(slot_end - side / 2.0, (row.min_y() + row.max_y()) / 2.0);
       paint_task_box(ui, center, checked, scale, spacing, visuals);
     }
   }
@@ -142,8 +143,7 @@ fn paint_task_box(
     // At the body size, the check mark has the width of the egui check mark. The width increases with the font
     // size, so that the mark is not thin in large text.
     let stroke = Stroke::new(visuals.fg_stroke.width * scale, visuals.fg_stroke.color);
-    let bottom = pos2(small.center().x, small.bottom());
-    painter.line_segment([pos2(small.left(), small.center().y), bottom], stroke);
-    painter.line_segment([bottom, small.right_top()], stroke);
+    let points = vec![pos2(small.left(), small.center().y), pos2(small.center().x, small.bottom()), small.right_top()];
+    painter.add(Shape::line(points, stroke));
   }
 }

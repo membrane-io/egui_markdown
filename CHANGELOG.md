@@ -145,7 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A link in a table cell showed no tooltip, opened an empty URL, and did not set
   `MarkdownLabelOutput::link_clicked`. ([#42])
 - A task list item shows a checkbox that the label paints, not a `☐` or `☑` character that the default
-  egui fonts do not have. A copy of the item gives `[ ]` or `[x]`. ([#44])
+  egui fonts do not have. A copy of the item gives `[ ]` or `[x]`, so that the copy keeps the state of the
+  box. ([#44])
 
 ### Performance
 

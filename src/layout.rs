@@ -40,7 +40,8 @@ pub struct LayoutResult {
   pub hr_positions: Vec<usize>,
   /// The task list boxes: `(char_index, checked, scale)`. `char_index` is the start of the transparent `[x]`
   /// or `[ ]` that holds the box, and `scale` is the size of the label font divided by the size of the body
-  /// font. The label paints each box over its placeholder after it places the galley.
+  /// font. The slot of the placeholder is as wide as the box, and the ` ` after the placeholder starts at the
+  /// end of the slot. The label paints each box in its slot after it places the galley.
   pub task_boxes: Vec<(usize, bool, f32)>,
   /// The inline widgets: `(start_char, end_char, token_index, font)`, with the font that
   /// [`LinkHandler::layout_link`] received. The [`LinkHandler`] paints each widget over its transparent
@@ -630,19 +631,27 @@ pub fn build_layout(
       }
       Token::TaskListMarker { checked, .. } => {
         // The default egui fonts have no checkbox glyph, so the label paints the box over a transparent
-        // placeholder. A copy of the text gives the markdown of the box.
+        // placeholder. A copy of the text gives `[x]` or `[ ]`, so that the copy keeps the state of the box.
         let placeholder = if *checked { "[x]" } else { "[ ]" };
         let scale = font_id.size / TextStyle::Body.resolve(ui.style()).size;
         let side = ui.spacing().icon_width * scale;
-        // The slot is as wide for both placeholders, so the text of each item starts at the same x. The
-        // placeholder is in the center of the slot, so the label paints the box at the center of its glyphs.
-        let (width, slot) = ui.ctx().fonts_mut(|f| {
-          let mut width = |text: &str| -> f32 { text.chars().map(|c| f.glyph_width(&font_id, c)).sum() };
-          (width(placeholder), width("[x]").max(width("[ ]")).max(side))
+        // The slot of the placeholder is as wide as the box, so the box covers the placeholder and the text of
+        // each item starts at the same x. When the wider placeholder is wider than the box, as in a monospace
+        // font, the placeholder gets a smaller font. Both placeholders get the same font. The row keeps the
+        // body row height, because the format keeps its line height.
+        let mut format = transparent_format.clone();
+        let width = ui.ctx().fonts_mut(|f| {
+          let mut width = |text: &str, font: &FontId| -> f32 { text.chars().map(|c| f.glyph_width(font, c)).sum() };
+          let wider = width("[x]", &font_id).max(width("[ ]", &font_id));
+          if wider > side {
+            format.font_id.size *= side / wider;
+          }
+          width(placeholder, &format.font_id)
         });
-        let margin = (slot - width) / 2.0;
+        // The placeholder is in the center of the slot. The leading space of the next " " ends the slot.
+        let margin = ((side - width) / 2.0).max(0.0);
         task_boxes.push((job.text.chars().count(), *checked, scale));
-        push_section(&mut job, placeholder, margin, transparent_format.clone());
+        push_section(&mut job, placeholder, margin, format);
         section_to_token.push(token_index);
         push_section(&mut job, " ", margin, base_format.clone());
         section_to_token.push(token_index);
@@ -1490,6 +1499,48 @@ mod section_tests {
       };
       assert_eq!(x_of("alpha"), x_of("beta"), "the text of the top level items");
       assert_eq!(x_of("gamma"), x_of("delta"), "the text of the nested items");
+      checked = true;
+    });
+    output.textures_delta.clear();
+    assert!(checked);
+  }
+
+  /// In a monospace font, `[x]` is wider than the box. The placeholder gets a smaller font, so that its glyphs
+  /// stay in the slot of the box, and the row keeps the body row height.
+  #[test]
+  fn a_placeholder_wider_than_the_box_fits_in_the_slot() {
+    let markdown = crate::parse("- [x] alpha\n- [ ] beta\n- gamma");
+    let ctx = egui::Context::default();
+    ctx.set_missing_glyph_policy(egui::MissingGlyphPolicy::Panic);
+    let mut checked = false;
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+      let style = MarkdownStyle::default();
+      let font = FontId::monospace(14.0);
+      let wider = ui.fonts_mut(|f| "[x]".chars().map(|c| f.glyph_width(&font, c)).sum::<f32>());
+      let side = ui.spacing().icon_width * 14.0 / TextStyle::Body.resolve(ui.style()).size;
+      assert!(wider > side, "the test needs a placeholder wider than the box");
+      let color = ui.visuals().text_color();
+      let layout =
+        build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+      let galley = ui.fonts_mut(|f| f.layout_job(layout.job.clone()));
+      let mut row_start = 0;
+      let mut task_rows = 0;
+      for row in &galley.rows {
+        let text: String = row.glyphs.iter().map(|g| g.chr).collect();
+        if let Some(&(start, ..)) = layout.task_boxes.iter().find(|&&(start, ..)| start >= row_start) {
+          if start < row_start + row.glyphs.len() {
+            let index = start - row_start;
+            let slot_end = row.glyphs[index + 3].pos.x;
+            let tolerance = 0.5;
+            assert!(row.glyphs[index].pos.x >= slot_end - side - tolerance, "the start of the placeholder in {text:?}");
+            assert!(row.glyphs[index + 2].max_x() <= slot_end + tolerance, "the end of the placeholder in {text:?}");
+            task_rows += 1;
+          }
+        }
+        assert_eq!(row.height(), galley.rows[2].height(), "the height of the row {text:?}");
+        row_start += row.char_count_including_newline().0;
+      }
+      assert_eq!(task_rows, 2);
       checked = true;
     });
     output.textures_delta.clear();
