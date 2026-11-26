@@ -519,7 +519,7 @@ fn token_style_to_format(
 mod tests {
   use super::*;
   use crate::types::TokenStyle;
-  use epaint::text::ByteRangeExt as _;
+  use egui::epaint::text::ByteRangeExt as _;
   use pulldown_cmark::CowStr;
 
   /// Inline code in a cell takes the margin and stroke of [`egui::Visuals::code`], so its background

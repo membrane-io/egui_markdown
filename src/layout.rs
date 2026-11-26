@@ -4,7 +4,7 @@ use egui::{
   text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,
 };
 
-use epaint::text::ByteRangeExt as _;
+use egui::epaint::text::ByteRangeExt as _;
 
 use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, MarkdownStyle};
@@ -647,8 +647,8 @@ pub(crate) fn pad_code_body(text: &str) -> String {
 mod syntect_code {
   use std::sync::{Arc, LazyLock};
 
+  use egui::epaint::text::Galley;
   use egui::{text::LayoutJob, Color32, FontFamily, FontId, Stroke, Ui};
-  use epaint::text::Galley;
   use syntect::easy::HighlightLines;
   use syntect::highlighting::{HighlightState, Highlighter, Style};
   use syntect::parsing::{ParseState, ScopeStack, SyntaxSet};
@@ -1043,8 +1043,8 @@ mod syntect_code {
   #[cfg(test)]
   mod tests {
     use super::*;
+    use egui::epaint::text::ByteRangeExt as _;
     use egui::{vec2, Context, RawInput, Rect, UiBuilder};
-    use epaint::text::ByteRangeExt as _;
     use std::fmt::Write as _;
 
     fn growing_body(n: usize) -> String {
