@@ -41,6 +41,11 @@ pub struct MarkdownStyle {
   pub table: TableStyle,
   /// Vertical spacing between block elements in pixels.
   pub block_spacing: f32,
+  /// The height of a row of body text divided by the label font size. The default is 17/13, which gives
+  /// 17 point rows for the 13 point Body font of the default egui style. A row is never shorter than the
+  /// row height of its tallest font, such as the font of a heading.
+  #[cfg_attr(feature = "serde", serde(default = "default_line_height_ratio"))]
+  pub line_height_ratio: f32,
   /// Font size for code blocks. `None`, the default, uses the size of [`egui::TextStyle::Monospace`]
   /// in the egui style, as `ui.code()` does. `Some(size)` sets a fixed size.
   pub code_font_size: Option<f32>,
@@ -59,10 +64,15 @@ impl Default for MarkdownStyle {
       list: ListStyle::default(),
       table: TableStyle::default(),
       block_spacing: 8.0,
+      line_height_ratio: default_line_height_ratio(),
       code_font_size: None,
       default_code_language: String::new(),
     }
   }
+}
+
+fn default_line_height_ratio() -> f32 {
+  17.0 / 13.0
 }
 
 impl Hash for MarkdownStyle {
@@ -75,6 +85,7 @@ impl Hash for MarkdownStyle {
     self.list.hash(state);
     self.table.hash(state);
     self.block_spacing.to_bits().hash(state);
+    self.line_height_ratio.to_bits().hash(state);
     self.code_font_size.map(f32::to_bits).hash(state);
     self.default_code_language.hash(state);
   }
@@ -111,6 +122,8 @@ impl MarkdownStyle {
   pub fn render_style(&mut self, ui: &mut Ui) {
     ui.label("Block spacing:");
     ui.add(DragValue::new(&mut self.block_spacing).range(0.0..=40.0).speed(0.5));
+    ui.label("Line height ratio:");
+    ui.add(DragValue::new(&mut self.line_height_ratio).range(1.0..=3.0).speed(0.01));
 
     ui.separator();
 

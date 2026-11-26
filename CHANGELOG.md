@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `MarkdownStyle::line_height_ratio`, the height of a row of body text divided by the label font size.
 - The `egui_markdown_style` crate, which holds `MarkdownStyle` and the other style types, so that an
   application can store a style without a dependency on the renderer.
 - `set_style` and `global_style`, which install and read one `MarkdownStyle` for an `egui::Context`. A
@@ -53,6 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The row height of the label follows the font size. A row of body text is
+  `MarkdownStyle::line_height_ratio` times the label font size, and never shorter than the row height of
+  the font. The default ratio is 17/13, so the 13 point Body font of the default egui style keeps its 17
+  point rows. Before, every row was 17 points tall, so text larger than 13 points overlapped the next row
+  and smaller text had large gaps. A heading or inline code row is as tall as its font or taller. Before, the
+  rows of a wrapped heading overlapped, also at the default size. Headings at the default size now get
+  taller rows (H1 24, H2 20 and H3 18 points), so a label with a heading is taller than before.
 - Inline code uses `FontFamily::Monospace`, as a code block does. It keeps the size of the text
   around it. Bold inline code uses the `"mono-bold"` family when the app registers one.
 - **Breaking:** `MarkdownStyle::code_font_size` is an `Option<f32>`. `None`, the default, uses the
