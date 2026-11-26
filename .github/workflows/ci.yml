@@ -29,6 +29,8 @@ jobs:
             run: cargo clippy -- -D warnings
           - name: Test
             run: cargo test
+          - name: Test (no default features)
+            run: cargo test --no-default-features
           - name: Doc
             run: cargo doc --no-deps
           - name: Check WASM

@@ -25,9 +25,9 @@ Run the local CI script:
 ./check.sh
 ```
 
-This runs `cargo fmt --check`, `cargo clippy` for three feature sets, `cargo test`, `cargo doc`, and a
-wasm check. CI runs `cargo fmt --check`, `cargo clippy` on the library only, `cargo test`, `cargo doc` and
-the wasm check, with the default features only.
+This runs `cargo fmt --check`, `cargo clippy` for three feature sets, `cargo test` with and without the
+default features, `cargo doc`, and a wasm check. CI runs `cargo fmt --check`, `cargo clippy` on the library
+only, `cargo test` with and without the default features, `cargo doc` and the wasm check.
 
 ## Pull request guidelines
 
