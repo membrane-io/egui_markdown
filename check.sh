@@ -17,10 +17,10 @@ echo "--- clippy (every feature but extra_syntaxes) ---"
 cargo clippy --all-targets --features "$FEATURES" -- -D warnings
 
 echo "--- cargo test ---"
-cargo test --features "$FEATURES"
+cargo test --features "$FEATURES" --no-fail-fast
 
 echo "--- cargo test (no default features) ---"
-cargo test --no-default-features
+cargo test --no-default-features --no-fail-fast
 
 echo "--- cargo doc ---"
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --features "$FEATURES"

@@ -27,10 +27,6 @@ jobs:
         include:
           - name: Clippy
             run: cargo clippy -- -D warnings
-          - name: Test
-            run: cargo test
-          - name: Test (no default features)
-            run: cargo test --no-default-features
           - name: Doc
             run: cargo doc --no-deps
           - name: Check WASM
@@ -43,3 +39,27 @@ jobs:
           targets: ${{ matrix.target }}
       - run: ${{ matrix.run }}
 
+  test:
+    name: Test
+    # The snapshot tests need a GPU. A macOS runner has one, and the snapshots come from macOS.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: dtolnay/rust-toolchain@stable
+
+      # `--no-fail-fast` runs all tests after a failure, so the artifact holds all new snapshots.
+      - name: Test
+        run: cargo test --no-fail-fast
+
+      - name: Test (no default features)
+        if: always()
+        run: cargo test --no-default-features --no-fail-fast
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: "**/tests/snapshots"
