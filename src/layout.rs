@@ -10,10 +10,22 @@ use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, MarkdownStyle};
 use crate::types::Token;
 
-/// Override for markdown body/table cell row height (`TextFormat::line_height`).
+/// The row height of body text (`TextFormat::line_height`) for the label font size `font_size`.
 ///
-/// `None` uses egui’s default (font metrics).
-pub(crate) const MARKDOWN_LINE_HEIGHT_POINTS: Option<f32> = Some(17.0);
+/// egui centers the text in a row that is taller than the font, so the extra height is space between
+/// two rows. The row height is 17/13 of the font size: 17 points for 13 point text, the Body size of the
+/// default egui style. A ratio, not a fixed height, keeps the same space between rows when an application
+/// changes the font size. The function multiplies before it divides, so 13 points gives exactly 17 points.
+pub(crate) fn body_line_height(font_size: f32) -> f32 {
+  font_size * 17.0 / 13.0
+}
+
+/// The row height of a section in the font `font_id`: `body_line_height`, or the egui row height of the
+/// font when that is taller. A heading or large inline code thus gets a row as tall as its font, and its
+/// glyphs do not overlap the rows above and below it.
+fn section_line_height(ui: &Ui, font_id: &FontId, body_line_height: f32) -> f32 {
+  body_line_height.max(ui.ctx().fonts_mut(|f| f.row_height(font_id)))
+}
 
 /// List markers are right-aligned in a slot as wide as this string, measured in the body font,
 /// so bullets and numbers of the same nesting level all start their text at the same x.
@@ -89,7 +101,8 @@ fn registered_family(ui: &Ui, name: &str) -> Option<FontFamily> {
 
 #[inline]
 fn text_format(font_id: FontId, color: Color32) -> TextFormat {
-  TextFormat { font_id, color, valign: Align::BOTTOM, line_height: MARKDOWN_LINE_HEIGHT_POINTS, ..Default::default() }
+  let line_height = Some(body_line_height(font_id.size));
+  TextFormat { font_id, color, valign: Align::BOTTOM, line_height, ..Default::default() }
 }
 
 /// Outcome of appending a Link token to a [`LayoutJob`].
@@ -272,8 +285,8 @@ fn apply_bold(format: &mut TextFormat, ui: &Ui, has_bold: bool) {
   }
 }
 
-/// The format of text with the inline `style`: bold, italic, strikethrough, the heading size, and the
-/// inline code colors and font.
+/// The format of text with the inline `style`: bold, italic, strikethrough, the heading size, the
+/// inline code colors and font, and the row height of the resulting font.
 fn styled_format(
   base_format: &TextFormat,
   style: &crate::types::TokenStyle,
@@ -301,6 +314,9 @@ fn styled_format(
   if style.inline_code {
     apply_inline_code_bg(&mut format, ui.visuals(), &markdown_style.inline_code);
     apply_inline_code_font(&mut format, ui, style.bold || style.heading.is_some());
+  }
+  if let Some(body) = base_format.line_height {
+    format.line_height = Some(section_line_height(ui, &format.font_id, body));
   }
   format
 }
@@ -1208,6 +1224,42 @@ mod section_tests {
     }
   }
 
+  /// Each row is as tall as its tallest font or taller, so that the glyphs of two wrapped rows do not
+  /// overlap. egui rounds the row to the pixel and not the font, so the test accepts half a point less.
+  /// A row of body text is 17 points tall for 13 point text, and the same ratio for each other font size.
+  #[test]
+  fn rows_follow_the_font_size() {
+    let mut checked = false;
+    egui::__run_test_ui(|ui| {
+      let style = MarkdownStyle::default();
+      let long = "word ".repeat(40);
+      for (size, body_row) in [(13.0, 17.0), (20.0, 26.0), (10.0, 13.0)] {
+        for prefix in ["", "# ", "## ", "Text `code` "] {
+          let text = format!("{prefix}{long}");
+          let markdown = crate::parse(&text);
+          let font = FontId::proportional(size);
+          let color = ui.visuals().text_color();
+          let layout = build_layout(ui, &markdown.tokens, font, color, None, 200.0, false, None, false, &style, None);
+          let galley = ui.fonts_mut(|f| f.layout_job(layout.job));
+          assert!(galley.rows.len() > 1, "the text wraps");
+          for row in &galley.rows {
+            let font_height = row.row.glyphs.iter().map(|g| g.font_height).fold(0.0, f32::max);
+            let height = row.row.size.y;
+            assert!(
+              height + 0.5 >= font_height,
+              "{prefix:?} at {size} pt: a row of {height} for a font of {font_height}"
+            );
+            if prefix.is_empty() {
+              assert_eq!(height, body_row, "a body row at {size} pt");
+            }
+          }
+        }
+      }
+      checked = true;
+    });
+    assert!(checked);
+  }
+
   /// A rule takes a row of its own, with one blank row above and below it, as between two paragraphs.
   #[test]
   fn a_rule_has_one_blank_row_on_each_side() {
@@ -1224,7 +1276,7 @@ mod section_tests {
       };
       let paragraphs = galley("Above\n\nBelow");
       let rule = galley("Above\n\n---\n\nBelow");
-      let line = MARKDOWN_LINE_HEIGHT_POINTS.unwrap();
+      let line = body_line_height(14.0);
       let added = rule.size().y - paragraphs.size().y;
       assert!((added - (style.horizontal_rule.height + line)).abs() < 0.5, "the rule added {added} points");
 

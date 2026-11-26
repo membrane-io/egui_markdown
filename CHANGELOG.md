@@ -97,6 +97,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The row height of the label follows the font size. A row of body text is 17/13 of the label font
+  size, which is 17 points for the 13 point Body font of the default egui style. A heading or inline
+  code row is never shorter than its font. Before, every row was 17 points tall, so text larger than
+  13 points overlapped the next row and smaller text had large gaps. The rows of a heading also
+  overlapped at the default size. Headings at the default size now get taller rows (H1 24, H2 20 and
+  H3 18 points), and a label with a heading is taller than before.
 - A table measured smaller in a sizing pass than it shows: each cell lost its right and bottom
   padding. A `Harness::fit_contents` or an auto-sized `Area` cut off the end of the label.
 - A code block in a list item was drawn over the item text and the next item, at the left edge of the
