@@ -92,10 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   An app that uses Shift for something else can pass `.selectable(!ui.input(|i| i.modifiers.shift))`.
   ([#14])
 - `heal()` holds back a marker at the end of the text, such as `-`, `1.` or `**`, and the URL of an
-  open link, until more text shows what it is. A click on a link with an empty href opens nothing,
-  except in a table cell. ([#12])
+  open link, until more text shows what it is. A click on a link with an empty href opens nothing.
+  ([#12], [#42])
 - A link in a table cell uses the `LinkHandler`. Version 0.1.0 opened the URL of the link and did not
   call the handler.
+- A link in a table cell has the same hover and click as a link in the text. It shows the tooltip of
+  `LinkHandler::hover_text`, else the title, else the href when `url_in_tooltip` is set. A click on a
+  link with an empty href in a cell does not call `LinkHandler::click`. ([#42])
 - `MarkdownLabel::calculate_size` runs the render of `show` in an invisible child `Ui`, so it counts
   tables, blockquotes, images and scrolling code blocks. `calculate_size` and `layout_in_ui` heal the
   text when `heal` is on.
@@ -136,6 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Two tables in one label shared a scroll id. ([#2])
 - The scroll bar of a table was outside the border of the table. ([#17])
 - A table or an image outside the view kept its height from an old width. ([#18])
+- A link in a table cell showed no tooltip, opened an empty URL, and did not set
+  `MarkdownLabelOutput::link_clicked`. ([#42])
 
 ### Performance
 
@@ -203,3 +208,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#35]: https://github.com/membrane-io/egui_markdown/pull/35
 [#37]: https://github.com/membrane-io/egui_markdown/pull/37
 [#39]: https://github.com/membrane-io/egui_markdown/pull/39
+[#42]: https://github.com/membrane-io/egui_markdown/pull/42
