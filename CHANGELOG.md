@@ -141,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A table or an image outside the view kept its height from an old width. ([#18])
 - A link in a table cell showed no tooltip, opened an empty URL, and did not set
   `MarkdownLabelOutput::link_clicked`. ([#42])
+- A task list item shows a checkbox that the label paints, not a `☐` or `☑` character that the default
+  egui fonts do not have. A copy of the item gives `[ ]` or `[x]`. ([#NN])
 
 ### Performance
 
@@ -209,3 +211,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#37]: https://github.com/membrane-io/egui_markdown/pull/37
 [#39]: https://github.com/membrane-io/egui_markdown/pull/39
 [#42]: https://github.com/membrane-io/egui_markdown/pull/42
+[#NN]: https://github.com/membrane-io/egui_markdown/pull/NN

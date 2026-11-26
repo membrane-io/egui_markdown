@@ -11,7 +11,7 @@ egui widget with selectable text.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/membrane-io/egui_markdown/main/docs/screenshots/readme-dark.png">
-  <img alt="A heading, a paragraph with a link, a nested list, a Rust code block, a table and a blockquote" src="https://raw.githubusercontent.com/membrane-io/egui_markdown/main/docs/screenshots/readme-light.png" width="520">
+  <img alt="A heading, a paragraph with a link, a nested list with a task list, a Rust code block, a table and a blockquote" src="https://raw.githubusercontent.com/membrane-io/egui_markdown/main/docs/screenshots/readme-light.png" width="520">
 </picture>
 
 ## Usage

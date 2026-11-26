@@ -1,6 +1,8 @@
 //! The [`LayoutJob`] of a list of tokens.
 
-use egui::{text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Sense, Stroke, TextFormat, Ui};
+use egui::{
+  text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Sense, Stroke, TextFormat, TextStyle, Ui,
+};
 
 use egui::epaint::text::ByteRangeExt as _;
 
@@ -36,6 +38,10 @@ pub struct LayoutResult {
   pub segment_breaks: Vec<usize>,
   /// The character index of the space that holds each horizontal rule.
   pub hr_positions: Vec<usize>,
+  /// The task list boxes: `(char_index, checked, scale)`. `char_index` is the start of the transparent `[x]`
+  /// or `[ ]` that holds the box, and `scale` is the size of the label font divided by the size of the body
+  /// font. The label paints each box over its placeholder after it places the galley.
+  pub task_boxes: Vec<(usize, bool, f32)>,
   /// The inline widgets: `(start_char, end_char, token_index, font)`, with the font that
   /// [`LinkHandler::layout_link`] received. The [`LinkHandler`] paints each widget over its transparent
   /// characters after the label places the galley.
@@ -466,6 +472,7 @@ pub fn build_layout(
   let mut segment_breaks: Vec<usize> = Vec::new();
   let mut blockquote_depth: u32 = 0;
   let mut hr_positions: Vec<usize> = Vec::new();
+  let mut task_boxes: Vec<(usize, bool, f32)> = Vec::new();
   let mut inline_widget_spans: Vec<(usize, usize, usize, FontId)> = Vec::new();
 
   // Every section in the label font, a blank row included, has the body row height.
@@ -622,8 +629,22 @@ pub fn build_layout(
         hr_positions.push(hr_char_pos);
       }
       Token::TaskListMarker { checked, .. } => {
-        let marker_char = if *checked { "☑ " } else { "☐ " };
-        push_section(&mut job, marker_char, 0.0, base_format.clone());
+        // The default egui fonts have no checkbox glyph, so the label paints the box over a transparent
+        // placeholder. A copy of the text gives the markdown of the box.
+        let placeholder = if *checked { "[x]" } else { "[ ]" };
+        let scale = font_id.size / TextStyle::Body.resolve(ui.style()).size;
+        let side = ui.spacing().icon_width * scale;
+        // The slot is as wide for both placeholders, so the text of each item starts at the same x. The
+        // placeholder is in the center of the slot, so the label paints the box at the center of its glyphs.
+        let (width, slot) = ui.ctx().fonts_mut(|f| {
+          let mut width = |text: &str| -> f32 { text.chars().map(|c| f.glyph_width(&font_id, c)).sum() };
+          (width(placeholder), width("[x]").max(width("[ ]")).max(side))
+        });
+        let margin = (slot - width) / 2.0;
+        task_boxes.push((job.text.chars().count(), *checked, scale));
+        push_section(&mut job, placeholder, margin, transparent_format.clone());
+        section_to_token.push(token_index);
+        push_section(&mut job, " ", margin, base_format.clone());
         section_to_token.push(token_index);
       }
       Token::FootnoteRef { label } => {
@@ -650,6 +671,7 @@ pub fn build_layout(
     code_block_info,
     segment_breaks,
     hr_positions,
+    task_boxes,
     inline_widget_spans,
   }
 }
@@ -1431,6 +1453,46 @@ mod section_tests {
       }
       checked = true;
     });
+    assert!(checked);
+  }
+
+  /// A task item holds a transparent `[x]` or `[ ]` in a slot that is as wide for both, so the text of a
+  /// checked item and of an unchecked item starts at the same x. `task_boxes` holds the character index of
+  /// each placeholder and its state.
+  #[test]
+  fn checked_and_unchecked_task_text_starts_at_the_same_x() {
+    let markdown = crate::parse("- [x] alpha\n- [ ] beta\n  - [ ] gamma\n  - [x] delta");
+    let ctx = egui::Context::default();
+    ctx.set_missing_glyph_policy(egui::MissingGlyphPolicy::Panic);
+    let mut checked = false;
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+      let style = MarkdownStyle::default();
+      let font = FontId::proportional(14.0);
+      let color = ui.visuals().text_color();
+      let layout =
+        build_layout(ui, &markdown.tokens, font, color, None, f32::INFINITY, false, None, false, &style, None);
+      let char_of = |text: &str| layout.job.text[..layout.job.text.find(text).unwrap()].chars().count();
+      let scale = 14.0 / TextStyle::Body.resolve(ui.style()).size;
+      let expected: Vec<(usize, bool, f32)> =
+        [("[x] alpha", true), ("[ ] beta", false), ("[ ] gamma", false), ("[x] delta", true)]
+          .iter()
+          .map(|&(text, checked)| (char_of(text), checked, scale))
+          .collect();
+      assert_eq!(layout.task_boxes, expected);
+
+      let galley = ui.fonts_mut(|f| f.layout_job(layout.job.clone()));
+      let x_of = |word: &str| {
+        let row =
+          galley.rows.iter().find(|row| row.glyphs.iter().map(|g| g.chr).collect::<String>().contains(word)).unwrap();
+        let text: String = row.glyphs.iter().map(|g| g.chr).collect();
+        let index = text[..text.find(word).unwrap()].chars().count();
+        row.glyphs[index].pos.x
+      };
+      assert_eq!(x_of("alpha"), x_of("beta"), "the text of the top level items");
+      assert_eq!(x_of("gamma"), x_of("delta"), "the text of the nested items");
+      checked = true;
+    });
+    output.textures_delta.clear();
     assert!(checked);
   }
 

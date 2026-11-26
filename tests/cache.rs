@@ -261,6 +261,25 @@ fn a_label_follows_a_change_of_the_visuals() {
   }
 }
 
+/// The width of the box of a task item follows `Spacing::icon_width`, and its scale follows the size of the
+/// body font, also for a label with a font of its own.
+#[test]
+fn a_task_list_follows_the_icon_width_and_the_body_size() {
+  type Change = fn(&mut egui::Style);
+  let changes: [(&str, Change); 2] = [
+    ("icon width", |style| style.spacing.icon_width = 30.0),
+    ("body size", |style| {
+      style.text_styles.insert(egui::TextStyle::Body, FontId::proportional(6.0));
+    }),
+  ];
+  for doc in ["- [x] done\n- [ ] todo", "- [x] done\n- [ ] todo\n\n| a |\n|---|\n| 1 |"] {
+    for (name, change) in changes {
+      let show = show_doc(doc, FontId::proportional(14.0), MarkdownStyle::default());
+      assert_follows_change(&format!("{name}, {doc:?}"), &show, |ctx| ctx.all_styles_mut(change), &show);
+    }
+  }
+}
+
 #[test]
 fn a_label_follows_a_bold_family_that_the_app_registers_later() {
   for doc in [WHOLE, SEGMENTED] {
