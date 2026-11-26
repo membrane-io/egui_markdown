@@ -15,13 +15,8 @@
     "use_new_terminal": false
   },
   {
-    "label": "Run Simple",
-    "command": "cargo run --example simple",
-    "use_new_terminal": true
-  },
-  {
-    "label": "Run Advanced",
-    "command": "cargo run --example advanced",
+    "label": "Run Editor",
+    "command": "cargo run --example editor",
     "use_new_terminal": true
   },
   {

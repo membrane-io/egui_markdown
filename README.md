@@ -16,7 +16,7 @@ markdown crates.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/simple-dark.png">
-  <img alt="The simple example: markdown source on the left, and the rendered output on the right" src="docs/screenshots/simple-light.png">
+  <img alt="The editor example: markdown source on the left, and the rendered output on the right" src="docs/screenshots/simple-light.png">
 </picture>
 
 ## Quick Start
@@ -99,7 +99,7 @@ MarkdownLabel::new(id, text).style(&style).show(ui);
 ```
 
 `MarkdownStyle` also has a `ui()` method that renders an interactive editor for every
-style field. See the `advanced` example.
+style field. See the `style` example.
 
 To give every label in an app the same style, install it once on the context. A label with no
 `.style()` reads it:
@@ -177,19 +177,19 @@ if output.response.clicked() && !output.link_clicked {
   <img alt="Code blocks, nested blockquotes, headings, a rule, an aligned table, and a footnote" src="docs/screenshots/lower-light.png" width="600">
 </picture>
 
-The `advanced` example adds custom link handlers, an inline badge widget, a block widget, code
-block buttons, and the style editor:
-
-![The advanced example, with its style editor open](docs/screenshots/advanced-dark.png)
-
 | Example | Description |
 |---------|-------------|
-| `simple` | An editor and the rendered output. |
-| `advanced` | A style editor, custom link handlers, inline widgets, code block buttons, and a streaming simulation. |
+| `hello_world` | One label in a scroll area. Start here. |
+| `editor` | A text editor and the rendered output. |
+| `streaming` | Text that arrives a few characters at a time. The label heals the text while it is incomplete, and `.map_job()` fades in the newest characters. |
+| `links` | A `LinkHandler`: link colors, tooltips, clicks, an inline widget and a block widget. |
+| `code_blocks` | A Copy button on each code block, horizontal scrolling, and a dark and a light syntect theme. |
+| `style` | The `MarkdownStyle` editor, `set_style`, and the theme buttons. |
+| `images` | Images from URLs. It needs the `images` feature. |
 
 ```sh
-cargo run --example simple
-cargo run --example advanced
+cargo run --example hello_world
+cargo run --example images --features images
 ```
 
 ## License

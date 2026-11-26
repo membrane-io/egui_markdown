@@ -2185,7 +2185,7 @@ mod tests {
       .collect()
   }
 
-  /// The markdown of each example and of each streaming fixture.
+  /// The markdown of each example, of each markdown fixture and of each streaming fixture.
   fn stream_documents() -> Vec<String> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut docs = vec![
@@ -2193,16 +2193,18 @@ mod tests {
       format!("{RESUME_EDGES}\n<div>late html</div>\n\nMore."),
       format!("{RESUME_EDGES}\n[ref]: https://example.com\n"),
     ];
-    for example in ["examples/simple.rs", "examples/advanced.rs"] {
-      let source = std::fs::read_to_string(root.join(example)).unwrap();
-      let start = source.find("r#\"").unwrap() + 3;
-      let end = source[start..].find("\"#;").unwrap() + start;
-      docs.push(source[start..end].to_string());
+    for entry in std::fs::read_dir(root.join("examples/markdown")).unwrap() {
+      docs.push(std::fs::read_to_string(entry.unwrap().path()).unwrap());
     }
     for entry in std::fs::read_dir(root.join("tests/fixtures")).unwrap() {
       let path = entry.unwrap().path();
-      let deltas: Vec<String> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-      docs.push(deltas.concat());
+      let text = std::fs::read_to_string(&path).unwrap();
+      if path.extension().is_some_and(|ext| ext == "md") {
+        docs.push(text);
+      } else {
+        let deltas: Vec<String> = serde_json::from_str(&text).unwrap();
+        docs.push(deltas.concat());
+      }
     }
     docs
   }

@@ -1,61 +1,4 @@
-use eframe::egui;
-use egui_markdown::MarkdownLabel;
-
-fn main() -> eframe::Result {
-  env_logger::init();
-
-  let options = eframe::NativeOptions {
-    viewport: egui::ViewportBuilder::default().with_inner_size([900.0, 700.0]).with_title("egui_markdown simple"),
-    ..Default::default()
-  };
-
-  eframe::run_native("egui_markdown simple", options, Box::new(|cc| Ok(Box::new(DemoApp::new(cc)))))
-}
-
-struct DemoApp {
-  markdown_input: String,
-  show_editor: bool,
-}
-
-impl DemoApp {
-  fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-    Self { markdown_input: DEFAULT_MARKDOWN.to_string(), show_editor: true }
-  }
-}
-
-impl eframe::App for DemoApp {
-  fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-    egui::Panel::top("top").show(ui, |ui| {
-      ui.horizontal(|ui| {
-        ui.heading("egui_markdown");
-        ui.separator();
-        ui.toggle_value(&mut self.show_editor, "Show Editor");
-        if ui.button("Reset").clicked() {
-          self.markdown_input = DEFAULT_MARKDOWN.to_string();
-        }
-      });
-    });
-
-    if self.show_editor {
-      egui::Panel::left("editor").default_size(400.0).show(ui, |ui| {
-        ui.heading("Markdown Source");
-        egui::ScrollArea::vertical().show(ui, |ui| {
-          ui.add(egui::TextEdit::multiline(&mut self.markdown_input).desired_width(f32::INFINITY).code_editor());
-        });
-      });
-    }
-
-    egui::CentralPanel::default().show(ui, |ui| {
-      ui.heading("Rendered Output");
-      ui.separator();
-      egui::ScrollArea::vertical().show(ui, |ui| {
-        MarkdownLabel::new(ui.make_persistent_id("md"), &self.markdown_input).show(ui);
-      });
-    });
-  }
-}
-
-const DEFAULT_MARKDOWN: &str = r#"# egui_markdown
+# egui_markdown
 
 A markdown parser and renderer for [egui](https://github.com/emilk/egui).
 
@@ -152,4 +95,3 @@ Here's a paragraph with **bold**, *italic*, `code`, and a [link](https://example
 > - Item one
 > - Item two with **bold**
 > - Item three with `code`
-"#;
