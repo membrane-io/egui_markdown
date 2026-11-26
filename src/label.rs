@@ -9,7 +9,7 @@ use egui::epaint::{
 };
 use egui::{
   text::LayoutJob, text_selection::LabelSelectionState, Align, Color32, Context, CursorIcon, FontId, FontSelection, Id,
-  Layout, Pos2, Rect, Response, Sense, Stroke, TextWrapMode, Ui, UiBuilder, Vec2,
+  Layout, Pos2, Rect, Response, Sense, Stroke, TextStyle, TextWrapMode, Ui, UiBuilder, Vec2,
 };
 
 use egui::epaint::text::ByteRangeExt as _;
@@ -109,9 +109,9 @@ impl Revision {
 }
 
 /// The inputs other than the tokens that a cached layout or height depends on: the style, the size of
-/// code blocks, the link handler, the font, the color, the egui visuals that [`build_layout`] reads, the
-/// code theme, and the [`fonts_epoch`]. It costs the same on every frame, whatever the length of the
-/// document.
+/// code blocks, the link handler, the font, the color, the egui visuals and the egui sizes that
+/// [`build_layout`] reads, the code theme, and the [`fonts_epoch`]. It costs the same on every frame,
+/// whatever the length of the document.
 ///
 /// Each value that [`build_layout`] reads from `ui` must be here. The wrap width and the break flag are
 /// not, because the label applies them to the job on each frame.
@@ -130,6 +130,8 @@ fn frame_key(
   (style, code_font_size.to_bits(), handler.map(|h| h.id()), font, color).hash(&mut hasher);
   (visuals.dark_mode, visuals.hyperlink_color, visuals.strong_text_color()).hash(&mut hasher);
   (code.text_color, code.stroke, code.corner_radius, code.margin).hash(&mut hasher);
+  // A task list box is as wide as the egui checkbox at the body size.
+  (ui.spacing().icon_width.to_bits(), TextStyle::Body.resolve(ui.style()).size.to_bits()).hash(&mut hasher);
   (code_theme_identity(ui, code_theme), fonts_epoch(ui.ctx())).hash(&mut hasher);
   hasher.finish()
 }
@@ -693,8 +695,9 @@ impl<'a> MarkdownLabel<'a> {
   /// the galley, and the response. The caller paints the galley.
   ///
   /// The galley holds text only. A table, an image, a block widget and a scrolling code block have no
-  /// text to lay out, so they are left out, and a blockquote shows its text without its bar. Use
-  /// [`Self::show`] to render those. The text is healed when [`Self::heal`] is on.
+  /// text to lay out, so they are left out. A blockquote shows its text without its bar. A task list item
+  /// shows no box, because the caller paints only the galley. Use [`Self::show`] to render those. The text
+  /// is healed when [`Self::heal`] is on.
   pub fn layout_in_ui(self, ui: &mut Ui) -> (Pos2, Arc<Galley>, Response) {
     let context_style = egui_markdown_style::global_style(ui.ctx());
     let style = self.style.unwrap_or(context_style.as_ref());
@@ -782,6 +785,7 @@ impl<'a> MarkdownLabel<'a> {
           &layout.code_block_spans,
           &layout.code_block_info,
           &layout.hr_positions,
+          &layout.task_boxes,
           &layout.inline_widget_spans,
           color,
           style,
@@ -838,6 +842,7 @@ impl<'a> MarkdownLabel<'a> {
       &layout.code_block_spans,
       &layout.code_block_info,
       &layout.hr_positions,
+      &layout.task_boxes,
       &layout.inline_widget_spans,
       color,
       style,
@@ -1188,6 +1193,7 @@ impl<'a> MarkdownLabel<'a> {
           &cached.layout.code_block_spans,
           &cached.layout.code_block_info,
           &cached.layout.hr_positions,
+          &cached.layout.task_boxes,
           &cached.layout.inline_widget_spans,
           color,
           style,
@@ -1238,6 +1244,7 @@ impl<'a> MarkdownLabel<'a> {
       &layout.code_block_spans,
       &layout.code_block_info,
       &layout.hr_positions,
+      &layout.task_boxes,
       &layout.inline_widget_spans,
       color,
       style,
@@ -1257,6 +1264,7 @@ impl<'a> MarkdownLabel<'a> {
     code_block_spans: &[(usize, usize)],
     code_block_info: &[(String, String)],
     hr_positions: &[usize],
+    task_boxes: &[(usize, bool, f32)],
     inline_widget_spans: &[(usize, usize, usize, FontId)],
     color: Color32,
     style: &MarkdownStyle,
@@ -1281,6 +1289,7 @@ impl<'a> MarkdownLabel<'a> {
     let shown = |char_index: usize| built.is_empty() || shown_after_map(&galley.job, &built, char_index);
     let hr_positions: Vec<usize> = hr_positions.iter().copied().filter(|&at| shown(at)).collect();
     let hr_positions = hr_positions.as_slice();
+    let task_boxes: Vec<_> = task_boxes.iter().copied().filter(|&(at, ..)| shown(at)).collect();
     let painted_widget_spans: Vec<_> = inline_widget_spans.iter().filter(|&&(at, ..)| shown(at)).cloned().collect();
     let mut code_block_rects = paint::compute_code_block_rects(code_block_spans, &galley);
     let available_width = ui.available_width();
@@ -1326,6 +1335,7 @@ impl<'a> MarkdownLabel<'a> {
       out.add_text(response);
       paint_decorations(ui, hr_positions, &galley, &code_block_rects, galley_pos, decoration_width, style);
       ui.painter().galley(galley_pos, galley.clone(), color);
+      paint::paint_task_boxes(ui, &task_boxes, &galley, galley_pos);
       if let Some(handler) = self.link_handler {
         paint_inline_widgets(ui, handler, tokens, &painted_widget_spans, &galley, galley_pos);
       }
@@ -1342,6 +1352,8 @@ impl<'a> MarkdownLabel<'a> {
     } else {
       ui.painter().galley(galley_pos, galley.clone(), color);
     }
+    // The label paints the boxes after the selection background, so that the selection does not hide them.
+    paint::paint_task_boxes(ui, &task_boxes, &galley, galley_pos);
 
     if let Some(button_fn) = self.code_block_buttons {
       render_code_block_buttons(ui, button_fn, &code_block_rects, code_block_info, galley_pos);

@@ -15,10 +15,19 @@ rules that a change must keep. The rustdoc of the public API describes how to us
    and a scrolling code block cannot be text in a galley. A document without them takes the whole-document
    path. A document with them takes the segmented path.
 4. **Lay out** (`layout::build_layout`). The tokens become one `LayoutJob`, with a map from each section to
-   its token, the character spans of code blocks, rules and inline widgets.
+   its token, the character spans of code blocks, rules, task list boxes and inline widgets.
 5. **Shape and paint** (`MarkdownLabel::render_galley`). egui shapes the job into a galley. The label paints
-   the code block backgrounds and the rules, then the galley, then the inline widgets of the `LinkHandler`.
-   It handles hover, click and text selection on the galley.
+   the code block backgrounds and the rules, then the galley, then the task list boxes, then the inline
+   widgets of the `LinkHandler`. It handles hover, click and text selection on the galley.
+
+A task list item holds a transparent `[x]` or `[ ]` in the middle of a slot that is as wide as the box, so
+that the text of a checked item and of an unchecked item starts at the same x. When a placeholder is wider
+than the box, as in a monospace font, the placeholder gets a smaller font with the same row height. The
+default egui fonts have no checkbox glyph. The label paints the box in the slot with the look of an
+`egui::Checkbox` that is not interactive. It finds the slot from the ` ` after the placeholder, because
+egui rounds the x of each glyph, and `[x]` and `[ ]` round differently. The label paints the box after the
+galley. A text selection paints the placeholder in the selection text color, and the fill of the box covers
+it. A copy of the item gives the placeholder, so that the copy keeps the state of each box.
 
 On the segmented path, `render_token_range` walks the tokens. It flushes the text between two blocks as one
 galley (`flush_text_range`), and renders each block as a separate egui widget. A blockquote renders its
@@ -49,8 +58,9 @@ the source too.
 
 The **frame key** (`frame_key`) holds every input of a layout that is not a token: the style, the code font
 size, `LinkHandler::id`, the font, the text color, the egui visuals that `build_layout` reads (dark mode, the
-hyperlink color, the strong text color, `Visuals::code`), the identity of the code theme, and the fonts
-epoch. It costs the same on each frame, whatever the length of the document.
+hyperlink color, the strong text color, `Visuals::code`), the egui sizes that it reads (`Spacing::icon_width`
+and the size of `TextStyle::Body`, for the slot of a task list box), the identity of the code theme, and the
+fonts epoch. It costs the same on each frame, whatever the length of the document.
 
 **Scrolling code blocks.** The source, the job and the galley of a `StreamingCodeCache` are each in an
 `Arc`, so the clone that `get_temp` makes on each frame copies no text. When the identity is the same and the
@@ -76,7 +86,8 @@ lays out a small probe job once per pass, and gives a new epoch when egui return
   depends on it.
 - **Each value that `build_layout` reads from `ui` is in the frame key.** A value that is not in it gives a
   stale layout when the value changes. The `a_label_follows_*` tests in `tests/cache.rs` check the font, the
-  visuals, the fonts and the code theme. They cannot check a value that a change adds.
+  visuals, the fonts and the code theme, and `a_task_list_follows_the_icon_width_and_the_body_size` checks the
+  egui sizes. They cannot check a value that a change adds.
 - **`max_rows` is in `hash_text`.** A change of `max_lines` or of `truncate` lays out the document again.
   The segmented path ignores `max_rows`. `a_label_follows_a_change_of_max_lines` checks this.
 - **`build_layout` sets `max_rows` to `usize::MAX - 1` when there is no row limit.** A finite row count

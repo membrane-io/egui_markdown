@@ -7,6 +7,13 @@ const TEXT: &str = "alpha beta gamma delta";
 
 /// Click at the left end of the label, shift-click near its right end, and copy. Returns the copied text.
 fn shift_click_and_copy() -> Option<String> {
+  let ends = |rect: Rect| (pos2(rect.left() + 1.0, rect.center().y), pos2(rect.right() - 1.0, rect.center().y));
+  shift_click_and_copy_text(TEXT, ends)
+}
+
+/// Show the label of `text`, click at the first point of `ends`, shift-click at the second point, and copy.
+/// `ends` receives the rect of the label. Returns the copied text.
+fn shift_click_and_copy_text(text: &str, ends: fn(Rect) -> (Pos2, Pos2)) -> Option<String> {
   let ctx = Context::default();
   let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
   let frame = |events: Vec<Event>, modifiers: Modifiers| {
@@ -15,7 +22,7 @@ fn shift_click_and_copy() -> Option<String> {
     let input = RawInput { screen_rect: Some(screen), events, ..Default::default() };
     let mut output = ctx.run_ui(input, |ui| {
       let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-      rect = MarkdownLabel::new(Id::NULL.with("selection"), TEXT).hug_content(true).show(&mut child).response.rect;
+      rect = MarkdownLabel::new(Id::NULL.with("selection"), text).hug_content(true).show(&mut child).response.rect;
     });
     output.textures_delta.clear();
     let copied = output.platform_output.commands.into_iter().find_map(|command| match command {
@@ -32,8 +39,9 @@ fn shift_click_and_copy() -> Option<String> {
   };
 
   let (rect, _) = frame(Vec::new(), Modifiers::NONE);
-  click(pos2(rect.left() + 1.0, rect.center().y), Modifiers::NONE);
-  click(pos2(rect.right() - 1.0, rect.center().y), Modifiers::SHIFT);
+  let (start, end) = ends(rect);
+  click(start, Modifiers::NONE);
+  click(end, Modifiers::SHIFT);
   frame(vec![Event::Copy], Modifiers::NONE).1
 }
 
@@ -41,6 +49,14 @@ fn shift_click_and_copy() -> Option<String> {
 fn a_shift_click_extends_the_selection() {
   let copied = shift_click_and_copy().expect("a selection to copy");
   assert!(copied.starts_with("alpha beta gamma delt"), "copied {copied:?}");
+}
+
+/// A copy of a task list gives `[x]` or `[ ]` for each box, so that the copy keeps the state of each box.
+#[test]
+fn a_copy_of_a_task_list_gives_the_markdown_of_each_box() {
+  let ends = |rect: Rect| (pos2(rect.left() + 1.0, rect.top() + 4.0), pos2(rect.right() - 1.0, rect.bottom() - 4.0));
+  let copied = shift_click_and_copy_text("- [x] alpha\n- [ ] beta", ends).expect("a selection to copy");
+  assert!(copied.starts_with("• [x] alpha\n• [ ] bet"), "copied {copied:?}");
 }
 
 /// Drag across a code block shown with `scroll_code_blocks`, and copy. Returns the copied text.
