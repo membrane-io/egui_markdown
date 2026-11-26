@@ -1,4 +1,4 @@
-//! Code block background and horizontal rule painting.
+//! The painting of code block backgrounds and horizontal rules.
 
 use std::sync::Arc;
 
@@ -7,7 +7,7 @@ use epaint::{pos2, Galley};
 
 use crate::style::{CodeBlockStyle, HorizontalRuleStyle};
 
-/// Compute the background rectangles for code blocks from character offset spans.
+/// The background rect of each code block, from the character spans of the blocks in `galley`.
 ///
 /// A rect covers the rows of the block, from the x of its first glyph to the right edge of its widest row.
 /// [`paint_code_block_bg`] grows it by the padding of the style. [`crate::MarkdownLabel`] keeps its left edge,
@@ -46,7 +46,8 @@ pub fn compute_code_block_rects(code_blocks: &[(usize, usize)], galley: &Arc<Gal
   code_block_rects
 }
 
-/// Paint code block background and border.
+/// Paint the background and the border of a code block. `bg_rect` is relative to `origin`, and the painted
+/// rect is larger by the padding of `code_style`.
 ///
 /// The fill and corner radius come from [`egui::Visuals::code`], as for the frame that
 /// [`crate::MarkdownLabel`] gives a scrolling code block, so both render paths show one code surface.
@@ -67,7 +68,7 @@ pub(crate) fn paint_code_block_rect(ui: &Ui, r: Rect, code_style: &CodeBlockStyl
   ui.painter().rect_stroke(r, code.corner_radius, stroke, StrokeKind::Inside);
 }
 
-/// Paint horizontal rules at the given character positions.
+/// Paint a horizontal rule across `available_width` at the row of each character index in `hr_positions`.
 pub fn paint_horizontal_rules(
   ui: &Ui,
   hr_positions: &[usize],

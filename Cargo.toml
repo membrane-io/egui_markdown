@@ -9,10 +9,9 @@ edition = "2021"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 description = "A markdown parser and renderer for egui"
-repository = "https://github.com/iamseeley/egui_markdown"
-homepage = "https://github.com/iamseeley/egui_markdown"
+repository = "https://github.com/membrane-io/egui_markdown"
 documentation = "https://docs.rs/egui_markdown"
-categories = ["gui", "graphics"]
+categories = ["gui"]
 keywords = ["egui", "markdown", "gui", "commonmark"]
 include = ["**/*.rs", "tests/fixtures/*.json", "Cargo.toml", "LICENSE-MIT", "LICENSE-APACHE", "README.md"]
 
@@ -38,6 +37,9 @@ syntax_highlighting = ["egui_extras/syntect", "dep:syntect"]
 extra_syntaxes = ["syntax_highlighting", "dep:two-face"]
 images = ["egui_extras/image", "egui_extras/http"]
 svg = ["egui_extras/svg"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [[example]]
 name = "simple"

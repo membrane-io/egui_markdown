@@ -1,4 +1,4 @@
-//! Table rendering for markdown tables.
+//! Markdown tables, rendered with `egui_extras::TableBuilder`.
 
 use egui::text::LayoutJob;
 use egui::{
@@ -145,10 +145,10 @@ fn padded_cell(ui: &mut Ui, margin: Margin, add: impl FnOnce(&mut Ui)) {
   ui.expand_to_include_rect(cell);
 }
 
-/// Outer stroke on the visible table, plus a light inner shadow on cut edges.
-/// `ScrollAreaOutput::inner_rect` is the pre-shrink available rect, so height
-/// comes from the table and width from the viewport. The visible rect is
-/// always rounded; a cut edge is the same rounded path, just shorter.
+/// Paint the outer stroke of the visible part of the table, and a light inner shadow on each edge that the
+/// view cuts. `viewport` is `ScrollAreaOutput::inner_rect`, the available rect before the scroll area
+/// shrinks it, so the height comes from the table and the width from the view. The visible rect always has
+/// rounded corners, also at a cut edge.
 fn paint_table_chrome(ui: &Ui, table_rect: Rect, viewport: Rect, stroke: Option<Stroke>, radius: u8) {
   let mut vis = table_rect.intersect(ui.clip_rect());
   vis.min.x = vis.min.x.max(viewport.min.x);
@@ -206,9 +206,9 @@ fn paint_edge_shadow(painter: &egui::Painter, vis: Rect, side: OverflowSide, dar
   painter.add(egui::epaint::RectShape::filled(strip, 0.0, color).with_blur_width(SIZE));
 }
 
-/// Internal separators only. The outer rectangle is painted by [`paint_table_chrome`].
+/// Paint the separators between the cells. [`paint_table_chrome`] paints the outer stroke.
 fn paint_cell_separators(ui: &Ui, rect: Rect, stroke: Stroke, last_col: bool, last_row: bool) {
-  // Exact columns clip their cells; pull the lines in so the stroke is not discarded.
+  // A column with an exact width clips its cells, so the lines move inside the cell to stay visible.
   let rect = rect.shrink(stroke.width * 0.5);
   let painter = ui.painter();
   if !last_col {
@@ -386,8 +386,8 @@ fn image_link_text<'a>(alt: &'a str, url: &'a str) -> &'a str {
   }
 }
 
-/// Return the font and color a link should use in a table cell, accounting for
-/// header bold styling and missing bold-font fallback.
+/// The font and the color of a link in a table cell. A link in the header is bold: it uses the `"bold"` font
+/// family when the app registers one, else the strong text color.
 #[inline]
 fn link_font_and_color(
   font_id: &FontId,
@@ -414,6 +414,8 @@ struct Measured {
   row_heights: Vec<f32>,
 }
 
+/// The width of each column, at least 40 points, the height of the header and the height of each row, with
+/// the cell padding `pad`.
 fn measure_table(ui: &Ui, data: &TableData<'_>, style: &CellStyle, pad: [f32; 4]) -> Measured {
   let num_cols = data.alignments.len();
   let mut widths = vec![40.0_f32; num_cols];

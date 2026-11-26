@@ -1,4 +1,4 @@
-//! Layout job construction from parsed markdown token streams.
+//! The [`LayoutJob`](egui::text::LayoutJob) of a list of tokens.
 
 use egui::{
   text::LayoutJob, Align, Color32, CursorIcon, FontFamily, FontId, OpenUrl, Response, Sense, Stroke, TextFormat, Ui,
@@ -18,35 +18,35 @@ fn section_line_height(ui: &Ui, font_id: &FontId, min_height: f32) -> f32 {
   min_height.max(ui.ctx().fonts_mut(|f| f.row_height(font_id)))
 }
 
-/// List markers are right-aligned in a slot as wide as this string, measured in the body font,
-/// so bullets and numbers of the same nesting level all start their text at the same x.
+/// A list marker is right-aligned in a slot as wide as this string in the body font, so that the bullets
+/// and the numbers of one nesting level start their text at the same x.
 const MARKER_SLOT_REFERENCE: &str = "99. ";
 
-/// The result of building an egui [`LayoutJob`] from parsed markdown tokens.
+/// The [`LayoutJob`] of a list of tokens, and what the label needs to paint it and to react to it.
 #[derive(Clone)]
 pub struct LayoutResult {
-  /// The constructed layout job ready for galley creation.
+  /// The job, which egui shapes into a galley.
   pub job: LayoutJob,
-  /// Maps each layout section index to the originating token index.
+  /// The index of the token of each section of the job.
   pub section_to_token: Vec<usize>,
-  /// Byte-offset spans `(start_char, end_char)` of code blocks in the layout text.
+  /// The character range `(start, end)` of each code block in the text of the job.
   pub code_block_spans: Vec<(usize, usize)>,
-  /// `(source_text, language)` pairs for each code block.
+  /// The source text and the language of each code block.
   pub code_block_info: Vec<(String, String)>,
-  /// Token indices that require separate rendering (tables, images, blockquotes).
+  /// The indices of the tokens that the job leaves out, because the label renders them as separate widgets:
+  /// tables, images, blockquote markers, block widget links and scrolling code blocks.
   pub segment_breaks: Vec<usize>,
-  /// Character positions of horizontal rules (the middle space char).
+  /// The character index of the space that holds each horizontal rule.
   pub hr_positions: Vec<usize>,
-  /// Current blockquote nesting depth at the end of layout.
+  /// The blockquote depth at the end of the tokens.
   pub blockquote_depth: u32,
-  /// Inline widget spans: `(start_char, end_char, token_index, font)`, with the font that
-  /// [`LinkHandler::layout_link`] received. Each entry marks a transparent placeholder region that a
-  /// [`LinkHandler`] will paint over after galley positioning.
+  /// The inline widgets: `(start_char, end_char, token_index, font)`, with the font that
+  /// [`LinkHandler::layout_link`] received. The [`LinkHandler`] paints each widget over its transparent
+  /// characters after the label places the galley.
   pub inline_widget_spans: Vec<(usize, usize, usize, FontId)>,
 }
 
-/// Look up the section index for a given character offset by walking LayoutJob sections.
-/// Replaces the per-frame `char_to_section: Vec<u32>` allocation.
+/// The index of the section of `job` that holds the character at `char_index`.
 #[inline]
 pub fn section_for_char(job: &LayoutJob, char_index: u32) -> Option<u32> {
   let mut offset = 0u32;
@@ -61,7 +61,7 @@ pub fn section_for_char(job: &LayoutJob, char_index: u32) -> Option<u32> {
   None
 }
 
-/// Apply inline code background and text color to a [`TextFormat`].
+/// Give `format` the text color and the background of inline code.
 ///
 /// The margin, corner radius and stroke of the background come from [`egui::Visuals::code`].
 #[inline]
@@ -95,27 +95,23 @@ fn text_format(font_id: FontId, color: Color32, line_height: f32) -> TextFormat 
   TextFormat { font_id, color, valign: Align::BOTTOM, line_height: Some(line_height), ..Default::default() }
 }
 
-/// Outcome of appending a Link token to a [`LayoutJob`].
+/// What [`append_link_to_job`] appended for a link.
 #[derive(Default)]
 pub struct LinkAppend {
-  /// True when the [`LinkHandler`] reported that this link is a block widget.
-  /// The caller must render the link separately with [`LinkHandler::block_widget`].
-  /// Layout appends no sections in this case.
+  /// True when the [`LinkHandler`] makes the link a block widget. Then the function appends no section, and
+  /// the caller renders the link with [`LinkHandler::block_widget`].
   pub is_block_widget: bool,
-  /// Inline-widget placeholder span `(start_char, end_char)` in the job's text.
-  /// `None` for non-inline-widget links.
+  /// The character range `(start, end)` of an inline widget in the text of the job, or `None` for a link
+  /// that is not an inline widget.
   pub inline_widget_span: Option<(usize, usize)>,
-  /// Number of sections appended to the [`LayoutJob`] for this link.
+  /// The number of sections that the function appended for the link.
   pub sections_added: usize,
 }
 
-/// Append a `Link` token to a [`LayoutJob`], dispatching through an optional [`LinkHandler`].
+/// Append a link to `job`, in the order of [`LinkHandler`]: a block widget, an inline widget, the sections of
+/// `layout_link`, the color of `link_style`, and else `link_color`.
 ///
-/// Encapsulates the priority order: `is_block_widget` → `inline_widget_size` (with optional
-/// `layout_link` placeholder) → `layout_link` → `link_style` → default hyperlink color.
-///
-/// The caller is responsible for mapping the appended sections to their token index
-/// (see [`LinkAppend::sections_added`]).
+/// The caller maps the appended sections to the token of the link ([`LinkAppend::sections_added`]).
 #[allow(clippy::too_many_arguments)]
 pub fn append_link_to_job(
   ui: &Ui,
@@ -137,7 +133,6 @@ pub fn append_link_to_job(
       let added = if handler.layout_link(ui, text, href, job, font_id, Color32::TRANSPARENT) {
         let added = job.sections.len() - before;
         for section in &mut job.sections[before..] {
-          // section.format.color = Color32::TRANSPARENT;
           section.format.line_height = Some(widget_size.y);
         }
         added
@@ -202,12 +197,11 @@ fn push_section_with_wrap_indent(
   });
 }
 
-/// Render a single link inline in a [`Ui`], dispatching through an optional [`LinkHandler`].
+/// Render one link as a separate widget in `ui`, as a table cell does, and return its response.
 ///
-/// Used by table cells where each link is rendered as its own widget. Handles
-/// block widgets, inline widgets (placeholder + `paint_inline_widget`), custom
-/// `layout_link` sections, `link_style`, and click delegation. Returns the
-/// allocated [`Response`].
+/// The link uses the [`LinkHandler`]: a block widget, an inline widget, the sections of `layout_link`,
+/// `link_style`, the hover underline and the click. Unlike a link in a galley, it shows no tooltip, and a
+/// click opens the href also when the href is empty.
 pub fn render_link_in_ui(
   ui: &mut Ui,
   text: &str,
@@ -260,7 +254,7 @@ pub fn render_link_in_ui(
   response
 }
 
-/// Check if a "bold" font family is registered with egui.
+/// Whether the app registers a `"bold"` font family.
 fn has_bold_font(ui: &Ui) -> bool {
   registered_family(ui, "bold").is_some()
 }
@@ -313,7 +307,7 @@ fn styled_format(
   format
 }
 
-/// Width of each line's leading whitespace, in points, using the code font.
+/// The width in points of the whitespace at the start of each line of `text`, in the code font.
 fn code_line_indents(ui: &Ui, text: &str, code_font_size: f32) -> Vec<f32> {
   let font_id = FontId::monospace(code_font_size);
   ui.ctx().fonts_mut(|f| {
@@ -386,11 +380,11 @@ pub(crate) fn code_block_indent(
   }
 }
 
-/// Whether a token stream contains anything that [`build_layout`] would report as a segment
-/// break, which means whether it must use the segmented render path.
+/// Whether `tokens` hold a token that [`build_layout`] puts in [`LayoutResult::segment_breaks`], so that the
+/// label must take the segmented path.
 ///
-/// Must stay in sync with every `segment_breaks.push` in [`build_layout`]. It exists so a
-/// caller can make that decision without paying for a full layout it would then discard.
+/// It must agree with each `segment_breaks.push` in [`build_layout`]. It reads only the tokens, so the label
+/// chooses the path before it builds a layout.
 pub fn needs_segmentation(
   tokens: &[Token<'_>],
   scroll_code_blocks: bool,
@@ -404,14 +398,12 @@ pub fn needs_segmentation(
   })
 }
 
-/// Build an egui [`LayoutJob`] from a slice of markdown tokens.
+/// Build the [`LayoutJob`] of `tokens`: one styled section for each run of text, and the
+/// [`LayoutResult::segment_breaks`] of the tokens that the job leaves out.
 ///
-/// Converts tokens into styled text sections suitable for galley layout.
-/// Returns segment breaks for tokens that need separate rendering (tables, images, blockquotes).
-///
-/// `max_width` and `break_anywhere` seed [`LayoutJob::wrap`]. Callers that cache the
-/// resulting job should re-apply the live wrap width (and break flag) before shaping,
-/// since those values are typically excluded from layout cache keys.
+/// `max_width` and `break_anywhere` are the first values of [`LayoutJob::wrap`]. A caller that caches the
+/// job and leaves these values out of its cache key must write the current values into the job before egui
+/// shapes it.
 #[allow(clippy::too_many_arguments)]
 pub fn build_layout(
   ui: &mut Ui,
@@ -445,12 +437,11 @@ pub fn build_layout(
 
   // Every section in the label font, a blank row included, has the body row height.
   let body_line_height = section_line_height(ui, &font_id, style.line_height_ratio * font_id.size);
-  // Pre-build common formats to avoid repeated font_id.clone().
   let base_format = text_format(font_id.clone(), color, body_line_height);
   let transparent_format = TextFormat { color: Color32::TRANSPARENT, ..base_format.clone() };
   let hr_format = TextFormat { line_height: Some(style.horizontal_rule.height), ..transparent_format.clone() };
 
-  // Disable egui's paragraph-splitting optimization (see egui #5411).
+  // A finite row count, also without a row limit, turns off the paragraph split of egui (egui#5411).
   if let Some(n) = max_rows {
     job.wrap.max_rows = n as usize;
   } else {
@@ -631,19 +622,18 @@ pub fn build_layout(
   }
 }
 
-/// Optional custom syntax highlighting theme reference.
+/// The code theme that a label gives to the layout functions.
 ///
-/// When the `syntax_highlighting` feature is enabled this is
-/// `Option<&syntect::highlighting::Theme>`. When disabled it is `Option<&()>`
-/// (always `None`).
+/// With the `syntax_highlighting` feature it is `Option<&syntect::highlighting::Theme>`. Without it, it is
+/// `Option<&()>`, and always `None`.
 #[cfg(feature = "syntax_highlighting")]
 pub type CodeThemeArg<'a> = Option<&'a syntect::highlighting::Theme>;
 
-/// See [`CodeThemeArg`] - stub type when syntax highlighting is disabled.
+/// The code theme that a label gives to the layout functions. Without syntax highlighting, it is always `None`.
 #[cfg(not(feature = "syntax_highlighting"))]
 pub type CodeThemeArg<'a> = Option<&'a ()>;
 
-/// Pad each source line with a leading space (matches scrolling code-block rendering).
+/// `text` with one space at the start of each line, as a scrolling code block has.
 pub(crate) fn pad_code_body(text: &str) -> String {
   let mut padded = String::with_capacity(text.len() + text.lines().count());
   for (i, line) in text.lines().enumerate() {
@@ -841,12 +831,13 @@ mod syntect_code {
     }
   }
 
-  /// Streaming cache for a scrolling fence: syntect state is frozen after complete lines.
+  /// The cache of a scrolling code block. It keeps the syntect state after the last complete line, so that
+  /// a code block that grows highlights only its new lines.
   #[derive(Clone)]
   pub(crate) struct StreamingCodeCache {
     pub identity_hash: u64,
     pub source: Arc<str>,
-    /// Byte length of the complete-line prefix of `source` covered by state / `frozen_job`.
+    /// The byte length of the complete lines at the start of `source`, which the states and `frozen_job` hold.
     pub frozen_len: usize,
     pub parse_state: ParseState,
     pub highlight_state: HighlightState,
@@ -854,7 +845,10 @@ mod syntect_code {
     pub galley: Arc<Galley>,
   }
 
-  /// Produce a syntax-highlighted [`LayoutJob`] for a code block body.
+  /// The [`LayoutJob`] of the code `body`, highlighted for `language`.
+  ///
+  /// The theme is `code_theme`, else the theme that [`crate::set_code_themes`] installed, else the
+  /// built-in `base16-ocean` theme for the current dark mode.
   pub fn highlight_code(
     ui: &Ui,
     body: &str,
@@ -891,7 +885,7 @@ mod syntect_code {
     layout_job
   }
 
-  /// Build or update a scrolling code-block galley.
+  /// The cache of a scrolling code block for the source `text`, from `cached` when it is still valid.
   pub(crate) fn scrolling_code_galley(
     ui: &mut Ui,
     text: &str,
@@ -1143,7 +1137,7 @@ pub use syntect_code::highlight_code;
 #[cfg(feature = "syntax_highlighting")]
 pub(crate) use syntect_code::{scrolling_code_galley, theme_identity_ptr, StreamingCodeCache};
 
-/// Produce a plain (unhighlighted) [`LayoutJob`] for a code block body.
+/// The [`LayoutJob`] of the code `body`, in one color, because the crate has no syntax highlighting.
 #[cfg(not(feature = "syntax_highlighting"))]
 pub fn highlight_code(
   ui: &Ui,

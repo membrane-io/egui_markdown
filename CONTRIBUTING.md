@@ -3,11 +3,13 @@
 ## Get started
 
 1. Clone the repository.
-2. Install Rust 1.95 or later, which egui 0.37 requires (`rustup update stable`).
+2. Install Rust 1.95 or later, which egui `main` requires (`rustup update stable`).
 3. Run `cargo check` to verify your setup.
 4. Run `cargo run --example simple` to see the library render a document.
 
-## Code Style
+## Code style
+
+Read [ARCHITECTURE.md](ARCHITECTURE.md) before you change the layout or the caches.
 
 - All inline comments end with a period.
 - Doc comments (`///`) come before `#[allow(...)]` attributes.
@@ -23,10 +25,11 @@ Run the local CI script:
 ./check.sh
 ```
 
-This runs `cargo fmt --check`, `cargo clippy` across the feature configurations, `cargo test`,
-`cargo doc`, and a wasm check.
+This runs `cargo fmt --check`, `cargo clippy` for three feature sets, `cargo test`, `cargo doc`, and a
+wasm check. CI runs `cargo fmt --check`, `cargo clippy` on the library only, `cargo test`, `cargo doc` and
+the wasm check, with the default features only.
 
-## Pull Request Guidelines
+## Pull request guidelines
 
 - Keep each pull request to a single change.
 - Add tests for new parser or layout behavior.
