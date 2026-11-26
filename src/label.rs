@@ -24,7 +24,7 @@ use crate::layout::{scrolling_code_galley, StreamingCodeCache};
 use crate::link::{InlineWidgetRow, LinkHandler};
 use crate::paint;
 use crate::parser;
-use crate::style::{CodeBlockStyle, MarkdownStyle};
+use crate::style::MarkdownStyle;
 use crate::table;
 use crate::types::{tokens_to_owned, Token};
 
@@ -1287,7 +1287,7 @@ impl<'a> MarkdownLabel<'a> {
     let hr_positions: Vec<usize> = hr_positions.iter().copied().filter(|&at| shown(at)).collect();
     let hr_positions = hr_positions.as_slice();
     let painted_widget_spans: Vec<_> = inline_widget_spans.iter().filter(|&&(at, ..)| shown(at)).cloned().collect();
-    let code_block_rects = paint::compute_code_block_rects(ui, code_block_spans, &galley);
+    let mut code_block_rects = paint::compute_code_block_rects(code_block_spans, &galley);
     let available_width = ui.available_width();
     // Decorations (code block backgrounds, horizontal rules) span the allocated width, so a
     // filling widget must claim the leftover space — otherwise they paint outside the rect.
@@ -1305,25 +1305,21 @@ impl<'a> MarkdownLabel<'a> {
       size.x = size.x.max(available_width);
     }
     let padding = &style.code_block.padding;
-    if hug_content {
-      // The label that hugs its content is wide enough for the right padding of each code block.
-      let code_right = code_block_rects.iter().map(|r| r.max.x + padding[2]).fold(0.0, f32::max);
-      size.x = size.x.max(code_right);
-    }
+    // The label is wide enough for the right padding of each code block, but not wider than the wrap width.
+    let code_right = code_block_rects.iter().map(|r| r.max.x + padding[2]).fold(0.0, f32::max);
+    size.x = size.x.max(code_right.min(wrap.max_width));
     let decoration_width = if hug_content { size.x } else { available_width };
     // The background of a code block starts at the pad space that starts each row, because the layout puts
     // the left padding after that space. It ends at the right edge of the label, as the frame of a scrolling
-    // code block does.
-    let mut code_block_rects = code_block_rects;
+    // code block does. It goes past the rows of the block by the top and the bottom padding.
     for r in &mut code_block_rects {
-      r.min.x += padding[0];
-      r.max.x = size.x - padding[2];
+      *r = Rect::from_min_max(pos2(r.min.x, r.min.y - padding[1]), pos2(size.x, r.max.y + padding[3]));
     }
-    // A code block grows its background by its padding past its rows. In the galley, a blank row above and
-    // below the block holds that padding. A block at the top or at the bottom of the galley has no blank row
-    // there, so the label allocates the padding, as a `Frame` allocates its inner margin.
-    let pad_top = if code_block_rects.iter().any(|r| r.min.y <= 0.0) { padding[1] } else { 0.0 };
-    let pad_bottom = if code_block_rects.iter().any(|r| r.max.y >= size.y) { padding[3] } else { 0.0 };
+    // In the galley, a blank row above and below a code block holds that padding. A block at the top or at the
+    // bottom of the galley has no blank row there, so the label allocates the padding, as a `Frame` allocates
+    // its inner margin.
+    let pad_top = if code_block_rects.iter().any(|r| r.min.y < 0.0) { padding[1] } else { 0.0 };
+    let pad_bottom = if code_block_rects.iter().any(|r| r.max.y > size.y) { padding[3] } else { 0.0 };
     size.y += pad_top + pad_bottom;
     let galley_offset = epaint::vec2(0.0, pad_top);
 
@@ -1353,7 +1349,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     if let Some(button_fn) = self.code_block_buttons {
-      render_code_block_buttons(ui, button_fn, &code_block_rects, code_block_info, galley_pos, &style.code_block);
+      render_code_block_buttons(ui, button_fn, &code_block_rects, code_block_info, galley_pos);
     }
 
     if let Some(handler) = self.link_handler {
@@ -1557,7 +1553,7 @@ fn paint_decorations(
   style: &MarkdownStyle,
 ) {
   for bg_rect in code_block_rects {
-    paint::paint_code_block_bg(ui, *bg_rect, origin, &style.code_block);
+    paint::paint_code_block_rect(ui, bg_rect.translate(origin.to_vec2()), &style.code_block);
   }
   paint::paint_horizontal_rules(ui, hr_positions, galley, origin, available_width, &style.horizontal_rule);
 }
@@ -1568,10 +1564,9 @@ fn render_code_block_buttons(
   code_block_rects: &[Rect],
   code_block_info: &[(String, String)],
   galley_pos: Pos2,
-  code_style: &CodeBlockStyle,
 ) {
   for (bg_rect, (code_text, lang)) in code_block_rects.iter().zip(code_block_info.iter()) {
-    let bg_rect = paint::padded_code_block_rect(*bg_rect, galley_pos, code_style);
+    let bg_rect = bg_rect.translate(galley_pos.to_vec2());
 
     let header_rect = Rect::from_min_max(pos2(bg_rect.min.x, bg_rect.min.y), pos2(bg_rect.max.x, bg_rect.min.y + 24.0));
     let mut child_ui =

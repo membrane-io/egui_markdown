@@ -9,10 +9,11 @@ use crate::style::{CodeBlockStyle, HorizontalRuleStyle};
 
 /// Compute the background rectangles for code blocks from character offset spans.
 ///
-/// A rect starts at the x of the first glyph of the block and ends at the right edge of the widest row of the
-/// block. [`crate::MarkdownLabel`] then moves the right edge to the right edge of the space that it allocates.
-/// `_ui` is not used.
-pub fn compute_code_block_rects(_ui: &mut Ui, code_blocks: &[(usize, usize)], galley: &Arc<Galley>) -> Vec<Rect> {
+/// A rect covers the rows of the block, from the x of its first glyph to the right edge of its widest row.
+/// [`paint_code_block_bg`] grows it by the padding of the style. [`crate::MarkdownLabel`] keeps its left edge,
+/// because the layout puts the left padding inside the rows, and moves its right edge to the right edge of the
+/// label.
+pub fn compute_code_block_rects(code_blocks: &[(usize, usize)], galley: &Arc<Galley>) -> Vec<Rect> {
   let mut code_block_rects = Vec::new();
   for &(start, end) in code_blocks {
     debug_assert!(start <= end);
@@ -45,20 +46,21 @@ pub fn compute_code_block_rects(_ui: &mut Ui, code_blocks: &[(usize, usize)], ga
   code_block_rects
 }
 
-/// The rect of the background of a code block: `bg_rect`, the rect of its rows relative to `origin`, grown
-/// by the padding of `code_style`.
-pub(crate) fn padded_code_block_rect(bg_rect: Rect, origin: Pos2, code_style: &CodeBlockStyle) -> Rect {
-  let p = &code_style.padding;
-  let r = bg_rect.translate(origin.to_vec2());
-  Rect::from_min_max(pos2(r.min.x - p[0], r.min.y - p[1]), pos2(r.max.x + p[2], r.max.y + p[3]))
-}
-
 /// Paint code block background and border.
 ///
 /// The fill and corner radius come from [`egui::Visuals::code`], as for the frame that
 /// [`crate::MarkdownLabel`] gives a scrolling code block, so both render paths show one code surface.
 pub fn paint_code_block_bg(ui: &Ui, bg_rect: Rect, origin: Pos2, code_style: &CodeBlockStyle) {
-  let r = padded_code_block_rect(bg_rect, origin, code_style);
+  let mut r = bg_rect.translate(origin.to_vec2());
+  r.min.x -= code_style.padding[0];
+  r.min.y -= code_style.padding[1];
+  r.max.x += code_style.padding[2];
+  r.max.y += code_style.padding[3];
+  paint_code_block_rect(ui, r, code_style);
+}
+
+/// Paint the background and the border of a code block in `r`.
+pub(crate) fn paint_code_block_rect(ui: &Ui, r: Rect, code_style: &CodeBlockStyle) {
   let code = &ui.visuals().code;
   ui.painter().rect_filled(r, code.corner_radius, code.bg_color);
   let stroke = Stroke::new(code_style.stroke_width, ui.visuals().widgets.noninteractive.bg_stroke.color);
