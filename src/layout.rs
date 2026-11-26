@@ -10,21 +10,12 @@ use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, MarkdownStyle};
 use crate::types::Token;
 
-/// The row height of body text (`TextFormat::line_height`) for the label font size `font_size`.
-///
-/// egui centers the text in a row that is taller than the font, so the extra height is space between
-/// two rows. The row height is 17/13 of the font size: 17 points for 13 point text, the Body size of the
-/// default egui style. A ratio, not a fixed height, keeps the same space between rows when an application
-/// changes the font size. The function multiplies before it divides, so 13 points gives exactly 17 points.
-pub(crate) fn body_line_height(font_size: f32) -> f32 {
-  font_size * 17.0 / 13.0
-}
-
-/// The row height of a section in the font `font_id`: `body_line_height`, or the egui row height of the
-/// font when that is taller. A heading or large inline code thus gets a row as tall as its font, and its
-/// glyphs do not overlap the rows above and below it.
-fn section_line_height(ui: &Ui, font_id: &FontId, body_line_height: f32) -> f32 {
-  body_line_height.max(ui.ctx().fonts_mut(|f| f.row_height(font_id)))
+/// The row height (`TextFormat::line_height`) of a section in the font `font_id`: `min_height`, or the egui
+/// row height of the font when that is taller. egui centers the text in a row that is taller than the font,
+/// so the extra height is space between two rows. A heading or large inline code gets a row as tall as its
+/// font, so that its glyphs do not overlap the rows above and below it.
+fn section_line_height(ui: &Ui, font_id: &FontId, min_height: f32) -> f32 {
+  min_height.max(ui.ctx().fonts_mut(|f| f.row_height(font_id)))
 }
 
 /// List markers are right-aligned in a slot as wide as this string, measured in the body font,
@@ -100,9 +91,8 @@ fn registered_family(ui: &Ui, name: &str) -> Option<FontFamily> {
 }
 
 #[inline]
-fn text_format(font_id: FontId, color: Color32) -> TextFormat {
-  let line_height = Some(body_line_height(font_id.size));
-  TextFormat { font_id, color, valign: Align::BOTTOM, line_height, ..Default::default() }
+fn text_format(font_id: FontId, color: Color32, line_height: f32) -> TextFormat {
+  TextFormat { font_id, color, valign: Align::BOTTOM, line_height: Some(line_height), ..Default::default() }
 }
 
 /// Outcome of appending a Link token to a [`LayoutJob`].
@@ -286,9 +276,11 @@ fn apply_bold(format: &mut TextFormat, ui: &Ui, has_bold: bool) {
 }
 
 /// The format of text with the inline `style`: bold, italic, strikethrough, the heading size, the
-/// inline code colors and font, and the row height of the resulting font.
+/// inline code colors and font. Text in a font other than the font of `base_format` gets the row height
+/// of its font when that is taller than `body_line_height`.
 fn styled_format(
   base_format: &TextFormat,
+  body_line_height: f32,
   style: &crate::types::TokenStyle,
   ui: &Ui,
   bold_available: bool,
@@ -315,8 +307,8 @@ fn styled_format(
     apply_inline_code_bg(&mut format, ui.visuals(), &markdown_style.inline_code);
     apply_inline_code_font(&mut format, ui, style.bold || style.heading.is_some());
   }
-  if let Some(body) = base_format.line_height {
-    format.line_height = Some(section_line_height(ui, &format.font_id, body));
+  if format.font_id != base_format.font_id {
+    format.line_height = Some(section_line_height(ui, &format.font_id, body_line_height));
   }
   format
 }
@@ -451,8 +443,10 @@ pub fn build_layout(
   let mut hr_positions: Vec<usize> = Vec::new();
   let mut inline_widget_spans: Vec<(usize, usize, usize, FontId)> = Vec::new();
 
+  // Every section in the label font, a blank row included, has the body row height.
+  let body_line_height = section_line_height(ui, &font_id, style.line_height_ratio * font_id.size);
   // Pre-build common formats to avoid repeated font_id.clone().
-  let base_format = text_format(font_id.clone(), color);
+  let base_format = text_format(font_id.clone(), color, body_line_height);
   let transparent_format = TextFormat { color: Color32::TRANSPARENT, ..base_format.clone() };
   let hr_format = TextFormat { line_height: Some(style.horizontal_rule.height), ..transparent_format.clone() };
 
@@ -480,7 +474,7 @@ pub fn build_layout(
         if text.is_empty() {
           continue;
         }
-        let format = styled_format(&base_format, style, ui, bold_available, color, style_ref);
+        let format = styled_format(&base_format, body_line_height, style, ui, bold_available, color, style_ref);
         push_section(&mut job, text, 0.0, format);
         section_to_token.push(token_index);
       }
@@ -556,7 +550,7 @@ pub fn build_layout(
       }
       Token::Link { text, href, style, .. } => {
         // A link takes the size, weight and slant of the text around it, and keeps its own color.
-        let link_base = styled_format(&base_format, style, ui, bold_available, color, style_ref);
+        let link_base = styled_format(&base_format, body_line_height, style, ui, bold_available, color, style_ref);
         let link_font = link_base.font_id.clone();
         let info = append_link_to_job(ui, &mut job, text, href, &link_font, &link_base, hyperlink_color, link_handler);
         if info.is_block_widget {
@@ -1224,36 +1218,65 @@ mod section_tests {
     }
   }
 
-  /// Each row is as tall as its tallest font or taller, so that the glyphs of two wrapped rows do not
-  /// overlap. egui rounds the row to the pixel and not the font, so the test accepts half a point less.
+  /// Run `add_contents` in a context with the default egui fonts, so that rows have real font metrics.
+  fn with_default_fonts(mut add_contents: impl FnMut(&mut Ui)) {
+    let ctx = egui::Context::default();
+    let mut output = ctx.run_ui(egui::RawInput::default(), |ui| add_contents(ui));
+    output.textures_delta.clear();
+  }
+
+  /// The height of each row of `text` in a label 200 points wide with the font size `size`.
+  fn row_heights(ui: &mut Ui, text: &str, size: f32, style: &MarkdownStyle) -> Vec<f32> {
+    let markdown = crate::parse(text);
+    let font = FontId::proportional(size);
+    let color = ui.visuals().text_color();
+    let layout = build_layout(ui, &markdown.tokens, font, color, None, 200.0, false, None, false, style, None);
+    let galley = ui.fonts_mut(|f| f.layout_job(layout.job));
+    galley.rows.iter().map(|row| row.row.size.y).collect()
+  }
+
   /// A row of body text is 17 points tall for 13 point text, and the same ratio for each other font size.
+  /// A heading row is as tall as its font or taller, so that the glyphs of two wrapped rows do not overlap.
+  /// egui rounds the row to the nearest pixel, so the test accepts half a point less.
   #[test]
   fn rows_follow_the_font_size() {
     let mut checked = false;
-    egui::__run_test_ui(|ui| {
+    with_default_fonts(|ui| {
       let style = MarkdownStyle::default();
       let long = "word ".repeat(40);
       for (size, body_row) in [(13.0, 17.0), (20.0, 26.0), (10.0, 13.0)] {
-        for prefix in ["", "# ", "## ", "Text `code` "] {
-          let text = format!("{prefix}{long}");
-          let markdown = crate::parse(&text);
-          let font = FontId::proportional(size);
-          let color = ui.visuals().text_color();
-          let layout = build_layout(ui, &markdown.tokens, font, color, None, 200.0, false, None, false, &style, None);
-          let galley = ui.fonts_mut(|f| f.layout_job(layout.job));
-          assert!(galley.rows.len() > 1, "the text wraps");
-          for row in &galley.rows {
-            let font_height = row.row.glyphs.iter().map(|g| g.font_height).fold(0.0, f32::max);
-            let height = row.row.size.y;
-            assert!(
-              height + 0.5 >= font_height,
-              "{prefix:?} at {size} pt: a row of {height} for a font of {font_height}"
-            );
-            if prefix.is_empty() {
-              assert_eq!(height, body_row, "a body row at {size} pt");
-            }
-          }
+        let rows = row_heights(ui, &long, size, &style);
+        assert!(rows.len() > 1, "the text wraps");
+        assert!(rows.iter().all(|&height| height == body_row), "body rows {rows:?} at {size} pt");
+        for (prefix, scale) in [("# ", style.heading.scales[0]), ("## ", style.heading.scales[1])] {
+          let font_row = ui.fonts_mut(|f| f.row_height(&FontId::proportional(size * scale)));
+          let rows = row_heights(ui, &format!("{prefix}{long}"), size, &style);
+          assert!(rows.len() > 1, "the heading wraps");
+          assert!(
+            rows.iter().all(|&height| height + 0.5 >= font_row),
+            "{prefix:?} rows {rows:?} for a font row of {font_row}"
+          );
         }
+      }
+      checked = true;
+    });
+    assert!(checked);
+  }
+
+  /// Each row of body text, a blank row and a list item included, is `line_height_ratio` times the font
+  /// size tall. When that is shorter than the row height of the font, each row has the row height of the
+  /// font.
+  #[test]
+  fn body_rows_follow_the_line_height_ratio() {
+    let mut checked = false;
+    with_default_fonts(|ui| {
+      let text = format!("{}\n\n- item\n- item", "word ".repeat(40));
+      let font_row = ui.fonts_mut(|f| f.row_height(&FontId::proportional(13.0))).round();
+      for (size, ratio, row) in [(11.0, 17.0 / 11.0, 17.0), (13.0, 1.0, font_row)] {
+        let style = MarkdownStyle { line_height_ratio: ratio, ..Default::default() };
+        let rows = row_heights(ui, &text, size, &style);
+        assert!(rows.len() > 4, "the paragraph wraps");
+        assert!(rows.iter().all(|&height| height == row), "rows {rows:?} at {size} pt and the ratio {ratio}");
       }
       checked = true;
     });
@@ -1276,7 +1299,7 @@ mod section_tests {
       };
       let paragraphs = galley("Above\n\nBelow");
       let rule = galley("Above\n\n---\n\nBelow");
-      let line = body_line_height(14.0);
+      let line = style.line_height_ratio * 14.0;
       let added = rule.size().y - paragraphs.size().y;
       assert!((added - (style.horizontal_rule.height + line)).abs() < 0.5, "the rule added {added} points");
 
