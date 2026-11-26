@@ -7,196 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- The crates need egui `main` (after egui 0.37.0) and Rust 1.95, for `LayoutSection::wrap_indent` and
+  `TextFormat::background_stroke`. Patch egui to `main`, as the README shows, until the next egui
+  release. Version 0.1.0 needed egui 0.33. ([#13], [#20])
+- `MarkdownLabel::show` returns a `MarkdownLabelOutput`. Its `response` covers the whole label, and
+  `link_clicked` is true for a click on a link. A caller that used `show` as the last expression of a
+  closure that returns `()` must add a `;`. ([#11], [#32])
+- `MarkdownStyle::code_font_size` is an `Option<f32>`. `None`, the default, uses the size of
+  `TextStyle::Monospace` in the egui style, as `ui.code()` does. Version 0.1.0 used a fixed `10.0`.
+  ([#30])
+- `CodeBlockStyle::corner_radius` and the `InlineCodeStyle` fields `expand_bg_y`, `bg_corner_radius`,
+  `stroke_dark`, `stroke_light` and `stroke_width` are removed. Code blocks and inline code take their
+  corner radius, and inline code its margin and border, from `egui::Visuals::code`. ([#10], [#20])
+- `LinkHandler::layout_link` receives the `&Ui`.
+- `LinkHandler::paint_inline_widget` runs once for each link, not once for each row. It receives the
+  font of the link and an `InlineWidgetRow` for each row. ([#16])
+- `Token::Link` has a `style: TokenStyle` field. A pattern that names every field must add `style` or
+  `..`.
+- `layout::build_layout` takes `max_width` and `break_anywhere` and does not read `ui.wrap_mode()`.
+  `layout::apply_inline_code_bg` takes `&egui::Visuals` in place of `dark_mode`.
+  `paint::compute_code_block_rects` takes no `Ui`. ([#6], [#20], [#35])
+
 ### Added
 
-- `MarkdownStyle::line_height_ratio`, the height of a row of body text divided by the label font size.
-- The `egui_markdown_style` crate, which holds `MarkdownStyle` and the other style types, so that an
-  application can store a style without a dependency on the renderer.
-- `set_style` and `global_style`, which install and read one `MarkdownStyle` for an `egui::Context`. A
-  label with no `.style()` uses it.
+- The `egui_markdown_style` crate, which holds `MarkdownStyle` and the other style types. An
+  application can store a style without a dependency on the renderer. ([#2])
+- `set_style` and `global_style`, which install and read one `MarkdownStyle` for an `egui::Context`.
 - `set_code_themes` and `code_theme`, which install and read a dark and a light syntect theme for an
-  `egui::Context`. A label with no `.code_theme()` uses them.
-- `ListStyle` on `MarkdownStyle`. A list marker is right-aligned in a slot, and a wrapped row of an item
-  starts at the x of the item text.
-- `MarkdownLabel::shrink_code_blocks` and `MarkdownLabel::code_block_min_width`, which size a scrolling
-  code block to its content.
-- `MarkdownLabel::hug_content`, which sizes the label to its content and not to the available width.
-- `MarkdownLabel::map_job`, which rewrites the layout job before the label shapes it, for example to
-  fade in new text.
-- Inline code has rounded corners, a margin, and a border. It takes all three from
-  `egui::Visuals::code`.
-- A row that soft-wraps inside a list item or a code line starts at the indent of the line that it
-  continues. The label sets `LayoutSection::wrap_indent` for this.
-- The `extra_syntaxes` feature, which highlights TypeScript, TSX, JSX and the other syntaxes of `bat`
-  through `two-face`.
+  `egui::Context`.
+- `MarkdownStyle::line_height_ratio`, the height of a row of body text divided by the font size.
+  ([#34])
+- `ListStyle`: a list marker is right-aligned in a slot, so all items of a level start their text at
+  the same x. ([#3])
+- `TableStyle` with `stroke_width`, `corner_radius` and `cell_padding`. A table that does not fit
+  shows a stroke on the cut edge and an inner shadow. ([#10])
+- `MarkdownLabel::wrap_mode`, `wrap`, `truncate` and `extend`, as on `egui::Label`, and
+  `MarkdownLabel::overflow_wrap` with `OverflowWrap`. `.truncate().max_lines(3)` elides after three
+  rows. ([#6])
+- `MarkdownLabel::hug_content`, which makes the label as wide as its content. ([#9])
+- `MarkdownLabel::shrink_code_blocks` and `code_block_min_width`, which size a scrolling code block to
+  its content. ([#1])
+- `MarkdownLabel::map_job`, which changes the layout job before the label shapes it, for example to
+  fade in new text. ([#8])
+- `LinkHandler::hover_text`, a tooltip for a link. A link with a title, such as `[text](url "Docs")`,
+  shows the title when the handler gives no text. ([#11], [#14])
+- The `extra_syntaxes` feature: TypeScript, TSX, JSX and the other syntaxes of `bat`, through
+  `two-face`. ([#15])
 - A code block shows the italic, bold and underline that the syntect theme gives a scope. Bold code
-  uses a registered `"mono-bold"` font family.
-- The label renders the HTML `<img>` and `<br>` tags. An `<img>` tag gives a `Token::Image` with its
-  `width` and `height` in points. A table cell shows an image and starts a new row at a `<br>`.
-- `OverflowWrap` enum (`Normal`, `BreakAll`) and `MarkdownLabel::overflow_wrap`, which break a
-  run of text that is wider than the available width.
-- `MarkdownLabel::wrap_mode`, `.wrap()`, `.truncate()`, and `.extend()`, which mirror the same
-  methods on the egui `Label`. Truncate elides after `max_lines` rows, which defaults to 1, and
-  sets `BreakAll`.
-- `LinkHandler::hover_text`, which shows a tooltip while the pointer is on a link. A handler
-  uses it to say where a link goes when the link text does not.
-- `TableStyle::stroke_width` on `MarkdownStyle`. A non-zero width draws separator lines
-  between table cells. Default is `0.0` (no stroke).
-- `TableStyle::corner_radius` on the outer table stroke.
-- `TableStyle::cell_padding` (`[left, top, right, bottom]`) for the inset inside each cell.
-- Overflow chrome on tables: a matching stroke on the visible cut edge, and a
-  light inner shadow when the table does not fit horizontally or vertically.
-- A link shows its title, such as `"Docs"` in `[text](url "Docs")`, as a tooltip when the
-  `LinkHandler` gives no hover text.
+  uses a registered `"mono-bold"` font family. ([#15])
+- The HTML tags `<img>`, with `width` and `height`, and `<br>`, also in a table cell. ([#18])
 - `LinkStyle` derives `Clone`, `Copy`, `Debug`, `PartialEq` and `Eq`.
-- `render_steady_state_long`, `render_streaming_long` and `render_streaming_long_healed` benchmarks, on a
-  document of 500 sections.
 
 ### Changed
 
-- The row height of the label follows the font size. A row of body text is
-  `MarkdownStyle::line_height_ratio` times the label font size, and never shorter than the row height of
-  the font. The default ratio is 17/13, so the 13 point Body font of the default egui style keeps its 17
-  point rows. Before, every row was 17 points tall, so text larger than 13 points overlapped the next row
-  and smaller text had large gaps. A heading or inline code row is as tall as its font or taller. Before, the
-  rows of a wrapped heading overlapped, also at the default size. Headings at the default size now get
-  taller rows (H1 24, H2 20 and H3 18 points), so a label with a heading is taller than before.
-- Inline code uses `FontFamily::Monospace`, as a code block does. It keeps the size of the text
-  around it. Bold inline code uses the `"mono-bold"` family when the app registers one.
-- **Breaking:** `MarkdownStyle::code_font_size` is an `Option<f32>`. `None`, the default, uses the
-  size of `TextStyle::Monospace` in the egui style, as `ui.code()` does. `Some(size)` sets a fixed
-  size. Version 0.1.0 used a fixed `10.0`.
-- **Breaking:** the crates need egui 0.37 from the egui `main` branch, for
-  `LayoutSection::wrap_indent` and `TextFormat::background_stroke`. Patch egui to `main` until the
-  next egui release. Version 0.1.0 needed egui 0.33.
-- **Breaking:** `CodeBlockStyle::corner_radius` is removed. A code block takes its fill and its corner
-  radius from `egui::Visuals::code`.
-- **Breaking:** `InlineCodeStyle::expand_bg_y`, `bg_corner_radius`, `stroke_dark`, `stroke_light` and
-  `stroke_width` are removed. Set the margin, the corner radius and the border of inline code on
-  `egui::Visuals::code`.
-- **Breaking:** `apply_inline_code_bg` takes `&egui::Visuals` in place of `dark_mode: bool`.
-- **Breaking:** `LinkHandler::layout_link` receives the `&Ui`, so that a handler can lay out against
-  the live `Ui`.
-- A scrolling code block keeps the syntect state of each complete line, and highlights only the new
-  lines when the code grows.
-- A code block in the text galley gets the code background fill, as a scrolling code block does.
-- The scroll bar of a table that scrolls is inside the border of the table.
-- **Breaking:** `build_layout` now takes `max_width: f32` and `break_anywhere: bool`, and no
-  longer reads `ui.wrap_mode()` itself. A caller that caches the resulting job must write the
-  live wrap values over it before each shape, as `MarkdownLabel` already does.
-- **Breaking:** `MarkdownLabel::show` now returns `MarkdownLabelOutput`. Its `response` covers all of
-  the label: the text, the tables, the images, the code blocks and the block widgets. It is hovered
-  when the pointer is anywhere on the label, and it is clicked only when the click is on the text.
-  `link_clicked` tells a click on a link from a click on other text. A parent widget that reacts to
-  a click uses the two to ignore a link click. A caller that uses `show` as the last expression of a
-  closure that returns `()` must add a `;`.
-- **Breaking:** `Token::Link` has a `style: TokenStyle` field, the inline style around the link. A
-  pattern that names every field of `Token::Link` must add `style` or `..`.
-- Holding Shift no longer turns off text selection, so a shift-click extends the selection, as it
-  does on `egui::Label`. The selection also stays painted while Shift is down. An app that used
-  Shift for something else can pass `.selectable(!ui.input(|i| i.modifiers.shift))`.
-- **Breaking:** the crates need Rust 1.95, which egui 0.36 needs. `rust-version` said 1.80.
-- **Breaking:** `LinkHandler::paint_inline_widget` now runs once for each link, not once for each
-  row. It receives the font of the link and an `InlineWidgetRow` for each row, with the rect and the
-  characters of the row, so one widget can paint and react to hover over all of its rows.
-- `heal()` removes a last line that holds only block markers, such as `-` or `1.`, and a run of
-  inline markers at the end, such as `**`. It also removes the URL of an open link, so the link
-  has an empty href until its `)` arrives. A click on a link with an empty href opens no URL.
-- **Breaking:** `paint::compute_code_block_rects` no longer takes a `Ui`. The right edge of each rect is the
-  right edge of the widest row of the block. Before, it was the available width of the `Ui` minus 16 pt.
+- The row height follows the font size. A row of body text is `line_height_ratio` times the font size,
+  and a heading or inline code row is at least as tall as its font. Headings at the default size get
+  taller rows, so a label with a heading is taller than before. ([#34])
+- Inline code uses the monospace font, at the size of the text around it. Bold inline code uses the
+  `"mono-bold"` family when the app registers one. ([#30])
+- A wrapped row of a list item or of a code line starts at the indent of the line. ([#3], [#20])
+- A nested list starts its marker at the x of the text of its parent item.
+- A horizontal rule has one blank row above it and one below it, and its row is
+  `HorizontalRuleStyle::height` tall.
+- A shift-click extends the text selection, as on `egui::Label`. Shift no longer turns off selection.
+- `heal()` holds back a marker at the end of the text, such as `-`, `1.` or `**`, and the URL of an
+  open link, until more text shows what it is. A link with an empty href opens nothing. ([#12])
+- `MarkdownLabel::calculate_size` runs the render of `show` in an invisible child `Ui`, so it counts
+  tables, blockquotes, images and scrolling code blocks. `calculate_size` and `layout_in_ui` heal the
+  text when `heal` is on.
+- The background of a code block starts at the left edge of the label and ends at its right edge. The
+  label allocates the padding of a code block at its top and bottom. The code text is 4 points further
+  right than before, and the code block buttons use the padding of `CodeBlockStyle`. ([#35])
+- A code block in the text galley gets the background fill of `egui::Visuals::code`, as a scrolling
+  code block does. ([#10])
 
 ### Fixed
 
-- A table measured smaller in a sizing pass than it shows: each cell lost its right and bottom
-  padding. A `Harness::fit_contents` or an auto-sized `Area` cut off the end of the label.
-- A code block in a list item was drawn over the item text and the next item, at the left edge of the
-  label. It now starts below the item text, at the x of the item text.
+- A code block in a list item covered the item text and the next item. ([#29])
+- A table measured smaller in a sizing pass than it shows, so `Harness::fit_contents` or an auto-sized
+  `Area` cut off the end of the label. ([#28])
 - Without the `syntax_highlighting` feature, a code block was gray and hard to read in light mode.
-  It now takes the text color of `egui::Visuals::code`.
-- The rendered text was invisible to screen readers and other accessibility tools. Each galley now
-  has the widget info of a label, as `egui::Label` does.
-- The text of a code block shown with `scroll_code_blocks` could not be selected. It now can, as other
-  text can.
-- A streamed `**` at the end of the text healed to `****` and showed as a rule for one delta.
-  A streamed `-` under a line made the line a heading for one delta.
-- A `map_job` that hides text, such as a reveal, now also hides a rule or an inline widget after
-  that text. The label previously painted them before the text above them showed.
-- A streamed table header showed as raw text, then as a table, and then as raw text again.
-  `heal()` now removes an incomplete table line above the separator, and a body row that holds
-  only its first `|`. A complete header gets its separator without a blank line between them.
-- `TextWrapMode::Truncate` on the surrounding `Ui`, and now on the widget builders, truncates
-  the text. It previously behaved as wrap.
-- The label draws the link underline half way into the descent of the font. It previously drew
-  the underline at the bottom of the row, so a tall line height put a gap under the text.
-- `heal()` treated every `*` as emphasis, so a streamed `* item` bullet, or `2 * 3`, showed a stray
-  `*`. An emphasis run now opens only before a non-space character and closes only after one, and a
-  blank line closes every inline construct.
-- `heal()` closed a `~~~` fence with a backtick fence, which showed as a line of code. It now closes
-  a fence with a run of the same character and length, and a backtick run inside a tilde fence stays
-  code.
-- `heal()` no longer cuts the `]` from a footnote reference at the end of the text, counts a table
-  header with an empty cell as one column short, or adds a table separator after a blank line.
-- The text of a link or an image kept only its last styled run, so `[**bold** and more](u)` showed
-  ` and more`. It now keeps every run.
-- A later paragraph of a loose list item ran into the first paragraph, and a code block inside an
-  item started on the row of the item text. Both now start a row of their own.
-- Inline code and links inside a heading now have the size of the heading, and inline code inside
-  bold text is bold.
-- `LinkStyle::underline` is now read. `false` turns off the hover underline.
-- A blockquote now gets block spacing above it, as it already did below it.
-- Inline code in a table cell had no space between its background and the next word. A cell that
-  holds a link also dropped the inline code background, italics and strikethrough of its other text,
-  and put item spacing between its words.
-- A block widget link now gets block spacing above and below it, and the text after it no longer starts
-  with a space.
-- A nested list starts its marker at the x of the text of the item above it. It was indented by the
-  width of two spaces, which left the nested text close to the parent's text.
-- A horizontal rule had two blank rows above it and two below it, and its own row was a full line
-  tall. It now has one blank row on each side, as between two paragraphs, and its row is
-  `HorizontalRuleStyle::height` tall.
-- The segmented render path no longer copies every token of the document on each cached frame.
-- A frame with unchanged text no longer hashes the tokens of every text segment. On a document of 500
-  sections, a steady frame costs about 89us, down from 162us.
-- A block's cached height is now keyed by the block itself, so a block outside the view stays culled
-  while text streams in elsewhere in the document.
-- A streamed reply is parsed and healed incrementally. When the new text starts with the text of the
-  last parse up to its last resume point, the label keeps the tokens before that point and parses and
-  heals only the text after it. Cached segments and blocks in the kept tokens skip their hash. On a
-  document of 500 sections, a streamed frame costs about 220us, down from 810us, or 945us with heal on.
-- `MarkdownLabel::calculate_size` now heals the text when `heal` is on, and counts tables,
-  blockquotes, images and scrolling code blocks. It measures by running the render of `show` in an
-  invisible child `Ui`. Its width is still the width of the content.
-- `MarkdownLabel::layout_in_ui` now heals the text when `heal` is on. Its docs say that the galley holds
-  text only.
-- A table or an image outside the view keeps no height from an old width. The label measures it
-  again when the available width changes.
-- A `LinkHandler::layout_link` that reads the egui context inside a table cell no longer runs while
-  the label holds the fonts lock.
-- Two tables in one label no longer share a scroll id.
-- The published package now includes the streaming test fixtures, and `egui_markdown_style` ships
+  ([#23])
+- Screen readers did not read the text of the label. The text of a scrolling code block could not be
+  selected. ([#24])
+- A label kept an old layout after a change of its font, of the egui fonts, of the visuals, of the code
+  theme, of `max_lines` or of `scroll_code_blocks`. ([#33])
+- `TextWrapMode::Truncate` on the surrounding `Ui` wrapped the text.
+- `heal()` errors in streamed text: a `**` at the end showed as a rule, a `-` under a line made a
+  heading, a `* item` bullet or `2 * 3` showed a stray `*`, a `~~~` fence closed with backticks, a
+  table header showed as raw text and then as a table, and a footnote reference lost its `]`. ([#12],
+  [#14])
+- The text of a link or an image kept only its last styled run.
+- Inline code and links in a heading did not have the size of the heading. Inline code in bold text was
+  not bold.
+- `LinkStyle::underline` had no effect.
+- A blockquote had no block spacing above it. A block widget link had no block spacing, and the text
+  after it started with a space. A later paragraph or a code block of a list item started on the row
+  of the item text.
+- Inline code in a table cell had no space after its background. A cell with a link dropped the inline
+  code background, italics and strikethrough of its other text.
+- The link underline was at the bottom of the row, not under the text.
+- Two tables in one label shared a scroll id. ([#2])
+- The scroll bar of a table was outside the border of the table. ([#17])
+- A table or an image outside the view kept its height from an old width. ([#18])
+- A `LinkHandler::layout_link` that reads the egui context in a table cell ran while the label held the
+  fonts lock. ([#19])
+- The published package did not include the test fixtures, and `egui_markdown_style` did not include
   its license files.
-- A label that keeps its id and its text now follows a change of its font, of the egui text style that
-  it uses, of the egui visuals (dark or light mode, the hyperlink color, the strong text color and
-  `Visuals::code`), of the code theme, of `max_lines` and of `scroll_code_blocks`. Before, it kept the
-  layout of an earlier frame.
-- A label now follows a change of the fonts (`Context::set_fonts`, `Context::add_font`, or a "bold" or
-  "mono-bold" family that the app registers later) and a reset of the font atlas. Before, a list and an
-  indented code line kept the widths of the old fonts, and a scrolling code block kept the advances of the
-  old fonts and painted parts of other glyphs.
-- After a change of `overflow_wrap` or of the wrap mode, `calculate_size` and the culling of text off the
-  screen used a size from before the change.
-- A code block at the start or at the end of a label, of a blockquote or of a list item painted its
-  background 6 pt outside the label, over the widget above or below it. The label now allocates the
-  padding of that block, as an egui `Frame` allocates its inner margin, and the quote bar runs to the
-  bottom of the background. A code block between two paragraphs keeps its place.
-- The background of a code block now ends at the right edge of the label. Before, it ended 4 pt before
-  that edge, and with `hug_content` it filled the available width past the label. A label with
-  `hug_content` or with `TextWrapMode::Extend` is wide enough for the right padding of a code block, but
-  a label that wraps is not wider than the available width.
-- The background of a code block in a label without `scroll_code_blocks` started 4 pt left of the
-  label and of the paragraph text. It now starts at the left edge of the label, and the code text starts
-  after the left padding, as in a scrolling code block. The code text is 4 pt further right than before.
-- The code block buttons now use the padding of `CodeBlockStyle`. Before, they used fixed values.
+
+### Performance
+
+- The label parses and heals a streamed text only from the last point where the parse can start
+  again. ([#14])
+- A frame with unchanged text hashes no text segment, and a block outside the view stays culled while
+  text streams in elsewhere. ([#14])
+- The segmented render path copies no tokens on a cached frame. ([#14])
+- A scrolling code block highlights only the new lines when the code grows.
 
 ## [0.1.0] - 2026-03-23
 
@@ -225,3 +153,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Language alias mapping (`ts`/`tsx`/`jsx` to `javascript`) for broader syntax highlighting coverage.
 - `render_galley` wrap-width fix - text re-wraps correctly when the container resizes.
 - Two examples: `simple` (editor + rendered output), `advanced` (style editor, custom link handlers, inline widgets, streaming simulation).
+
+[#1]: https://github.com/membrane-io/egui_markdown/pull/1
+[#2]: https://github.com/membrane-io/egui_markdown/pull/2
+[#3]: https://github.com/membrane-io/egui_markdown/pull/3
+[#6]: https://github.com/membrane-io/egui_markdown/pull/6
+[#8]: https://github.com/membrane-io/egui_markdown/pull/8
+[#9]: https://github.com/membrane-io/egui_markdown/pull/9
+[#10]: https://github.com/membrane-io/egui_markdown/pull/10
+[#11]: https://github.com/membrane-io/egui_markdown/pull/11
+[#12]: https://github.com/membrane-io/egui_markdown/pull/12
+[#13]: https://github.com/membrane-io/egui_markdown/pull/13
+[#14]: https://github.com/membrane-io/egui_markdown/pull/14
+[#15]: https://github.com/membrane-io/egui_markdown/pull/15
+[#16]: https://github.com/membrane-io/egui_markdown/pull/16
+[#17]: https://github.com/membrane-io/egui_markdown/pull/17
+[#18]: https://github.com/membrane-io/egui_markdown/pull/18
+[#19]: https://github.com/membrane-io/egui_markdown/pull/19
+[#20]: https://github.com/membrane-io/egui_markdown/pull/20
+[#23]: https://github.com/membrane-io/egui_markdown/pull/23
+[#24]: https://github.com/membrane-io/egui_markdown/pull/24
+[#28]: https://github.com/membrane-io/egui_markdown/pull/28
+[#29]: https://github.com/membrane-io/egui_markdown/pull/29
+[#30]: https://github.com/membrane-io/egui_markdown/pull/30
+[#32]: https://github.com/membrane-io/egui_markdown/pull/32
+[#33]: https://github.com/membrane-io/egui_markdown/pull/33
+[#34]: https://github.com/membrane-io/egui_markdown/pull/34
+[#35]: https://github.com/membrane-io/egui_markdown/pull/35
