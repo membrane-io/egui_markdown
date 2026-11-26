@@ -30,13 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `MarkdownStyle` has the new fields `list`, `table` and `line_height_ratio`, and `HorizontalRuleStyle`
   has the new field `height`. A struct literal that names every field must add them or
   `..Default::default()`. ([#2], [#3], [#10], [#34])
-- `LayoutResult::inline_widget_spans` holds `(start, end, token_index, FontId)`. Version 0.1.0 held
-  `(start, end, token_index)`. ([#16])
-- `layout::build_layout` takes `max_width` and `break_anywhere` and does not read `ui.wrap_mode()`.
-  `layout::apply_inline_code_bg` takes `&egui::Visuals` in place of `dark_mode`.
-  `paint::compute_code_block_rects` takes no `Ui`, and the right edge of each rect is the right edge of
-  the widest row of the block. Version 0.1.0 used the available width minus 16 points. ([#6], [#20],
-  [#35])
+- The modules `label`, `layout`, `link`, `paint`, `parser`, `style`, `table`, `theme` and `types` are
+  private. Import the public types from the crate root, for example `egui_markdown::InlineCodeStyle` in
+  place of `egui_markdown::style::InlineCodeStyle`. ([#37])
+- The layout, paint and table functions of those modules are not public, for example `build_layout`,
+  `highlight_code`, `compute_code_block_rects` and `render_table`. ([#37])
+- `cursor_from_pos`, `glyph_at_index`, `last_non_whitespace_glyph` and `CodeThemeArg` are not public.
+  ([#37])
+- `default_code_theme` is removed. Call `egui_extras::syntax_highlighting::CodeTheme::from_style`.
+  ([#37])
+- `MarkdownStyle::ui` does not show the Dark and Light buttons. They changed the visuals of the whole
+  app. The `advanced` example shows them. ([#37])
 
 ### Added
 
@@ -67,8 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   uses a registered `"mono-bold"` font family. ([#15])
 - The HTML tags `<img>`, with `width` and `height`, and `<br>`, also in a table cell. ([#18])
 - `LinkStyle` derives `Clone`, `Copy`, `Debug`, `PartialEq` and `Eq`.
-- `MarkdownStyle::render_style`, the style editor of `MarkdownStyle::ui` without the dark, light and reset
-  buttons. ([#5])
 
 ### Changed
 
@@ -100,6 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   right than before, and the code block buttons use the padding of `CodeBlockStyle`. ([#35])
 - A code block in the text galley gets the background fill of `egui::Visuals::code`, as a scrolling
   code block does. ([#10])
+- `egui_markdown` has no direct dependency on `epaint`. It uses `egui::epaint`. ([#37])
 
 ### Fixed
 
@@ -173,7 +176,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#1]: https://github.com/membrane-io/egui_markdown/pull/1
 [#2]: https://github.com/membrane-io/egui_markdown/pull/2
 [#3]: https://github.com/membrane-io/egui_markdown/pull/3
-[#5]: https://github.com/membrane-io/egui_markdown/pull/5
 [#6]: https://github.com/membrane-io/egui_markdown/pull/6
 [#8]: https://github.com/membrane-io/egui_markdown/pull/8
 [#9]: https://github.com/membrane-io/egui_markdown/pull/9
@@ -196,3 +198,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#33]: https://github.com/membrane-io/egui_markdown/pull/33
 [#34]: https://github.com/membrane-io/egui_markdown/pull/34
 [#35]: https://github.com/membrane-io/egui_markdown/pull/35
+[#37]: https://github.com/membrane-io/egui_markdown/pull/37
