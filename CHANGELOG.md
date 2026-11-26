@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Without the `syntax_highlighting` feature, code blocks use the built-in highlighter of `egui_extras`
+  instead of one plain color.
 - The `egui_markdown_style` crate, which holds `MarkdownStyle` and the other style types. An
   application can store a style without a dependency on the renderer. ([#2])
 - `set_style` and `global_style`, which install and read one `MarkdownStyle` for an `egui::Context`.

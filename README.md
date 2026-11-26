@@ -59,7 +59,7 @@ footnotes.
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `syntax_highlighting` | Yes | Syntax-highlighted code blocks through `syntect`. |
+| `syntax_highlighting` | Yes | Syntax-highlighted code blocks through `syntect`. Without it, code blocks use the small built-in highlighter of `egui_extras`, which knows fewer languages. |
 | `extra_syntaxes` | No | The syntaxes of `bat` through `two-face`, with TypeScript, TSX and JSX. It makes the binary larger. |
 | `images` | No | Image rendering through the `egui_extras` image loaders. Call `egui_extras::install_image_loaders(ctx)` once at startup. The feature also turns on the HTTP loader, so an image URL can be remote. |
 | `svg` | No | SVG image support through `egui_extras`. |

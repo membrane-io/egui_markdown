@@ -1134,30 +1134,64 @@ pub use syntect_code::highlight_code;
 #[cfg(feature = "syntax_highlighting")]
 pub(crate) use syntect_code::{scrolling_code_galley, theme_identity_ptr, StreamingCodeCache};
 
-/// The [`LayoutJob`] of the code `body`, in one color, because the crate has no syntax highlighting.
+/// The [`LayoutJob`] of the code `body`, highlighted for `language` by the small built-in highlighter of
+/// `egui_extras`, because the crate has no `syntect`.
 #[cfg(not(feature = "syntax_highlighting"))]
 pub fn highlight_code(
   ui: &Ui,
   body: &str,
-  _language: &str,
+  language: &str,
   code_font_size: f32,
   _code_theme: CodeThemeArg<'_>,
 ) -> LayoutJob {
-  let color = plain_code_color(ui.visuals());
-  let mut job = LayoutJob::default();
-  job.append(body, 0.0, TextFormat { font_id: FontId::monospace(code_font_size), color, ..Default::default() });
+  use egui_extras::syntax_highlighting;
+
+  let style = ui.style();
+  let mut job = syntax_highlighting::highlight(ui.ctx(), style, &plain_code_theme(style), body, language);
+  // `egui_extras` returns one section in a fixed gray when it does not know the language. A known language
+  // gives two or more sections, because `pad_code_body` starts each line with a space, and the highlighter
+  // makes a separate token of the space. This code gives the one section the code color of the visuals.
+  let plain = job.sections.len() == 1;
+  for section in &mut job.sections {
+    section.format.font_id = FontId::monospace(code_font_size);
+    if plain {
+      section.format.color = plain_code_color(ui.visuals());
+    }
+  }
   job
 }
 
-/// The color of the code in [`highlight_code`] without syntax highlighting.
+/// The color of the code in [`highlight_code`] for a language that `egui_extras` does not know.
 #[cfg(not(feature = "syntax_highlighting"))]
 pub(crate) fn plain_code_color(visuals: &egui::Visuals) -> Color32 {
   visuals.code.text_color.unwrap_or_else(|| visuals.text_color())
 }
 
+/// The theme of the code in [`highlight_code`] without `syntect`.
+#[cfg(not(feature = "syntax_highlighting"))]
+pub(crate) fn plain_code_theme(style: &egui::Style) -> egui_extras::syntax_highlighting::CodeTheme {
+  egui_extras::syntax_highlighting::CodeTheme::from_style(style)
+}
+
 #[cfg(test)]
 mod section_tests {
   use super::*;
+
+  /// Without `syntect`, a code block in a language that `egui_extras` knows still has colors.
+  #[cfg(not(feature = "syntax_highlighting"))]
+  #[test]
+  fn code_is_highlighted_without_syntect() {
+    egui::__run_test_ui(|ui| {
+      let color_count = |language: &str| {
+        let job = highlight_code(ui, "fn main() { let x = 42; }", language, 14.0, None);
+        let mut colors: Vec<_> = job.sections.iter().map(|s| s.format.color).collect();
+        colors.dedup();
+        colors.len()
+      };
+      assert!(1 < color_count("rs"));
+      assert_eq!(color_count("not-a-language"), 1);
+    });
+  }
 
   /// Code and links inside a heading have the size of the heading.
   #[test]
