@@ -1020,8 +1020,8 @@ impl<'a> MarkdownLabel<'a> {
           let text = if alt.is_empty() { url.as_ref() } else { alt.as_ref() };
           let response = ui.link(text);
           out.add(response.rect);
-          if response.clicked() {
-            ui.ctx().open_url(egui::OpenUrl::new_tab(url.to_string()));
+          if crate::link::link_clicked(&response) {
+            crate::link::open_clicked_url(ui, &response, url);
           }
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
@@ -1365,8 +1365,8 @@ impl<'a> MarkdownLabel<'a> {
     let hovered_section =
       self.handle_hover(ui, tokens, &galley, section_to_token, inline_widget_spans, &response, galley_pos, color);
 
-    if self.interactable && response.clicked() {
-      out.link_clicked |= self.handle_click(ui, tokens, section_to_token, hovered_section);
+    if self.interactable && crate::link::link_clicked(&response) {
+      out.link_clicked |= self.handle_click(ui, &response, tokens, section_to_token, hovered_section);
     }
     out.add_text(response);
     size
@@ -1467,6 +1467,7 @@ impl<'a> MarkdownLabel<'a> {
   fn handle_click(
     &self,
     ui: &mut Ui,
+    response: &Response,
     tokens: &[Token<'_>],
     section_to_token: &[usize],
     hovered_section: Option<u32>,
@@ -1479,7 +1480,7 @@ impl<'a> MarkdownLabel<'a> {
     let token = token_index.and_then(|idx| tokens.get(idx));
 
     let Some(Token::Link { text, href, .. }) = token else { return false };
-    crate::layout::open_link(ui, self.link_handler, text, href);
+    crate::layout::open_link(ui, response, self.link_handler, text, href);
     true
   }
 }

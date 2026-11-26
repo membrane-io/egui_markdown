@@ -11,18 +11,26 @@ const WITH_TABLE: &str = "plain words [link](https://example.com)\n\n| a |\n|---
 
 /// Render `text`, then click at the point that `at` picks from the label rect. Returns (clicked, link_clicked).
 fn click(text: &str, at: impl Fn(Rect) -> Pos2) -> (bool, bool) {
-  let (clicked, link_clicked, _) = click_label(text, None, false, at);
+  let (clicked, link_clicked, _) = click_label(text, None, false, PointerButton::Primary, Modifiers::NONE, at);
   (clicked, link_clicked)
 }
 
 /// As `click`, but a `map_job` splits the section that holds byte `split`, when there is one.
 fn click_split(text: &str, split: Option<usize>, at: impl Fn(Rect) -> Pos2) -> (bool, bool) {
-  let (clicked, link_clicked, _) = click_label(text, split, false, at);
+  let (clicked, link_clicked, _) = click_label(text, split, false, PointerButton::Primary, Modifiers::NONE, at);
   (clicked, link_clicked)
 }
 
-/// As `click_split`, with `heal` on the label. Also returns the URL of each `OpenUrl` command of the click.
-fn click_label(text: &str, split: Option<usize>, heal: bool, at: impl Fn(Rect) -> Pos2) -> (bool, bool, Vec<String>) {
+/// As `click_split`, with `heal` on the label, and a click of `button` with `modifiers` held. Also returns the
+/// URL and `new_tab` of each `OpenUrl` command of the click.
+fn click_label(
+  text: &str,
+  split: Option<usize>,
+  heal: bool,
+  button: PointerButton,
+  modifiers: Modifiers,
+  at: impl Fn(Rect) -> Pos2,
+) -> (bool, bool, Vec<(String, bool)>) {
   let ctx = Context::default();
   let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
   let frame = |events: Vec<Event>| {
@@ -59,7 +67,7 @@ fn click_label(text: &str, split: Option<usize>, heal: bool, at: impl Fn(Rect) -
       .commands
       .into_iter()
       .filter_map(|command| match command {
-        OutputCommand::OpenUrl(open) => Some(open.url),
+        OutputCommand::OpenUrl(open) => Some((open.url, open.new_tab)),
         _ => None,
       })
       .collect::<Vec<_>>();
@@ -69,11 +77,10 @@ fn click_label(text: &str, split: Option<usize>, heal: bool, at: impl Fn(Rect) -
 
   let (rect, ..) = frame(Vec::new());
   let pos = at(rect);
-  let button =
-    |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
-  frame(vec![Event::PointerMoved(pos)]);
-  frame(vec![button(true)]);
-  let (_, clicked, link_clicked, urls) = frame(vec![button(false)]);
+  let press = |pressed| Event::PointerButton { pos, button, pressed, modifiers };
+  frame(vec![Event::ModifiersChanged(modifiers), Event::PointerMoved(pos)]);
+  frame(vec![press(true)]);
+  let (_, clicked, link_clicked, urls) = frame(vec![press(false)]);
   (clicked, link_clicked, urls)
 }
 
@@ -104,17 +111,31 @@ fn a_click_on_a_link_reports_the_link_after_a_map_job_splits_a_section() {
 
 #[test]
 fn a_click_on_a_link_opens_its_url() {
-  let (_, link_clicked, urls) =
-    click_label(PLAIN_THEN_LINK, None, false, |rect| pos2(rect.right() - 4.0, rect.top() + 6.0));
+  let at = |rect: Rect| pos2(rect.right() - 4.0, rect.top() + 6.0);
+  let (_, link_clicked, urls) = click_label(PLAIN_THEN_LINK, None, false, PointerButton::Primary, Modifiers::NONE, at);
   assert!(link_clicked);
-  assert_eq!(urls, ["https://example.com"]);
+  assert_eq!(urls, [("https://example.com".to_owned(), false)]);
+}
+
+/// As with `egui::Hyperlink`, a modifier key or the middle button opens the link in a new tab.
+#[test]
+fn a_click_on_a_link_with_a_modifier_or_the_middle_button_opens_a_new_tab() {
+  let at = |rect: Rect| pos2(rect.right() - 4.0, rect.top() + 6.0);
+  for text in [PLAIN_THEN_LINK, WITH_TABLE] {
+    for (button, modifiers) in [(PointerButton::Primary, Modifiers::COMMAND), (PointerButton::Middle, Modifiers::NONE)]
+    {
+      let (_, _, urls) = click_label(text, None, false, button, modifiers, at);
+      assert_eq!(urls, [("https://example.com".to_owned(), true)], "{text:?} {button:?}");
+    }
+  }
 }
 
 /// Heal gives a link an empty href until its URL arrives.
 #[test]
 fn a_click_on_a_link_with_a_partial_url_opens_nothing() {
   let at = |rect: Rect| pos2(rect.right() - 4.0, rect.top() + 6.0);
-  let (clicked, link_clicked, urls) = click_label("See [app](program:/my", None, true, at);
+  let (clicked, link_clicked, urls) =
+    click_label("See [app](program:/my", None, true, PointerButton::Primary, Modifiers::NONE, at);
   assert_eq!((clicked, link_clicked), (true, true));
   assert!(urls.is_empty(), "{urls:?}");
 }
