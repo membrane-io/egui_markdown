@@ -201,7 +201,8 @@ fn push_section_with_wrap_indent(
 }
 
 /// The tooltip text of a link: the hover text of `handler`, else `title`, else the href when
-/// [`egui::Style::url_in_tooltip`] is set, as egui's `Hyperlink` does.
+/// [`egui::Style::url_in_tooltip`] is set, as egui's `Hyperlink` does. An empty href, which heal gives
+/// until the URL arrives, gives no tooltip.
 pub(crate) fn link_tooltip(
   ui: &Ui,
   handler: Option<&dyn LinkHandler>,
@@ -212,7 +213,7 @@ pub(crate) fn link_tooltip(
     Some(text)
   } else if let Some(title) = title {
     Some(title.to_owned())
-  } else if ui.style().url_in_tooltip {
+  } else if ui.style().url_in_tooltip && !href.is_empty() {
     Some(href.to_owned())
   } else {
     None
