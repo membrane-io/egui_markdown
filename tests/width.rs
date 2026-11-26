@@ -129,8 +129,8 @@ fn sentence_words(overflow: OverflowWrap, width: f32) -> Vec<String> {
   words
 }
 
-/// The default must leave words whole: the Gaze call site only opts into `BreakAll` for
-/// messages with no spaces, so ordinary prose has to keep wrapping at word boundaries.
+/// The default keeps words whole. An app uses `BreakAll` only for text with no spaces, so ordinary text must
+/// keep wrapping between words.
 #[test]
 fn spaced_sentence_keeps_words_intact_by_default() {
   let words = sentence_words(OverflowWrap::Normal, 120.0);

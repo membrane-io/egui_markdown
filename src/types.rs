@@ -1,88 +1,89 @@
-//! Parsed markdown token types and data structures.
+//! The token types of a parsed document.
 
 use std::hash::{Hash, Hasher};
 
 use pulldown_cmark::CowStr;
 
-/// A single parsed markdown token.
+/// One element of a parsed document.
 #[derive(Debug, Clone)]
 pub enum Token<'s> {
-  /// Line break (hard break or paragraph separator).
+  /// A line break: a hard break, or the end of a block.
   Newline,
-  /// Styled text span.
+  /// A run of text with one style.
   Text {
     /// The text content.
     text: CowStr<'s>,
     /// Inline styling, such as bold and italic.
     style: TokenStyle,
   },
-  /// Fenced or indented code block.
+  /// A fenced or indented code block.
   CodeBlock {
     /// The code content.
     text: CowStr<'s>,
     /// The language hint, such as `"rust"`, when the fence gives one.
     language: Option<CowStr<'s>>,
   },
-  /// Hyperlink with display text, URL, and optional title.
+  /// A link, with its text, its URL and an optional title.
   Link {
-    /// Display text of the link.
+    /// The text of the link.
     text: CowStr<'s>,
     /// The link destination URL.
     href: CowStr<'s>,
-    /// Optional hover title.
+    /// The title of the link, such as `"Docs"` in `[text](url "Docs")`.
     title: Option<CowStr<'s>>,
     /// The inline style around the link, such as the heading level of a link inside a heading.
     style: TokenStyle,
   },
-  /// List item bullet or number, such as `"• "` or `"1. "`.
+  /// The bullet or the number of a list item. An empty marker sets the x of a later paragraph or of a code
+  /// block in a list item.
   ListMarker {
     /// The marker string, such as `"• "` or `"1. "`.
     marker: CowStr<'s>,
-    /// Nesting depth (1 = top-level).
+    /// The nesting depth. A top-level item has depth 1.
     indent_level: usize,
   },
-  /// Inline image with alt text, URL, and optional title. Markdown `![alt](url)` and an HTML `<img>` tag
+  /// An image, with its alt text, its URL and an optional title. Markdown `![alt](url)` and an HTML `<img>` tag
   /// both give this token.
   Image {
-    /// Alt text for the image.
+    /// The alt text of the image.
     alt: CowStr<'s>,
-    /// Image source URL.
+    /// The URL of the image.
     url: CowStr<'s>,
-    /// Optional hover title.
+    /// The title of the image.
     title: Option<CowStr<'s>>,
     /// The width in points from the `width` attribute of an `<img>` tag.
     width: Option<u16>,
     /// The height in points from the `height` attribute of an `<img>` tag.
     height: Option<u16>,
   },
-  /// Table with headers, rows, and column alignments.
+  /// A table, with its header, its rows and the alignment of its columns.
   Table(TableData<'s>),
   /// Horizontal rule (`---`).
   HorizontalRule,
-  /// Start of a blockquote region.
+  /// The start of a blockquote.
   BlockquoteStart,
-  /// End of a blockquote region.
+  /// The end of a blockquote.
   BlockquoteEnd,
-  /// Task list checkbox (`- [x]` or `- [ ]`).
+  /// The checkbox of a task list item (`- [x]` or `- [ ]`).
   TaskListMarker {
     /// Whether the checkbox is checked.
     checked: bool,
-    /// Nesting depth (1 = top-level).
+    /// The nesting depth. A top-level item has depth 1.
     indent_level: usize,
   },
-  /// Footnote reference, such as `[^1]`.
+  /// A footnote reference, such as `[^1]`.
   FootnoteRef {
     /// The footnote label.
     label: CowStr<'s>,
   },
-  /// Footnote definition, such as `[^1]: ...`.
+  /// The start of a footnote definition, such as `[^1]: ...`.
   FootnoteDef {
     /// The footnote label.
     label: CowStr<'s>,
   },
 }
 
-/// Inline text styling applied to a [`Token::Text`].
+/// The inline style of a [`Token::Text`], and the style of the text around a [`Token::Link`].
 #[derive(Debug, Clone, Default, Hash)]
 pub struct TokenStyle {
   /// Bold weight.
@@ -91,34 +92,34 @@ pub struct TokenStyle {
   pub italic: bool,
   /// Strikethrough line.
   pub strikethrough: bool,
-  /// Inline code span (backtick-delimited).
+  /// Inline code, between backticks.
   pub inline_code: bool,
-  /// Heading level (1–6), or `None` for non-heading text.
+  /// The heading level, from 1 to 6, or `None` for text that is not in a heading.
   pub heading: Option<u8>,
 }
 
 impl TokenStyle {
-  /// Returns `true` if no styling is applied.
+  /// Returns `true` when the text has no inline style.
   pub fn is_plain(&self) -> bool {
     !self.bold && !self.italic && !self.strikethrough && !self.inline_code && self.heading.is_none()
   }
 }
 
-/// Parsed table data: column alignments, header cells, and body rows.
+/// The content of a table: the alignment of each column, the header cells and the body rows.
 #[derive(Debug, Clone)]
 pub struct TableData<'s> {
-  /// Column alignment directives.
+  /// The alignment of each column.
   pub alignments: Vec<Alignment>,
-  /// Header cells, each containing a token stream.
+  /// The header cells. Each cell is a list of tokens.
   pub headers: Vec<Vec<Token<'s>>>,
   /// Body rows. Each row is a `Vec` of cells, and each cell is a `Vec<Token>`.
   pub rows: Vec<Vec<Vec<Token<'s>>>>,
 }
 
-/// Column alignment for table cells.
+/// The alignment of the cells of a table column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Alignment {
-  /// No alignment specified.
+  /// The separator gives no alignment. The cells are left-aligned.
   None,
   /// Left-aligned.
   Left,
@@ -177,16 +178,17 @@ impl<'s> Hash for Token<'s> {
   }
 }
 
-/// The result of parsing a markdown string: the source text and its token stream.
+/// The result of [`crate::parse`]: the source text and its tokens.
 pub struct Markdown<'s> {
-  /// The original source text.
+  /// The source text.
   pub s: &'s str,
-  /// Parsed token stream.
+  /// The tokens of the text.
   pub tokens: Vec<Token<'s>>,
 }
 
 impl<'s> Token<'s> {
-  /// Returns the primary text content of this token.
+  /// The text of the token: the text of a text, code block or link, the alt text of an image, the marker of
+  /// a list item, or the label of a footnote. Other tokens have no text.
   pub fn text(&self) -> &str {
     match self {
       Token::Newline => "",
@@ -204,7 +206,7 @@ impl<'s> Token<'s> {
     }
   }
 
-  /// Returns the link URL if this is a `Link` token.
+  /// The URL of a [`Token::Link`], or `None` for another token.
   pub fn href(&self) -> Option<&str> {
     match self {
       Token::Link { href, .. } => Some(href),
@@ -223,7 +225,7 @@ impl<'s> Token<'s> {
   }
 }
 
-/// Convert borrowed tokens to owned ('static) by converting CowStr::Borrowed to Boxed.
+/// Copies of `tokens` that own their text, so that the label can keep them after the frame.
 pub(crate) fn tokens_to_owned(tokens: &[Token<'_>]) -> Vec<Token<'static>> {
   tokens.iter().map(|t| token_to_owned(t)).collect()
 }
@@ -278,9 +280,9 @@ mod size_tests {
   #[test]
   fn token_enum_size() {
     let size = std::mem::size_of::<Token<'_>>();
-    // The Link and Image variants set the size. Each holds 3 CowStr fields, Link also holds a
-    // TokenStyle, and Image also holds the size of an <img> tag. Boxing those would reduce it to
-    // ~24 bytes but breaks the public API - note for future semver bump.
+    // The Link and Image variants set the size. Each holds 3 CowStr fields. Link also holds a TokenStyle,
+    // and Image holds the size of an <img> tag. A Box around these fields makes the size smaller, but it
+    // changes the public API.
     eprintln!("Token size: {size} bytes");
     assert!(size <= 88, "Token grew unexpectedly: {size} bytes");
   }
@@ -289,7 +291,6 @@ mod size_tests {
   fn layout_result_size() {
     let size = std::mem::size_of::<crate::layout::LayoutResult>();
     eprintln!("LayoutResult size: {size} bytes");
-    // LayoutResult contains LayoutJob + 5 Vecs + u32, expected ~200-300 bytes.
     assert!(size <= 400, "LayoutResult grew unexpectedly: {size} bytes");
   }
 }

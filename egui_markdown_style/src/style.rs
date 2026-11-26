@@ -1,17 +1,16 @@
-//! Customizable visual styling for all markdown elements.
+//! The style of each markdown element.
 
 use std::hash::{Hash, Hasher};
 
 use egui::{self, Color32, DragValue, Grid, Ui};
 
-/// Visual styling for markdown rendering.
+/// The style of the markdown elements of a label.
 ///
-/// All fields have sensible defaults matching the previously hardcoded values.
-/// Dark/light theme adaptation is automatic via `InlineCodeStyle`'s per-theme color
-/// fields and egui's `Visuals::dark_mode`.
+/// Most colors come from the egui [`egui::Visuals`] of the `Ui`, so they follow dark and light mode. Inline
+/// code has a color and a background for each mode in [`InlineCodeStyle`].
 ///
-/// Install a context-wide default with [`crate::set_style`]; widgets read it via
-/// [`crate::global_style`] when no per-widget override is set.
+/// [`crate::set_style`] installs a style for all labels of a context. A label without its own style uses
+/// it.
 ///
 /// # Example
 ///
@@ -28,7 +27,7 @@ pub struct MarkdownStyle {
   pub inline_code: InlineCodeStyle,
   /// Styling for fenced code blocks.
   pub code_block: CodeBlockStyle,
-  /// Styling for heading levels 1–6.
+  /// Styling for heading levels 1 to 6.
   pub heading: HeadingStyle,
   /// Styling for horizontal rules.
   pub horizontal_rule: HorizontalRuleStyle,
@@ -75,6 +74,8 @@ fn default_line_height_ratio() -> f32 {
   17.0 / 13.0
 }
 
+// `f32` has no `Hash`, so each style type hashes the bits of its floats. A label uses the hash in its cache
+// keys.
 impl Hash for MarkdownStyle {
   fn hash<H: Hasher>(&self, state: &mut H) {
     self.inline_code.hash(state);
@@ -98,7 +99,8 @@ impl MarkdownStyle {
     self.code_font_size.unwrap_or_else(|| egui::TextStyle::Monospace.resolve(style).size)
   }
 
-  /// Show an interactive editor for all style fields, plus a dark/light switch.
+  /// Show an editor for each field of the style, with buttons that set the dark or the light egui visuals for
+  /// the whole context, and a button that resets the style.
   pub fn ui(&mut self, ui: &mut Ui) {
     ui.horizontal(|ui| {
       let dark_mode = ui.visuals().dark_mode;
@@ -118,7 +120,7 @@ impl MarkdownStyle {
     self.render_style(ui);
   }
 
-  /// Edit the markdown style fields.
+  /// Show an editor for each field of the style, without the buttons of [`Self::ui`].
   pub fn render_style(&mut self, ui: &mut Ui) {
     ui.label("Block spacing:");
     ui.add(DragValue::new(&mut self.block_spacing).range(0.0..=40.0).speed(0.5));
@@ -172,7 +174,7 @@ impl MarkdownStyle {
   }
 }
 
-/// Styling for inline code spans (backtick-delimited).
+/// The style of inline code, the text between backticks.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InlineCodeStyle {
@@ -184,7 +186,8 @@ pub struct InlineCodeStyle {
   pub background_dark: Color32,
   /// Background color in light mode.
   pub background_light: Color32,
-  /// How much to expand the background rectangle horizontally beyond the text bounds (in pixels).
+  /// How far the background extends past the text on each side, in points. It does not change the layout,
+  /// so the background can cover the text next to it.
   pub expand_bg: f32,
 }
 
@@ -211,7 +214,7 @@ impl Hash for InlineCodeStyle {
 }
 
 impl InlineCodeStyle {
-  /// Resolve color for the current theme.
+  /// The text color for dark mode or for light mode.
   pub fn color(&self, dark_mode: bool) -> Color32 {
     if dark_mode {
       self.color_dark
@@ -220,7 +223,7 @@ impl InlineCodeStyle {
     }
   }
 
-  /// Resolve background for the current theme.
+  /// The background color for dark mode or for light mode.
   pub fn background(&self, dark_mode: bool) -> Color32 {
     if dark_mode {
       self.background_dark
@@ -254,13 +257,13 @@ impl InlineCodeStyle {
   }
 }
 
-/// Styling for fenced code blocks.
+/// The style of code blocks. The fill and the corner radius come from [`egui::Visuals::code`].
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CodeBlockStyle {
-  /// Padding `[left, top, right, bottom]`.
+  /// The space between the code and the border, `[left, top, right, bottom]`, in points.
   pub padding: [f32; 4],
-  /// Stroke width for the code block border.
+  /// The width of the border, in the color of `Visuals::widgets.noninteractive.bg_stroke`.
   pub stroke_width: f32,
 }
 
@@ -305,11 +308,11 @@ impl CodeBlockStyle {
   }
 }
 
-/// Styling for heading levels 1–6.
+/// The style of headings.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HeadingStyle {
-  /// Font size multipliers for H1–H6.
+  /// The font size of each heading level, from H1 to H6, as a multiple of the label font size.
   pub scales: [f32; 6],
 }
 
@@ -339,13 +342,13 @@ impl HeadingStyle {
   }
 }
 
-/// Styling for horizontal rules (`---`).
+/// The style of horizontal rules (`---`).
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HorizontalRuleStyle {
-  /// Stroke width for horizontal rule lines.
+  /// The width of the line.
   pub stroke_width: f32,
-  /// Vertical space reserved for the rule row (points).
+  /// The height of the row of the rule, in points.
   pub height: f32,
 }
 
@@ -375,13 +378,13 @@ impl HorizontalRuleStyle {
   }
 }
 
-/// Styling for blockquotes.
+/// The style of blockquotes.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockquoteStyle {
-  /// Horizontal indent per nesting depth in pixels.
+  /// The indent of each nesting level, in points. The bar is in the middle of the indent.
   pub indent_per_depth: f32,
-  /// Width of the vertical bar drawn at the left edge of a blockquote.
+  /// The width of the bar at the left of a blockquote.
   pub stroke_width: f32,
 }
 
@@ -412,12 +415,11 @@ impl BlockquoteStyle {
   }
 }
 
-/// Styling for list markers.
+/// The style of list markers.
 ///
-/// Markers are right-aligned in a slot whose width is measured from the body font, so every item
-/// of a nesting level starts its text at the same x. These fields adjust that arrangement: `gap`
-/// moves the text away from the marker column (wrapped rows follow it), while the two `nudge`
-/// fields move a marker left of the column without moving any text.
+/// A marker is right-aligned in a slot with a width from the body font, so each item of a nesting level
+/// starts its text at the same x. `gap` moves the text, and its wrapped rows, away from the marker. The two
+/// `nudge` fields move a marker to the left, and do not move the text.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ListStyle {
@@ -427,7 +429,7 @@ pub struct ListStyle {
   pub bullet_nudge: f32,
   /// How far left of the marker column to draw a number, in points.
   pub number_nudge: f32,
-  /// Font size multiplier for the bullet glyph. The row height is unaffected.
+  /// The size of a bullet, as a multiple of the font size. It does not change the row height.
   pub bullet_scale: f32,
 }
 
@@ -450,15 +452,15 @@ fn default_cell_padding() -> [f32; 4] {
   [10.0, 6.0, 10.0, 6.0]
 }
 
-/// Styling for markdown tables.
+/// The style of tables.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TableStyle {
-  /// Width of separator lines between cells. `0.0` draws none.
+  /// The width of the lines between the cells and around the table. `0.0` draws no line.
   pub stroke_width: f32,
-  /// Corner radius of the outer table stroke. Only visible when [`Self::stroke_width`] is non-zero.
+  /// The corner radius of the line around the table. It shows only when [`Self::stroke_width`] is not zero.
   pub corner_radius: f32,
-  /// Inner cell padding `[left, top, right, bottom]`.
+  /// The space inside each cell, `[left, top, right, bottom]`, in points.
   #[cfg_attr(feature = "serde", serde(default = "default_cell_padding"))]
   pub cell_padding: [f32; 4],
 }

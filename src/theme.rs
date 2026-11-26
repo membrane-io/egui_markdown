@@ -1,16 +1,16 @@
-//! Syntax highlighting theme utilities.
+//! The syntect themes of code blocks.
 
 use std::sync::Arc;
 
 use egui::{Context, Id, Style};
 
-/// Return the default [`CodeTheme`](egui_extras::syntax_highlighting::CodeTheme) for the given egui style.
+/// The [`CodeTheme`](egui_extras::syntax_highlighting::CodeTheme) of `egui_extras` for the egui style `style`.
 #[cfg(feature = "syntax_highlighting")]
 pub fn default_code_theme(style: &Style) -> egui_extras::syntax_highlighting::CodeTheme {
   egui_extras::syntax_highlighting::CodeTheme::from_style(style)
 }
 
-/// Temp-data slot holding context-wide syntect themes for dark/light mode.
+/// The syntect themes that [`set_code_themes`] installs, in the temp data of the context.
 #[cfg(feature = "syntax_highlighting")]
 #[derive(Clone)]
 struct CodeThemesSlot {
@@ -18,8 +18,9 @@ struct CodeThemesSlot {
   light: Arc<syntect::highlighting::Theme>,
 }
 
-/// Install context-wide syntect themes used when a widget does not pass
-/// [`crate::MarkdownLabel::code_theme`].
+/// Install a dark and a light syntect theme for all labels of `ctx`. A label that has no
+/// [`crate::MarkdownLabel::code_theme`] uses the theme for the current dark mode. Without either, a label
+/// uses the built-in `base16-ocean` themes.
 #[cfg(feature = "syntax_highlighting")]
 pub fn set_code_themes(
   ctx: &Context,
@@ -29,7 +30,7 @@ pub fn set_code_themes(
   ctx.data_mut(|d| d.insert_temp(Id::NULL, CodeThemesSlot { dark: dark.into(), light: light.into() }));
 }
 
-/// Return the installed syntect theme for the given mode, if any.
+/// The syntect theme that [`set_code_themes`] installed for `dark_mode`, or `None`.
 #[cfg(feature = "syntax_highlighting")]
 pub fn code_theme(ctx: &Context, dark_mode: bool) -> Option<Arc<syntect::highlighting::Theme>> {
   ctx.data(|d| {

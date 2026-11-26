@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-//! Visual style types for [`egui_markdown`](https://docs.rs/egui_markdown), plus a
-//! context-scoped default stored as [`std::sync::Arc`] (same idea as egui's
-//! [`egui::Style`]).
+//! The style types of [`egui_markdown`](https://docs.rs/egui_markdown).
+//!
+//! [`MarkdownStyle`] holds the sizes, the spacing and the strokes of the markdown elements. [`set_style`]
+//! installs one style for an [`egui::Context`], and [`global_style`] reads it. An application can store a
+//! style with this crate and without a dependency on the renderer.
 
 mod style;
 
@@ -16,18 +18,18 @@ use std::sync::Arc;
 
 use egui::{Context, Id};
 
-/// Temp-data slot holding the context-wide markdown style.
+/// The style that [`set_style`] installs, in the temp data of the context.
 #[derive(Clone)]
 struct MarkdownStyleSlot(Arc<MarkdownStyle>);
 
-/// Install a context-wide markdown style. It stores an [`Arc`] that a widget clones or
-/// dereferences, so a call on each theme change costs little.
+/// Install `style` for all labels of `ctx`. A label without its own style uses it.
+///
+/// The context keeps an [`Arc`], so a call on each change of the app theme costs little.
 pub fn set_style(ctx: &Context, style: impl Into<Arc<MarkdownStyle>>) {
   ctx.data_mut(|d| d.insert_temp(Id::NULL, MarkdownStyleSlot(style.into())));
 }
 
-/// Return the context-wide markdown style, or [`MarkdownStyle::default`] if none
-/// has been installed yet.
+/// The style that [`set_style`] installed for `ctx`, or [`MarkdownStyle::default`].
 pub fn global_style(ctx: &Context) -> Arc<MarkdownStyle> {
   ctx
     .data(|d| d.get_temp::<MarkdownStyleSlot>(Id::NULL).map(|s| Arc::clone(&s.0)))

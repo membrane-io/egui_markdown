@@ -3,10 +3,10 @@
 
 //! A markdown parser and renderer for [egui](https://github.com/emilk/egui).
 //!
-//! Parses CommonMark markdown into a token stream, then renders it as an interactive
-//! egui widget with support for text formatting, links, code blocks, tables, images,
-//! blockquotes, lists, and more. Of the raw HTML in the text, it renders the `<img>` and `<br>`
-//! tags, and it shows each other tag as written.
+//! The crate parses CommonMark markdown into a list of [`Token`]s. [`MarkdownLabel`] renders the tokens
+//! as one interactive egui widget, with selectable text, links, code blocks, tables, images, blockquotes
+//! and lists. Of the raw HTML in the text, it renders the `<img>` and `<br>` tags, and it shows each other
+//! tag as written.
 //!
 //! # Quick Start
 //!
@@ -26,36 +26,26 @@
 //!   `egui_extras::install_image_loaders(ctx)` once at startup. The feature also turns on the HTTP
 //!   loader, so an image URL can be remote.
 //! - `svg` - SVG image support.
-//!
-// TODO: Math/LaTeX support. pulldown-cmark already supports `Options::ENABLE_MATH` which
-// emits `InlineMath`/`DisplayMath` events for `$...$` and `$$...$$`. To add math rendering:
-//   1. Add a `math` feature flag that enables ENABLE_MATH in the parser.
-//   2. Add Token::InlineMath / Token::DisplayMath variants.
-//   3. Create a separate `egui_math` crate that takes a LaTeX string and paints it
-//      using egui's Painter (text for symbols/Greek letters, lines for fraction bars,
-//      paths for roots, etc.). Use `pulldown-latex` to parse LaTeX into a layout tree.
-//   4. Feature-gate the dependency: `math = ["dep:egui_math"]`, delegating to it
-//      for inline/display math rendering (same pattern as egui_extras for tables).
 
 mod image;
 /// The [`MarkdownLabel`] widget.
 pub mod label;
-/// Layout job construction from token streams.
+/// The layout job of a list of tokens.
 pub mod layout;
-/// Link handler trait and link styling.
+/// The link handler trait and the link style.
 pub mod link;
-/// Code block and horizontal rule painting.
+/// The painting of code block backgrounds and horizontal rules.
 pub mod paint;
-/// CommonMark markdown parser.
+/// The CommonMark parser and [`heal`].
 pub mod parser;
-/// Customizable visual styling for markdown rendering.
+/// The style types, from `egui_markdown_style`.
 pub mod style;
 /// Table rendering.
 pub mod table;
-/// Syntax highlighting theme utilities.
+/// The syntect themes of code blocks.
 #[cfg(feature = "syntax_highlighting")]
 pub mod theme;
-/// Parsed markdown token types.
+/// The token types of a parsed document.
 pub mod types;
 
 pub use egui_markdown_style::{global_style, set_style};

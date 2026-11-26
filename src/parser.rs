@@ -1,4 +1,4 @@
-//! CommonMark markdown parser with streaming-friendly healing.
+//! The CommonMark parser, and [`heal`] for incomplete text.
 
 use std::borrow::Cow;
 use std::ops::Range;
@@ -176,13 +176,11 @@ fn decode_entities(value: CowStr<'_>) -> CowStr<'_> {
   CowStr::Boxed(decoded.into_boxed_str())
 }
 
-/// Auto-close unclosed markdown constructs for streaming/incomplete input.
+/// Close the open constructs of incomplete markdown, such as a reply of an LLM that is still streaming.
 ///
-/// When an application streams markdown, for example from an LLM, an unclosed construct
-/// makes pulldown-cmark render the raw syntax characters, such as `**` and `[`, as literal
-/// text.
-/// This function detects unclosed code fences, bold, italic, strikethrough, inline
-/// code, and links, and appends the necessary closing markers.
+/// An open construct makes pulldown-cmark show its markers, such as `**` and `[`, as text, or read the rest
+/// of the text as part of it. This function finds an open code fence, bold, italic, strikethrough, inline
+/// code, link or table header, and appends the markers that close it.
 ///
 /// A marker at the end of the input has no kind until more text arrives. This function
 /// removes a last line that holds only block markers, and a run of inline markers at the
@@ -224,8 +222,8 @@ pub fn heal(s: &str) -> Cow<'_, str> {
 
   let rest = without_marker_run(without_marker_line(s));
   let table_suffix = heal_table(rest);
-  // Skip inline healing when a table suffix was generated; the inline scanner
-  // doesn't understand table structure and can produce conflicting closings.
+  // A table separator replaces the inline heal, because the inline scan does not know the cells of a table
+  // and can append closers that conflict with the separator.
   let (rest, inline_suffix) = if table_suffix.is_empty() { heal_inline(rest) } else { (rest, String::new()) };
 
   if table_suffix.is_empty() && inline_suffix.is_empty() {
@@ -557,26 +555,28 @@ fn toggle_emphasis(open: &mut bool, can_open: bool, can_close: bool) {
   }
 }
 
+/// The separator to append when the last line of `s` is a complete table header with no separator, or an
+/// empty string.
 fn heal_table(s: &str) -> String {
   let lines: Vec<&str> = s.lines().collect();
   if lines.is_empty() {
     return String::new();
   }
 
-  // A blank line after the header ends the block, so a separator after it would show as text.
+  // When the text ends with a blank line, the last line is empty and gets no separator. The blank line ends
+  // the block, so a separator after it would show as text.
   let last_idx = lines.len() - 1;
   let last = lines[last_idx].trim();
 
-  // Case 1: Last line is a complete table header row - needs a separator.
+  // The last line is a header row when no separator comes before it in its block.
   if is_table_row(last) && !is_separator_like(last) {
-    // Walk backwards to see if there's already a separator in this table block.
     for i in (0..last_idx).rev() {
       let line = lines[i].trim();
       if line.is_empty() {
         break;
       }
       if is_full_separator(line) {
-        return String::new(); // body row in recognized table
+        return String::new(); // A body row of a table.
       }
     }
     let cols = count_table_columns(last);
@@ -595,12 +595,12 @@ fn is_table_row(line: &str) -> bool {
   line.starts_with('|') && line.ends_with('|') && line.matches('|').count() >= 3
 }
 
-/// A line containing only table-separator characters (`|`, `-`, `:`, space).
+/// A line that starts with `|` and holds only the characters of a table separator: `|`, `-`, `:` and space.
 fn is_separator_like(line: &str) -> bool {
   !line.is_empty() && line.starts_with('|') && line.chars().all(|c| matches!(c, '|' | '-' | ':' | ' '))
 }
 
-/// A complete separator line (separator-like with dashes and enough pipes for a table).
+/// A complete separator line: it has a `-` and at least two cells.
 fn is_full_separator(line: &str) -> bool {
   is_separator_like(line) && line.contains('-') && line.matches('|').count() >= 3
 }
@@ -611,9 +611,10 @@ fn count_table_columns(row: &str) -> usize {
   row.replace("\\|", "").matches('|').count().saturating_sub(1)
 }
 
-/// Parse a markdown string into a [`Markdown`] token stream.
+/// Parse markdown into a list of [`Token`]s.
 ///
-/// Supports CommonMark with extensions: tables, strikethrough, footnotes, and task lists.
+/// The parser reads CommonMark with the GitHub tables, strikethrough, footnotes and task lists, and the HTML
+/// tags `<img>` and `<br>`.
 pub fn parse<'s>(s: &'s str) -> Markdown<'s> {
   let mut tokens = Vec::new();
   parse_into(s, &mut tokens);
@@ -648,7 +649,6 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
   // Items nest, so this counts the open items rather than holding a flag that an inner item would clear.
   let mut item_depth = 0usize;
 
-  // Table collection state.
   let mut in_table = false;
   let mut table_alignments: Vec<Alignment> = Vec::new();
   let mut table_headers: Vec<Vec<Token<'s>>> = Vec::new();
@@ -657,7 +657,6 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
   let mut current_cell: Vec<Token<'s>> = Vec::new();
   let mut in_table_head = false;
 
-  // Footnote definition state.
   let mut in_footnote_def = false;
 
   let ensure_double_newline = |tokens: &mut Vec<Token>| {
@@ -682,7 +681,7 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
     |tokens: &[Token]| -> bool { matches!(tokens.last(), Some(Token::ListMarker { .. })) };
 
   for event in parser {
-    // When collecting table cells, route text into the cell buffer.
+    // In a table, the tokens go into the current cell.
     if in_table {
       match &event {
         Event::Start(Tag::TableHead) => {
@@ -894,7 +893,7 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
 
           let last = tokens.last();
           if matches!(last, Some(Token::ListMarker { .. })) || matches!(last, Some(Token::TaskListMarker { .. })) {
-            // Don't add newlines right after a list/task marker.
+            // The text of an item starts on the row of its marker.
           } else if after_header_in_list {
             ensure_newline(tokens);
           } else if in_list_item {
@@ -1381,7 +1380,7 @@ mod tests {
     let md = parse("Line 1\nLine 2");
     let mut it = md.tokens.iter();
     assert_eq!(it.next().unwrap().text(), "Line 1");
-    // SoftBreak becomes a space per CommonMark spec.
+    // A soft break becomes a space, as CommonMark specifies.
     assert_eq!(it.next().unwrap().text(), " ");
     assert_eq!(it.next().unwrap().text(), "Line 2");
     assert!(it.next().is_none());
@@ -1389,7 +1388,7 @@ mod tests {
 
   #[test]
   fn hard_break() {
-    // Two trailing spaces before newline = hard break.
+    // Two spaces before a newline give a hard break.
     let md = parse("Line 1  \nLine 2");
     let mut it = md.tokens.iter();
     assert_eq!(it.next().unwrap().text(), "Line 1");
@@ -1899,7 +1898,7 @@ mod tests {
 
   #[test]
   fn heal_backslash_escape_star() {
-    // \* is an escaped asterisk - should NOT trigger italic healing
+    // `\*` is an escaped asterisk, so it opens no italic.
     let input = "\\*not italic";
     assert!(matches!(super::heal(input), std::borrow::Cow::Borrowed(_)));
   }
@@ -1938,10 +1937,10 @@ mod tests {
 
   #[test]
   fn heal_footnote_ref_not_link() {
-    // [^1] should not be treated as a link
+    // `[^1]` is a footnote reference, not a link.
     let input = "text[^1";
     let healed = super::heal(input);
-    // Should NOT produce [^1]() - footnote refs are not links.
+    // Heal does not append `()` to a footnote reference.
     assert!(!healed.contains("]("), "Footnote ref should not be healed as link: {healed}");
   }
 

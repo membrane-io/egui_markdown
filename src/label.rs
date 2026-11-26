@@ -1,4 +1,4 @@
-//! The [`MarkdownLabel`] widget for rendering interactive markdown.
+//! The [`MarkdownLabel`] widget.
 
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -31,19 +31,19 @@ use crate::types::{tokens_to_owned, Token};
 #[cfg(feature = "syntax_highlighting")]
 pub use crate::theme::default_code_theme;
 
-/// Cached parse + layout result stored in egui temp memory.
+/// The parse of the text and, on the whole-document path, its layout, in egui temp data.
 #[derive(Clone, Default)]
 struct CachedMarkdownLayout {
   text_hash: u64,
   /// `None` when the document takes the segmented render path, which lays out each flush
   /// range separately and so has no use for a whole-document layout.
   layout: Option<Arc<LayoutResult>>,
-  /// The owned tokens for rendering (needed for hover/click after cache hit), and where the parse of
-  /// the next text, such as the next delta of a streamed reply, can start.
+  /// The owned tokens, which hover and click read after a cache hit, and where the parse of the next text,
+  /// such as the next delta of a streamed reply, can start.
   parse: parser::ParseState,
 }
 
-/// Cached layout result for a single flush range (used by segmented render path).
+/// The layout of one range of text on the segmented path.
 #[derive(Clone)]
 struct CachedFlushRange {
   /// The parse generation and the frame key of the frame that last used this entry, and the end of the
@@ -76,14 +76,14 @@ fn hash_text(text: &str, frame_key: u64, max_rows: Option<u32>, scroll_code_bloc
 /// Identity of everything the [`LayoutResult`] of a flush range depends on: its tokens and the
 /// [`frame_key`].
 ///
-/// Deliberately excludes the wrap width and break flag: `build_layout` only seeds
-/// those on `job.wrap`, and `render_galley` overwrites them with the live values
-/// before shaping. Hashing them here would rebuild every job on every frame of a resize.
+/// The wrap width and the break flag are not in the key. `build_layout` writes them into `job.wrap`, and
+/// `render_galley` writes the live values over them before egui shapes the job. A key with them would
+/// rebuild each job on each frame of a resize.
 #[inline]
 fn hash_flush_context(tokens: &[Token<'_>], frame_key: u64) -> u64 {
   let mut hasher = std::collections::hash_map::DefaultHasher::new();
-  // Token content must be hashed: a flush range is keyed by its start index, and an edit
-  // can change a range's content while leaving its start index and length untouched.
+  // The id of a range holds only its start index. An edit can change the tokens of a range and keep its start
+  // and its length, so the key holds the tokens.
   tokens.hash(&mut hasher);
   frame_key.hash(&mut hasher);
   hasher.finish()
@@ -291,8 +291,9 @@ fn cached_block_height(
   Some(cached.height)
 }
 
-/// Reserve space for an off-screen block using cached height and current available width.
-/// Width is not cached so a panel shrink cannot leave a stale wider min-size.
+/// Allocate the space of a block outside the view, from its cached height, and return `true`. Return `false`
+/// when the block is in the view or has no valid height. The space has the current available width, so a
+/// panel that shrinks does not keep the width of an earlier frame.
 fn try_cull_block(
   ui: &mut Ui,
   out: &mut Rendered,
@@ -358,7 +359,7 @@ pub enum OverflowWrap {
   BreakAll,
 }
 
-/// Resolved wrap settings for one layout/paint pass.
+/// The wrap settings of one render.
 struct ResolvedWrap {
   mode: TextWrapMode,
   max_width: f32,
@@ -406,10 +407,11 @@ impl Rendered {
   }
 }
 
-/// An interactive markdown-rendered label widget for egui.
+/// A widget that renders markdown text.
 ///
-/// Parses markdown text and renders it with formatting, clickable links,
-/// selectable text, code block overlays, and more.
+/// The label parses the text, lays it out and paints it, with selectable text, links that react to a
+/// click, code blocks, tables, images, blockquotes and lists. It keeps its caches in egui temp data under
+/// `id`. Give a text that grows, such as a streamed reply, the same `id` on each frame.
 ///
 /// # Example
 ///
@@ -445,7 +447,7 @@ pub struct MarkdownLabel<'a> {
 }
 
 impl<'a> MarkdownLabel<'a> {
-  /// Create a new markdown label with the given widget ID and markdown source text.
+  /// A label with the widget id `id` for the markdown `text`.
   pub fn new(id: Id, text: &'a str) -> Self {
     Self {
       id,
@@ -470,55 +472,50 @@ impl<'a> MarkdownLabel<'a> {
     }
   }
 
-  /// Override the base font used for rendering.
+  /// The font of the body text. The default is the font of the egui `Ui`.
   pub fn font(self, font: FontId) -> Self {
     Self { font: Some(font), ..self }
   }
 
-  /// Limit the number of visible lines (rows).
+  /// The largest number of rows that the label shows.
   ///
-  /// Under [`Self::truncate`], this is the elision row budget (default `1` when unset),
-  /// so `.truncate().max_lines(3)` acts like a CSS line-clamp.
+  /// With [`Self::truncate`], the label elides the text after this number of rows. The default is 1, so
+  /// `.truncate().max_lines(3)` shows three rows, as a CSS line clamp does.
   ///
-  /// Row limits apply only to the whole-document render path. Documents that need
-  /// segmentation (tables, images, blockquotes, scrolling code blocks) ignore this.
+  /// A document with a table, an image, a blockquote, a block widget link or a scrolling code block
+  /// ignores this limit and shows all of its rows.
   pub fn max_lines(self, n: u32) -> Self {
     Self { max_lines: Some(n), ..self }
   }
 
-  /// Override the wrap mode for this widget.
-  ///
-  /// When unset, [`Ui::wrap_mode`] is used (same as egui's [`egui::Label`]).
+  /// The wrap mode of the label. Without it, the label uses [`Ui::wrap_mode`], as [`egui::Label`] does.
   pub fn wrap_mode(self, wrap_mode: TextWrapMode) -> Self {
     Self { wrap_mode: Some(wrap_mode), ..self }
   }
 
-  /// Set wrap mode to [`TextWrapMode::Wrap`].
+  /// Set the wrap mode to [`TextWrapMode::Wrap`].
   pub fn wrap(self) -> Self {
     self.wrap_mode(TextWrapMode::Wrap)
   }
 
-  /// Set wrap mode to [`TextWrapMode::Truncate`].
+  /// Set the wrap mode to [`TextWrapMode::Truncate`].
   ///
-  /// Forces [`OverflowWrap::BreakAll`] at layout time. An explicit
-  /// [`OverflowWrap::Normal`] from [`Self::overflow_wrap`] does not survive truncate,
-  /// matching egui/`epaint` guidance for `max_rows = 1`.
-  ///
-  /// Elides after [`Self::max_lines`] rows, or 1 when `max_lines` is unset.
-  /// Same segmentation limitation as [`Self::max_lines`].
+  /// The label elides the text after [`Self::max_lines`] rows, or after one row. Truncate always breaks a
+  /// row between any two characters, as [`OverflowWrap::BreakAll`] does, as the egui docs of
+  /// `TextWrapping::break_anywhere` advise for a row limit. [`Self::overflow_wrap`] has no effect. The
+  /// limits of [`Self::max_lines`] apply.
   pub fn truncate(self) -> Self {
     self.wrap_mode(TextWrapMode::Truncate)
   }
 
-  /// Set wrap mode to [`TextWrapMode::Extend`], disabling wrapping and truncation.
+  /// Set the wrap mode to [`TextWrapMode::Extend`]. The label does not wrap and does not truncate.
   pub fn extend(self) -> Self {
     self.wrap_mode(TextWrapMode::Extend)
   }
 
-  /// How to break tokens that are wider than the available width.
-  ///
-  /// Default: [`OverflowWrap::Normal`]. Ignored under [`Self::extend`] (nothing to
-  /// break against) and overridden to [`OverflowWrap::BreakAll`] under [`Self::truncate`].
+  /// Where to break a run of text that is wider than the available width. The default is
+  /// [`OverflowWrap::Normal`]. It has no effect with [`Self::extend`], which does not wrap, and with
+  /// [`Self::truncate`], which always breaks between any two characters.
   pub fn overflow_wrap(self, overflow_wrap: OverflowWrap) -> Self {
     Self { overflow_wrap, ..self }
   }
@@ -531,50 +528,52 @@ impl<'a> MarkdownLabel<'a> {
     Self { selectable, ..self }
   }
 
-  /// Enable or disable all interaction (links, hover, selection). Default: `true`.
+  /// Turn the interaction of the label on or off: links, hover and text selection. Default: `true`.
   pub fn interactable(self, interactable: bool) -> Self {
     Self { interactable, ..self }
   }
 
-  /// Set a custom link handler for styling and click behavior.
+  /// The [`LinkHandler`] that styles the links and reacts to a click on a link.
   pub fn link_handler(self, handler: &'a dyn LinkHandler) -> Self {
     Self { link_handler: Some(handler), ..self }
   }
 
-  /// Add a button overlay to code blocks. The callback receives `(ui, code_text, language)`.
+  /// Add buttons, such as a copy button, to each code block. The label calls `f(ui, code, language)` with a
+  /// right-to-left `ui` over the top 24 points of the code block.
   pub fn code_block_buttons(self, f: &'a dyn Fn(&mut Ui, &str, &str)) -> Self {
     Self { code_block_buttons: Some(f), ..self }
   }
 
-  /// Enable horizontal scrolling for code blocks. Default: `false`.
+  /// Show each code block as a separate widget that scrolls horizontally. Default: `false`.
   ///
-  /// When enabled, code blocks render as standalone scrollable widgets instead of
-  /// inline galley text. Long lines scroll horizontally rather than wrapping.
+  /// A long line of code then scrolls and does not wrap. Without this, a code block is text in the galley of
+  /// the label, and a long line wraps.
   pub fn scroll_code_blocks(self, scroll: bool) -> Self {
     Self { scroll_code_blocks: scroll, ..self }
   }
 
-  /// Size code blocks to their content instead of filling the available width.
-  /// Default: `false` (fill). Only applies with [`Self::scroll_code_blocks`].
+  /// Make each scrolling code block as wide as its content, not as wide as the available width.
+  /// Default: `false`. It has an effect only with [`Self::scroll_code_blocks`].
   ///
-  /// Useful for tooltips and popovers that should hug their content.
+  /// Use it in a tooltip or a popup that is as wide as its content.
   pub fn shrink_code_blocks(self, shrink: bool) -> Self {
     Self { shrink_code_blocks: shrink, ..self }
   }
 
-  /// Size the whole widget to the laid-out galley instead of filling available width.
-  /// Default: `false` (fill). Wrapping still uses the available width as a cap.
+  /// Make the label as wide as its content, not as wide as the available width. Default: `false`. The text
+  /// still wraps at the available width.
   ///
-  /// Decorations (code-block backgrounds, horizontal rules) span the allocated
-  /// width, not the leftover space in the parent.
+  /// The code block backgrounds and the horizontal rules then end at the right edge of the label, not at
+  /// the right edge of the available space.
   pub fn hug_content(self, hug: bool) -> Self {
     Self { hug_content: hug, ..self }
   }
 
-  /// Minimum width for shrunk code blocks (capped at the available width).
+  /// The smallest width of a code block with [`Self::shrink_code_blocks`]. A width larger than the available
+  /// width has the available width.
   ///
-  /// Lets a container that sizes to content stretch blocks to match its widest
-  /// sibling, typically using a width measured on the previous frame.
+  /// A container that is as wide as its content can give each code block the width of its widest child, for
+  /// example from a measure on the previous frame.
   pub fn code_block_min_width(self, width: Option<f32>) -> Self {
     Self { code_block_min_width: width, ..self }
   }
@@ -589,10 +588,10 @@ impl<'a> MarkdownLabel<'a> {
     Self { heal, ..self }
   }
 
-  /// Rewrite the laid-out [`LayoutJob`] just before it is shaped into a galley.
+  /// Change the [`LayoutJob`] just before egui shapes it into a galley. Pass `None` to keep the job.
   ///
-  /// The parse/layout cache is unchanged; only the painted job is rewritten. Pass `None` to
-  /// leave the job as built.
+  /// The label caches the job before the map, so the map can change on each frame. On the segmented path,
+  /// the map applies to the last range of text only.
   ///
   /// A map that hides the end of the text (alpha 0, as a reveal does) makes the label allocate only
   /// the rows that show. The hidden rows stay in the layout below the allocation, so the caller must
@@ -604,26 +603,24 @@ impl<'a> MarkdownLabel<'a> {
     Self { map_job: f.map(|f| Box::new(f) as _), ..self }
   }
 
-  /// Override visual styling for this widget.
+  /// The style of this label.
   ///
-  /// Without this, the widget uses the context-wide style from
-  /// [`egui_markdown_style::global_style`], or [`MarkdownStyle::default`] when no context
-  /// style is installed.
+  /// Without it, the label uses the style that [`crate::set_style`] installed for the context, or
+  /// [`MarkdownStyle::default`].
   pub fn style(self, style: &'a MarkdownStyle) -> Self {
     Self { style: Some(style), ..self }
   }
 
-  /// Use a custom syntect theme for code block syntax highlighting.
+  /// The syntect theme of the code blocks of this label.
   ///
-  /// When set, this theme is used instead of the context-wide themes from
-  /// [`crate::set_code_themes`]. When neither is set, a built-in theme is
-  /// chosen based on dark/light mode.
+  /// Without it, the label uses the themes that [`crate::set_code_themes`] installed, or the built-in
+  /// `base16-ocean` theme for the current dark mode.
   #[cfg(feature = "syntax_highlighting")]
   pub fn code_theme(self, theme: &'a syntect::highlighting::Theme) -> Self {
     Self { code_theme: Some(theme), ..self }
   }
 
-  /// Resolve wrap mode, overflow, width, and row budget for this frame.
+  /// The wrap mode, the wrap width, the break flag and the row limit of this frame.
   fn resolve_wrap(&self, ui: &Ui) -> ResolvedWrap {
     let mode = self.wrap_mode.unwrap_or_else(|| ui.wrap_mode());
     match mode {
@@ -645,25 +642,25 @@ impl<'a> MarkdownLabel<'a> {
     }
   }
 
-  /// Re-apply live wrap fields that are deliberately excluded from layout cache keys.
+  /// Write the wrap width and the break flag of this frame into a cached job, which does not hold them.
   fn apply_live_wrap(wrap: &ResolvedWrap, job: &mut LayoutJob) {
     job.wrap.max_width = wrap.max_width;
     job.wrap.break_anywhere = wrap.break_anywhere;
   }
 
-  /// Return the code theme argument for passing to layout functions.
+  /// The code theme of this label, for the layout functions.
   #[cfg(feature = "syntax_highlighting")]
   fn code_theme_arg(&self) -> CodeThemeArg<'_> {
     self.code_theme
   }
 
-  /// Return the code theme argument (stub when syntax highlighting is disabled).
+  /// Always `None`, because the crate has no code themes without syntax highlighting.
   #[cfg(not(feature = "syntax_highlighting"))]
   fn code_theme_arg(&self) -> CodeThemeArg<'_> {
     None
   }
 
-  /// Render the markdown into the UI.
+  /// Render the markdown in `ui`.
   pub fn show(self, ui: &mut Ui) -> MarkdownLabelOutput {
     let mut out = Rendered::new();
     self.render(ui, &mut out);
@@ -749,7 +746,6 @@ impl<'a> MarkdownLabel<'a> {
     let font = self.font.clone().unwrap_or_else(|| FontSelection::Default.resolve(ui.style()));
 
     let cache_id = self.id.with("md_cache");
-    // Check if we have a cached layout for this text.
     let cached: Option<CachedMarkdownLayout> = ui.data(|d| d.get_temp(cache_id));
 
     // The text before the last resume point of the previous parse heals to itself, so a streamed reply
@@ -867,7 +863,8 @@ impl<'a> MarkdownLabel<'a> {
     self.render_token_range(ui, tokens, font, color, 0, tokens.len(), style, code_font_size, revision, out);
   }
 
-  /// Recursively render a range of tokens, handling blockquotes and tables as sub-regions.
+  /// Render the tokens `start..end` on the segmented path: each run of text as a galley, each block as a
+  /// widget, and each blockquote as a child `Ui` that renders its own tokens.
   #[allow(clippy::too_many_arguments)]
   fn render_token_range(
     &self,
@@ -886,15 +883,14 @@ impl<'a> MarkdownLabel<'a> {
     let mut i = start;
 
     let block_spacing = style.block_spacing;
-    // Before rendering a block element, add spacing if there was preceding content.
+    // Add block spacing before a block when content comes before it.
     let before_block = |had_content: bool, ui: &mut Ui| {
       if had_content {
         ui.add_space(block_spacing);
       }
     };
-    // After rendering a block element, skip trailing newlines and add uniform spacing —
-    // but only when more content follows, mirroring `before_block`, so a trailing block
-    // doesn't leave a spacing gap at the bottom.
+    // After a block, skip the newlines that follow it. Add block spacing only when content follows, as
+    // `before_block` does, so that a block at the end leaves no space below it.
     let after_block = |i: &mut usize, text_start: &mut usize, end: usize, ui: &mut Ui| {
       while *text_start < end && matches!(tokens[*text_start], Token::Newline) {
         *text_start += 1;
@@ -1118,7 +1114,7 @@ impl<'a> MarkdownLabel<'a> {
     self.flush_text_range(ui, tokens, font, color, text_start, end, style, revision, out);
   }
 
-  /// Render a range of non-break tokens as an interactive galley.
+  /// Render the tokens `start..end`, which hold no block, as one galley.
   #[allow(clippy::too_many_arguments)]
   fn flush_text_range(
     &self,
@@ -1135,12 +1131,12 @@ impl<'a> MarkdownLabel<'a> {
     if start >= end {
       return;
     }
-    // Skip if only newlines.
+    // A range of newlines and quote markers has no text.
     if tokens[start..end].iter().all(|t| matches!(t, Token::Newline | Token::BlockquoteStart | Token::BlockquoteEnd)) {
       return;
     }
 
-    // Trim trailing newlines; spacing between blocks is handled by render_token_range.
+    // Leave out the newlines at the end. `render_token_range` adds the space between blocks.
     let mut trimmed_end = end;
     while trimmed_end > start && matches!(tokens[trimmed_end - 1], Token::Newline) {
       trimmed_end -= 1;
@@ -1166,8 +1162,8 @@ impl<'a> MarkdownLabel<'a> {
     };
     let (generation, frame_key) = (revision.generation, revision.frame_key);
 
-    // Viewport culling: skip layout+paint for off-screen segments. Unlike the layout, a
-    // measured size is only valid at the width and the break flag it was measured at.
+    // A range outside the view gets no layout and no paint. Its measured size, unlike its layout, is valid
+    // only at the width and the break flag of the measure.
     let measured_at = (ctx_hash, max_width, wrap.break_anywhere);
     if let Some((cached_at, cached_size)) = ui.data(|d| d.get_temp::<((u64, f32, bool), Vec2)>(size_cache_id)) {
       if cached_at == measured_at {
@@ -1205,7 +1201,7 @@ impl<'a> MarkdownLabel<'a> {
     }
 
     let code_theme = self.code_theme_arg();
-    // Segmented flush ranges ignore row limits (tables/images/etc. already split the doc).
+    // A range on the segmented path has no row limit.
     let layout = build_layout(
       ui,
       token_slice,
@@ -1289,9 +1285,9 @@ impl<'a> MarkdownLabel<'a> {
     let painted_widget_spans: Vec<_> = inline_widget_spans.iter().filter(|&&(at, ..)| shown(at)).cloned().collect();
     let mut code_block_rects = paint::compute_code_block_rects(code_block_spans, &galley);
     let available_width = ui.available_width();
-    // Decorations (code block backgrounds, horizontal rules) span the allocated width, so a
-    // filling widget must claim the leftover space — otherwise they paint outside the rect.
-    // Popovers that hug content skip that expand and paint decorations at the galley width.
+    // The code block backgrounds and the rules span the allocated width. So a label that fills the available
+    // width allocates all of it, and does not paint outside its rect. A label that hugs its content paints
+    // them at the width of the galley.
     let mut size = galley.size();
     // The hidden text stays in the layout, so a line does not reflow when the next glyph shows. The allocation
     // stops at the last row that shows. A scroll that follows the bottom then moves only for text that shows.
@@ -1401,7 +1397,7 @@ impl<'a> MarkdownLabel<'a> {
     let token_index = section_to_token.get(section_index as usize).copied();
     let token = token_index.and_then(|idx| tokens.get(idx));
 
-    // Check if this token is an inline widget - show pointing hand but suppress underline/tooltip.
+    // An inline widget gets the pointing hand, but no underline and no tooltip.
     let is_inline_widget =
       token_index.is_some_and(|ti| inline_widget_spans.iter().any(|&(_, _, span_ti, _)| span_ti == ti));
 
@@ -1416,7 +1412,7 @@ impl<'a> MarkdownLabel<'a> {
     if underline {
       let link_color = link_style.and_then(|style| style.color).unwrap_or(ui.visuals().hyperlink_color);
       let stroke = Stroke::new(1.0_f32, link_color);
-      // Find all sections belonging to the same token (for multi-section layout_link).
+      // Underline each section of the link, because `layout_link` can append more than one.
       let target_token = token_index.unwrap();
       let mut sec_start_char = 0u32;
       for (sec_idx, &tok_idx) in section_to_token.iter().enumerate() {
@@ -1694,7 +1690,7 @@ fn render_code_block(
     if !shrink_to_content {
       ui.set_min_width(ui.available_width());
     } else if let Some(width) = min_width {
-      // `width` is the desired outer width; we're inside the frame's margins.
+      // `width` includes the margins of the frame, and this `Ui` is inside them.
       ui.set_min_width((width - p[0] - p[2]).min(ui.available_width()));
     }
     egui::ScrollArea::horizontal().id_salt(id).show(ui, |ui| {
@@ -1710,7 +1706,7 @@ fn render_code_block(
     });
   });
 
-  // Overlay buttons in the top-right, absolutely positioned over the frame.
+  // The buttons are in a right-to-left `Ui` over the top of the frame.
   if let Some(button_fn) = code_block_buttons {
     let border = frame_response.response.rect;
     let header_rect = Rect::from_min_max(pos2(border.min.x, border.min.y), pos2(border.max.x, border.min.y + 24.0));
@@ -1741,7 +1737,9 @@ fn set_label_widget_info(ui: &Ui, response: &Response, galley: &Galley) {
   response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), galley.text()));
 }
 
-/// Custom cursor-from-position that avoids egui's Galley::cursor_from_pos bug (#5796).
+/// The index of the character under `pos` in `galley`, or `None` when `pos` is not on a glyph.
+///
+/// The label does not use `Galley::cursor_from_pos`, because of egui#5796.
 pub fn cursor_from_pos(galley: &Galley, pos: Pos2) -> Option<u32> {
   if !galley.rect.contains(pos) {
     return None;
@@ -1761,7 +1759,7 @@ pub fn cursor_from_pos(galley: &Galley, pos: Pos2) -> Option<u32> {
   None
 }
 
-/// Finds the glyph and row_index from the given galley index.
+/// The glyph of the character at `index` in `galley`, and the index of its row.
 pub fn glyph_at_index(galley: &Galley, index: u32) -> Option<(&Glyph, u32)> {
   let mut offset = 0;
   for (row_index, row) in galley.rows.iter().enumerate() {
@@ -1773,7 +1771,7 @@ pub fn glyph_at_index(galley: &Galley, index: u32) -> Option<(&Glyph, u32)> {
   None
 }
 
-/// Helpful to avoid painting underlines for trailing whitespace.
+/// The last glyph of `row` that is not whitespace. The label ends a link underline there.
 pub fn last_non_whitespace_glyph(row: &Row) -> Option<&Glyph> {
   row.glyphs.iter().rfind(|glyph| !glyph.chr.is_whitespace())
 }

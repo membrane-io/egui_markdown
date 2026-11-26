@@ -66,8 +66,8 @@ fn code_block_wrapped_rows_keep_line_indentation() {
   }
 }
 
-/// Wrapped rows must start exactly where the item's text starts on the first row — the marker's
-/// own width, not a guess, so `- ` and `1. ` each line up with their own item.
+/// Wrapped rows start exactly where the text of the item starts on the first row. The label measures the
+/// width of the marker, so `- ` and `1. ` each line up with their own item.
 #[track_caller]
 fn assert_list_wraps_under_its_text(md: &str, marker: &str) {
   let rows = rows(md, 200.0);
