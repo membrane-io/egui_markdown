@@ -242,7 +242,7 @@ impl CellStyle<'_> {
 /// A part of a row of a cell: text and links that lay out as one job, or an image.
 enum CellPart<'a, 's> {
   Text(&'a [Token<'s>]),
-  Image(&'a str),
+  Image { url: &'a str, alt: &'a str },
 }
 
 /// A row of a cell, between two line breaks. Each part has its size.
@@ -269,7 +269,7 @@ fn layout_cell<'a, 's>(ui: &Ui, tokens: &'a [Token<'s>], style: &CellStyle, is_h
       let mut parts = Vec::new();
       let mut text_start = 0;
       for (i, token) in line.iter().enumerate() {
-        let Token::Image { url, width, height, .. } = token else { continue };
+        let Token::Image { alt, url, width, height, .. } = token else { continue };
         if !cfg!(feature = "images") {
           continue;
         }
@@ -277,7 +277,7 @@ fn layout_cell<'a, 's>(ui: &Ui, tokens: &'a [Token<'s>], style: &CellStyle, is_h
           parts.push(text_part(&line[text_start..i]));
         }
         let size = crate::image::image_size(ui, url, *width, *height, style.max_image_width);
-        parts.push((CellPart::Image(url), size));
+        parts.push((CellPart::Image { url, alt }, size));
         text_start = i + 1;
       }
       // An empty cell keeps the height of an empty text job.
@@ -318,8 +318,8 @@ fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: 
       for (part, size) in &line.parts {
         match part {
           CellPart::Text(run) => link_clicked |= render_text_run(ui, run, style, is_header),
-          CellPart::Image(url) => {
-            ui.add(crate::image::sized_image(url, *size));
+          CellPart::Image { url, alt } => {
+            ui.add(crate::image::sized_image(url, alt, *size));
           }
         }
       }
