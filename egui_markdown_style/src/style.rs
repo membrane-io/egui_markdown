@@ -157,6 +157,8 @@ impl MarkdownStyle {
 }
 
 /// The style of inline code, the text between backticks.
+///
+/// The corner radius, the margin and the stroke of the background come from [`egui::Visuals::code`].
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct InlineCodeStyle {
