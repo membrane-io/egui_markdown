@@ -18,8 +18,8 @@ A clear and concise description of the bug. Include screenshots or GIFs if appli
 **Expected behavior**
 What you expected to happen.
 
-**egui_markdown version**
-What version of egui_markdown are you using?
+**Versions**
+The version or commit of egui_markdown, and the version or commit of egui.
 
 **Additional context**
-Any other information (egui version, OS, backend, etc.).
+Any other information, such as the OS and the rendering backend.
