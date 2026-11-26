@@ -102,6 +102,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   right than before, and the code block buttons use the padding of `CodeBlockStyle`. ([#35])
 - A code block in the text galley gets the background fill of `egui::Visuals::code`, as a scrolling
   code block does. ([#10])
+- Seven small examples replace the examples `simple` and `advanced`: `hello_world`, `editor`, `streaming`,
+  `links`, `code_blocks`, `style` and `images`. Each example shows one topic. ([#39])
 
 ### Fixed
 
@@ -198,3 +200,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#34]: https://github.com/membrane-io/egui_markdown/pull/34
 [#35]: https://github.com/membrane-io/egui_markdown/pull/35
 [#37]: https://github.com/membrane-io/egui_markdown/pull/37
+[#39]: https://github.com/membrane-io/egui_markdown/pull/39
