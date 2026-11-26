@@ -6,11 +6,12 @@
 ![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-brightgreen.svg)
 
 A markdown parser and renderer for [egui](https://github.com/emilk/egui).
-It renders [CommonMark](https://commonmark.org/) and GitHub tables, task lists and footnotes as one egui widget with selectable text.
+It renders [CommonMark](https://commonmark.org/) and GitHub tables, task lists and footnotes as one
+egui widget with selectable text.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/readme-dark.png">
-  <img alt="A heading, a paragraph with a link, a nested list, a Rust code block, a table and a blockquote" src="docs/screenshots/readme-light.png" width="520">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/membrane-io/egui_markdown/main/docs/screenshots/readme-dark.png">
+  <img alt="A heading, a paragraph with a link, a nested list, a Rust code block, a table and a blockquote" src="https://raw.githubusercontent.com/membrane-io/egui_markdown/main/docs/screenshots/readme-light.png" width="520">
 </picture>
 
 ## Usage
@@ -34,8 +35,10 @@ fn show_markdown(ui: &mut egui::Ui) {
 - Text selection, as on `egui::Label`.
 - Syntax highlighting through `syntect`, with custom themes.
 - Tables with column alignment, and images with the `images` feature.
-- `LinkHandler` changes the style, the tooltip and the click of a link, and can show a link as a widget.
-- `.heal(true)` closes unclosed constructs, so partial LLM output renders correctly while it streams.
+- `LinkHandler` changes the style, the tooltip and the click of a link, and can show a link as a
+  widget.
+- `.heal(true)` closes unclosed constructs, so partial LLM output renders correctly while it
+  streams.
 - `MarkdownStyle` controls the look of each element, and has a built-in editor.
 - Layout caches and viewport culling keep large documents fast.
 
@@ -53,7 +56,8 @@ The [crate docs](https://docs.rs/egui_markdown) describe each option.
 
 ## egui version
 
-egui_markdown needs egui `main` and Rust 1.95 until the next egui release. Patch egui in your workspace:
+egui_markdown needs egui `main` and Rust 1.95 until the next egui release. Patch egui in your
+workspace:
 
 ```toml
 [patch.crates-io]
@@ -64,7 +68,8 @@ emath = { git = "https://github.com/emilk/egui.git", branch = "main" }
 ecolor = { git = "https://github.com/emilk/egui.git", branch = "main" }
 ```
 
-Patch `emath` and `ecolor` too, or the build has two incompatible copies of their types. Add `eframe` when you use it.
+Patch `emath` and `ecolor` too, or the build has two incompatible copies of their types. Add
+`eframe` when you use it.
 
 ## Examples
 

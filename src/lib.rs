@@ -8,7 +8,7 @@
 //! and lists. Of the raw HTML in the text, it renders the `<img>` and `<br>` tags, and it shows each other
 //! tag as written.
 //!
-//! # Quick Start
+//! # Quick start
 //!
 //! ```no_run
 //! # use eframe::egui;
@@ -27,19 +27,34 @@
 //! # Style
 //!
 //! [`MarkdownStyle`] controls the look of each markdown element. Give a style to one label with
-//! [`MarkdownLabel::style`], or install one for all labels of a context with [`set_style`]:
+//! [`MarkdownLabel::style`]:
 //!
 //! ```no_run
 //! # use eframe::egui;
 //! use egui_markdown::{MarkdownLabel, MarkdownStyle};
 //!
-//! fn ui(ui: &mut egui::Ui, text: &str) {
-//!     let mut style = MarkdownStyle::default();
-//!     style.heading.scales[0] = 2.0; // A bigger H1.
-//!     style.code_font_size = Some(14.0); // `None` uses the egui monospace size.
-//!     MarkdownLabel::new(ui.make_persistent_id("md"), text).style(&style).show(ui);
+//! fn ui(ui: &mut egui::Ui, text: &str, style: &MarkdownStyle) {
+//!     MarkdownLabel::new(ui.make_persistent_id("md"), text).style(style).show(ui);
+//! }
+//! ```
 //!
-//!     egui_markdown::set_style(ui.ctx(), style);
+//! Or install one style for all labels of a context with [`set_style`]. Call it one time at
+//! startup, for example in the constructor of the app, and not in each frame:
+//!
+//! ```no_run
+//! # use eframe::egui;
+//! use egui_markdown::MarkdownStyle;
+//!
+//! struct App;
+//!
+//! impl App {
+//!     fn new(cc: &eframe::CreationContext<'_>) -> Self {
+//!         let mut style = MarkdownStyle::default();
+//!         style.heading.scales[0] = 2.0; // A bigger H1.
+//!         style.code_font_size = Some(14.0); // `None` uses the egui monospace size.
+//!         egui_markdown::set_style(&cc.egui_ctx, style);
+//!         Self
+//!     }
 //! }
 //! ```
 //!
@@ -81,7 +96,7 @@
 //! - Size: [`MarkdownLabel::hug_content`], [`MarkdownLabel::calculate_size`] and
 //!   [`MarkdownLabel::layout_in_ui`].
 //!
-//! # Feature Flags
+//! # Feature flags
 //!
 //! - `syntax_highlighting` (default) - Syntax-highlighted code blocks via `syntect`.
 //! - `extra_syntaxes` - The syntaxes of `bat` through `two-face`, with TypeScript, TSX and JSX.

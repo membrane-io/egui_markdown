@@ -3,7 +3,7 @@
 Render **markdown** in an *egui* app with one widget. The text is selectable, and a [link](https://github.com/emilk/egui) opens on a click.
 
 - Parse CommonMark with `pulldown-cmark`
-  - Tables, task lists and footnotes
+  - Tables and footnotes
   - Syntax highlighting with `syntect`
 - Stream the text of an LLM reply
 

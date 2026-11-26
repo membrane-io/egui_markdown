@@ -1,8 +1,9 @@
 //! The screenshots of the README.
 //!
-//! Regenerate them with `UPDATE_SNAPSHOTS=1 cargo test --test readme_screenshots`. Without
-//! `UPDATE_SNAPSHOTS`, the tests do nothing. CI has no GPU adapter, and the text raster can differ between
+//! Regenerate them with `README_SCREENSHOTS=1 cargo test --test readme_screenshots`. Without
+//! `README_SCREENSHOTS`, the tests do nothing. CI has no GPU adapter, and the text raster can differ between
 //! the wgpu backends, so the tests do not compare the images.
+// The screenshots show the syntect colors of the code block, so the test needs syntect.
 #![cfg(feature = "syntax_highlighting")]
 
 use egui::{Id, Theme};
@@ -15,7 +16,7 @@ const MARKDOWN: &str = include_str!("../examples/markdown/readme.md");
 
 /// Render the README document in `theme`, and write the image to `docs/screenshots/{name}.png`.
 fn screenshot(theme: Theme, name: &str) {
-  if std::env::var_os("UPDATE_SNAPSHOTS").is_none() {
+  if std::env::var_os("README_SCREENSHOTS").is_none() {
     return;
   }
   let mut harness = Harness::builder()
@@ -28,6 +29,7 @@ fn screenshot(theme: Theme, name: &str) {
       // The harness leaves an 8 pt margin around the panel. Fill it with the panel color.
       let painter = ui.ctx().layer_painter(ui.layer_id());
       painter.rect_filled(ui.ctx().content_rect(), 0.0, ui.visuals().panel_fill);
+      // The frame adds 8 pt to the 8 pt margin of the harness, so the text has a 16 pt margin.
       egui::Frame::NONE.inner_margin(8).show(ui, |ui| {
         MarkdownLabel::new(Id::NULL.with("readme"), MARKDOWN).show(ui);
       });
