@@ -1148,10 +1148,23 @@ pub fn highlight_code(
 
   let style = ui.style();
   let mut job = syntax_highlighting::highlight(ui.ctx(), style, &plain_code_theme(style), body, language);
+  // `egui_extras` returns one section in a fixed gray when it does not know the language. A known language
+  // gives two or more sections, because `pad_code_body` starts each line with a space, and the highlighter
+  // makes a separate token of the space. This code gives the one section the code color of the visuals.
+  let plain = job.sections.len() == 1;
   for section in &mut job.sections {
     section.format.font_id = FontId::monospace(code_font_size);
+    if plain {
+      section.format.color = plain_code_color(ui.visuals());
+    }
   }
   job
+}
+
+/// The color of the code in [`highlight_code`] for a language that `egui_extras` does not know.
+#[cfg(not(feature = "syntax_highlighting"))]
+pub(crate) fn plain_code_color(visuals: &egui::Visuals) -> Color32 {
+  visuals.code.text_color.unwrap_or_else(|| visuals.text_color())
 }
 
 /// The theme of the code in [`highlight_code`] without `syntect`.

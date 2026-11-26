@@ -455,12 +455,12 @@ fn an_indented_code_line_follows_set_fonts() {
   assert_follows_change("set_fonts", show, swap_font_families, show);
 }
 
-/// Without syntax highlighting, a scrolling code block has the color of `Visuals::code`.
+/// Without syntax highlighting, a scrolling code block with no language has the color of `Visuals::code`.
 #[cfg(not(feature = "syntax_highlighting"))]
 #[test]
 fn a_plain_scrolling_code_block_follows_the_code_color() {
   let show = |ui: &mut egui::Ui| {
-    MarkdownLabel::new(Id::NULL.with("label"), "```rust\nfn main() {}\n```").scroll_code_blocks(true).show(ui);
+    MarkdownLabel::new(Id::NULL.with("label"), "```\nfn main() {}\n```").scroll_code_blocks(true).show(ui);
   };
   let change = |ctx: &Context| ctx.all_styles_mut(|style| style.visuals.code.text_color = Some(Color32::RED));
   assert_follows_change("code color", show, change, show);
