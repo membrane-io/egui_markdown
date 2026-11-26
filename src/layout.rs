@@ -195,24 +195,60 @@ fn push_section_with_wrap_indent(
   });
 }
 
-/// Render one link as a separate widget in `ui`, as a table cell does, and return its response.
+/// The tooltip text of a link: the hover text of `handler`, else `title`, else the href when
+/// [`egui::Style::url_in_tooltip`] is set, as egui's `Hyperlink` does.
+pub(crate) fn link_tooltip(
+  ui: &Ui,
+  handler: Option<&dyn LinkHandler>,
+  href: &str,
+  title: Option<&str>,
+) -> Option<String> {
+  if let Some(text) = handler.and_then(|handler| handler.hover_text(href)) {
+    Some(text)
+  } else if let Some(title) = title {
+    Some(title.to_owned())
+  } else if ui.style().url_in_tooltip {
+    Some(href.to_owned())
+  } else {
+    None
+  }
+}
+
+/// Open a link after a click on it. The label calls [`LinkHandler::click`], and opens the href in a new
+/// browser tab when the handler does not use the click.
+///
+/// A healed link has an empty href until its URL arrives, and a click on it opens nothing.
+pub(crate) fn open_link(ui: &mut Ui, handler: Option<&dyn LinkHandler>, text: &str, href: &str) {
+  if href.is_empty() {
+    return;
+  }
+  let handled = handler.is_some_and(|handler| handler.click(text, href, ui));
+  if !handled {
+    ui.ctx().open_url(OpenUrl::new_tab(href.to_string()));
+  }
+}
+
+/// Render one link as a separate widget in `ui`, as a table cell does. Return its response, and whether
+/// the response is a click on the link.
 ///
 /// The link uses the [`LinkHandler`]: a block widget, an inline widget, the sections of `layout_link`,
-/// `link_style`, the hover underline and the click. Unlike a link in a galley, it shows no tooltip, and a
-/// click opens the href also when the href is empty.
+/// `link_style`, the hover underline, the tooltip and the click. The tooltip and the click are the same as
+/// for a link in a galley. A block widget handles its own hover and click.
+#[allow(clippy::too_many_arguments)]
 pub fn render_link_in_ui(
   ui: &mut Ui,
   text: &str,
   href: &str,
+  title: Option<&str>,
   font_id: &FontId,
   base_format: &TextFormat,
   link_color: Color32,
   link_handler: Option<&dyn LinkHandler>,
-) -> Response {
+) -> (Response, bool) {
   if let Some(handler) = link_handler {
     if handler.is_block_widget(href) {
       if let Some(resp) = handler.block_widget(ui, text, href) {
-        return resp;
+        return (resp, false);
       }
     }
   }
@@ -222,7 +258,7 @@ pub fn render_link_in_ui(
 
   let galley = ui.fonts_mut(|f| f.layout_job(job));
   let size = galley.size();
-  let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+  let (rect, mut response) = ui.allocate_exact_size(size, Sense::click());
   ui.painter().galley(rect.min, galley.clone(), link_color);
 
   let is_inline_widget = info.inline_widget_span.is_some();
@@ -235,21 +271,25 @@ pub fn render_link_in_ui(
 
   if response.hovered() {
     ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
-    let link_style = link_handler.and_then(|h| h.link_style(href));
-    if !is_inline_widget && link_style.as_ref().is_none_or(|style| style.underline) {
-      let underline_color = link_style.and_then(|style| style.color).unwrap_or(link_color);
-      ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0_f32, underline_color));
+    if !is_inline_widget {
+      let link_style = link_handler.and_then(|h| h.link_style(href));
+      if link_style.as_ref().is_none_or(|style| style.underline) {
+        let underline_color = link_style.and_then(|style| style.color).unwrap_or(link_color);
+        ui.painter().line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0_f32, underline_color));
+      }
+      // An inline widget gets no tooltip, as in a galley.
+      if let Some(tooltip) = link_tooltip(ui, link_handler, href, title) {
+        response = response.on_hover_text_at_pointer(tooltip);
+      }
     }
   }
 
-  if response.clicked() {
-    let handled = link_handler.is_some_and(|h| h.click(text, href, ui));
-    if !handled {
-      ui.ctx().open_url(OpenUrl::new_tab(href.to_string()));
-    }
+  let clicked = response.clicked();
+  if clicked {
+    open_link(ui, link_handler, text, href);
   }
 
-  response
+  (response, clicked)
 }
 
 /// Whether the app registers a `"bold"` font family.

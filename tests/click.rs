@@ -1,6 +1,10 @@
 use egui::text::{ByteIndex, LayoutJob, LayoutSection};
-use egui::{pos2, vec2, Context, Event, Id, Modifiers, OutputCommand, PointerButton, Pos2, RawInput, Rect, UiBuilder};
-use egui_markdown::MarkdownLabel;
+use egui::{
+  pos2, vec2, Context, CursorIcon, Event, Id, Modifiers, Order, OutputCommand, PointerButton, Pos2, RawInput, Rect,
+  UiBuilder,
+};
+use egui_markdown::{LinkHandler, MarkdownLabel};
+use std::cell::RefCell;
 
 const PLAIN_THEN_LINK: &str = "plain words [link](https://example.com)";
 const WITH_TABLE: &str = "plain words [link](https://example.com)\n\n| a |\n|---|\n| b |";
@@ -113,4 +117,144 @@ fn a_click_on_a_link_with_a_partial_url_opens_nothing() {
   let (clicked, link_clicked, urls) = click_label("See [app](program:/my", None, true, at);
   assert_eq!((clicked, link_clicked), (true, true));
   assert!(urls.is_empty(), "{urls:?}");
+}
+
+/// What a hover and then a click on a point of a label give.
+struct Interaction {
+  cursor: CursorIcon,
+  tooltip: bool,
+  link_clicked: bool,
+  urls: Vec<String>,
+}
+
+/// Render `text` with `handler`, move the pointer to the point that `at` picks from the label rect, and
+/// then click there. The tooltip shows with no delay. `url_in_tooltip` sets the egui style flag.
+fn hover_and_click(
+  text: &str,
+  handler: Option<&dyn LinkHandler>,
+  url_in_tooltip: bool,
+  at: impl Fn(Rect) -> Pos2,
+) -> Interaction {
+  let ctx = Context::default();
+  ctx.global_style_mut(|style| {
+    style.url_in_tooltip = url_in_tooltip;
+    style.interaction.tooltip_delay = 0.0;
+    style.interaction.show_tooltips_only_when_still = false;
+  });
+  let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+  let frame = |events: Vec<Event>| {
+    let mut result = None;
+    let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      let mut label = MarkdownLabel::new(Id::NULL.with("hover_and_click"), text).hug_content(true).selectable(false);
+      if let Some(handler) = handler {
+        label = label.link_handler(handler);
+      }
+      let out = label.show(&mut child);
+      result = Some((out.response.rect, out.link_clicked));
+    });
+    output.textures_delta.clear();
+    let urls = output
+      .platform_output
+      .commands
+      .iter()
+      .filter_map(|command| match command {
+        OutputCommand::OpenUrl(open) => Some(open.url.clone()),
+        _ => None,
+      })
+      .collect::<Vec<_>>();
+    let (rect, link_clicked) = result.unwrap();
+    (rect, link_clicked, urls, output.platform_output.cursor_icon)
+  };
+
+  let (rect, ..) = frame(Vec::new());
+  let pos = at(rect);
+  // A new tooltip area is invisible in its first frame, so the pointer stays on the link for a few frames.
+  let (_, _, _, cursor) = frame(vec![Event::PointerMoved(pos)]);
+  frame(Vec::new());
+  frame(Vec::new());
+  let tooltip = ctx.memory(|mem| mem.areas().visible_layer_ids().iter().any(|layer| layer.order == Order::Tooltip));
+  let button =
+    |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+  frame(vec![button(true)]);
+  let (_, link_clicked, urls, _) = frame(vec![button(false)]);
+  Interaction { cursor, tooltip, link_clicked, urls }
+}
+
+/// A table with one header cell and one body cell that holds `link`.
+fn table_with_link(link: &str) -> String {
+  format!("| name |\n|---|\n| {link} |")
+}
+
+/// A point on the text of the link in the body cell of [`table_with_link`]. The two rows have the same
+/// height, and the table has 4 points of space under it.
+fn on_cell_link(rect: Rect) -> Pos2 {
+  pos2(rect.left() + 12.0, rect.top() + (rect.height() - 4.0) * 0.75)
+}
+
+#[test]
+fn a_click_on_a_link_in_a_table_cell_opens_its_url_and_reports_the_link() {
+  let text = table_with_link("[cell link](https://cell.example)");
+  let result = hover_and_click(&text, None, false, on_cell_link);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert_eq!(result.urls, ["https://cell.example"]);
+  assert!(result.link_clicked);
+}
+
+/// Heal gives a link an empty href until its URL arrives.
+#[test]
+fn a_click_on_a_link_with_an_empty_href_in_a_table_cell_opens_nothing() {
+  let text = table_with_link("[cell link]()");
+  let result = hover_and_click(&text, None, false, on_cell_link);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(result.urls.is_empty(), "{:?}", result.urls);
+}
+
+/// The tooltip of a paragraph link, to compare with a link in a table cell.
+#[test]
+fn a_link_with_a_title_in_a_paragraph_shows_a_tooltip() {
+  let text = "[paragraph link](https://para.example \"Para title\")";
+  let result = hover_and_click(text, None, false, |rect| pos2(rect.left() + 12.0, rect.center().y));
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(result.tooltip);
+}
+
+#[test]
+fn a_link_with_a_title_in_a_table_cell_shows_a_tooltip() {
+  let text = table_with_link("[cell link](https://cell.example \"Cell title\")");
+  let result = hover_and_click(&text, None, false, on_cell_link);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(result.tooltip);
+}
+
+#[test]
+fn a_link_in_a_table_cell_shows_its_url_in_a_tooltip_when_url_in_tooltip_is_set() {
+  let text = table_with_link("[cell link](https://cell.example)");
+  assert!(!hover_and_click(&text, None, false, on_cell_link).tooltip);
+  let result = hover_and_click(&text, None, true, on_cell_link);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(result.tooltip);
+}
+
+/// A handler that records the href of each call to `hover_text`.
+#[derive(Default)]
+struct HoverTextRecorder {
+  hrefs: RefCell<Vec<String>>,
+}
+
+impl LinkHandler for HoverTextRecorder {
+  fn hover_text(&self, href: &str) -> Option<String> {
+    self.hrefs.borrow_mut().push(href.to_owned());
+    Some(format!("Open {href}"))
+  }
+}
+
+#[test]
+fn a_link_in_a_table_cell_shows_the_hover_text_of_the_link_handler() {
+  let text = table_with_link("[cell link](https://cell.example)");
+  let handler = HoverTextRecorder::default();
+  let result = hover_and_click(&text, Some(&handler), false, on_cell_link);
+  assert_eq!(result.cursor, CursorIcon::PointingHand);
+  assert!(result.tooltip);
+  assert!(handler.hrefs.borrow().iter().any(|href| href == "https://cell.example"), "{:?}", handler.hrefs.borrow());
 }

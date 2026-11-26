@@ -12,7 +12,8 @@ use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, TableStyle};
 use crate::types::{Alignment, TableData, Token, TokenStyle};
 
-/// Render a markdown table using `egui_extras::TableBuilder`, and return the rect that the table allocated.
+/// Render a markdown table using `egui_extras::TableBuilder`. Return the rect that the table allocated, and
+/// whether a link in a cell got a click.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show_table(
   ui: &mut Ui,
@@ -23,10 +24,10 @@ pub(crate) fn show_table(
   inline_code_style: &InlineCodeStyle,
   table_style: &TableStyle,
   link_handler: Option<&dyn LinkHandler>,
-) -> Rect {
+) -> (Rect, bool) {
   let num_cols = data.alignments.len();
   if num_cols == 0 {
-    return Rect::NOTHING;
+    return (Rect::NOTHING, false);
   }
 
   let hyperlink_color = ui.visuals().hyperlink_color;
@@ -64,12 +65,13 @@ pub(crate) fn show_table(
   let scrolls = table_size.x > ui.available_width();
   let visible = Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width().min(table_size.x), table_size.y));
   let corner_inset = f32::from(radius) + stroke.map_or(0.0, |s| s.width);
+  let mut link_clicked = false;
   let output = ScrollArea::horizontal()
     .id_salt(id.with("scroll"))
     .content_margin(Margin { top: 0, right: 0, bottom: if scrolls { 0 } else { 4 }, left: 0 })
     .scroll_bar_rect(visible.shrink2(Vec2::new(corner_inset, 0.0)))
     .show(ui, |ui| {
-      let paint_table = |ui: &mut Ui| {
+      let mut paint_table = |ui: &mut Ui| {
         if stroke.is_some() {
           ui.spacing_mut().item_spacing = Vec2::ZERO;
         }
@@ -87,7 +89,9 @@ pub(crate) fn show_table(
             for (col_idx, cell_tokens) in data.headers.iter().enumerate() {
               let align = data.alignments.get(col_idx).copied().unwrap_or(Alignment::None);
               header.col(|ui| {
-                padded_cell(ui, cell_margin, |ui| render_cell(ui, cell_tokens, &cell_style, true, align));
+                padded_cell(ui, cell_margin, |ui| {
+                  link_clicked |= render_cell(ui, cell_tokens, &cell_style, true, align);
+                });
                 if let Some(stroke) = stroke {
                   paint_cell_separators(ui, ui.max_rect(), stroke, col_idx + 1 == num_cols, data.rows.is_empty());
                 }
@@ -101,7 +105,9 @@ pub(crate) fn show_table(
               for (col_idx, cell_tokens) in row_data.iter().enumerate() {
                 let align = data.alignments.get(col_idx).copied().unwrap_or(Alignment::None);
                 row.col(|ui| {
-                  padded_cell(ui, cell_margin, |ui| render_cell(ui, cell_tokens, &cell_style, false, align));
+                  padded_cell(ui, cell_margin, |ui| {
+                    link_clicked |= render_cell(ui, cell_tokens, &cell_style, false, align);
+                  });
                   if let Some(stroke) = stroke {
                     paint_cell_separators(ui, ui.max_rect(), stroke, col_idx + 1 == num_cols, row_idx == last_body);
                   }
@@ -119,7 +125,7 @@ pub(crate) fn show_table(
   paint_table_chrome(ui, output.inner, output.inner_rect, stroke, radius);
   // The scroll area shrinks `inner_rect` to the content before it allocates.
   let size = Vec2::new(output.inner_rect.width().min(output.content_size.x), output.content_size.y);
-  Rect::from_min_size(output.inner_rect.min, size)
+  (Rect::from_min_size(output.inner_rect.min, size), link_clicked)
 }
 
 fn padded_cell(ui: &mut Ui, margin: Margin, add: impl FnOnce(&mut Ui)) {
@@ -293,9 +299,11 @@ fn cell_size(lines: &[CellLine]) -> Vec2 {
   Vec2::new(lines.iter().map(|line| line.size.x).fold(0.0, f32::max), lines.iter().map(|line| line.size.y).sum())
 }
 
-/// Paint the rows of a cell, centered in the height of the cell, at the x that `align` gives.
-fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: bool, align: Alignment) {
+/// Paint the rows of a cell, centered in the height of the cell, at the x that `align` gives. Return whether a
+/// link in the cell got a click.
+fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: bool, align: Alignment) -> bool {
   let lines = layout_cell(ui, tokens, style, is_header);
+  let mut link_clicked = false;
   let rect = ui.max_rect();
   let mut y = rect.center().y - cell_size(&lines).y / 2.0;
   for line in &lines {
@@ -309,7 +317,7 @@ fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: 
       ui.spacing_mut().item_spacing.x = 0.0;
       for (part, size) in &line.parts {
         match part {
-          CellPart::Text(run) => render_text_run(ui, run, style, is_header),
+          CellPart::Text(run) => link_clicked |= render_text_run(ui, run, style, is_header),
           CellPart::Image(url) => {
             ui.add(crate::image::sized_image(url, *size));
           }
@@ -318,28 +326,35 @@ fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: 
     });
     y += line.size.y;
   }
+  link_clicked
 }
 
-fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: bool) {
+/// Paint a run of text and links in a row of a cell. Return whether a link in the run got a click.
+fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: bool) -> bool {
   let has_links = tokens.iter().any(|t| matches!(t, Token::Link { .. } | Token::Image { .. }));
   if !has_links {
     ui.label(style.job(ui, tokens, is_header));
-    return;
+    return false;
   }
 
   // Render tokens individually so links are clickable and dispatch through the LinkHandler. The tokens
   // hold their own spaces, so the labels sit side by side, as in the job that measured the cell.
   let (link_font, link_color) =
     link_font_and_color(style.font_id, style.hyperlink_color, style.strong_color, style.has_bold, is_header);
+  let base_format = TextFormat::default();
+  let mut link_clicked = false;
   for token in tokens {
     match token {
-      Token::Link { text, href, .. } => {
-        let base_format = TextFormat::default();
-        render_link_in_ui(ui, text.as_ref(), href.as_ref(), &link_font, &base_format, link_color, style.link_handler);
+      Token::Link { text, href, title, .. } => {
+        let (_, clicked) =
+          render_link_in_ui(ui, text, href, title.as_deref(), &link_font, &base_format, link_color, style.link_handler);
+        link_clicked |= clicked;
       }
+      // An image link uses no link handler and no title.
       Token::Image { alt, url, .. } => {
-        let base_format = TextFormat::default();
-        render_link_in_ui(ui, image_link_text(alt, url), url.as_ref(), &link_font, &base_format, link_color, None);
+        let (_, clicked) =
+          render_link_in_ui(ui, image_link_text(alt, url), url, None, &link_font, &base_format, link_color, None);
+        link_clicked |= clicked;
       }
       Token::Text { text, style: text_style } => {
         let format = token_style_to_format(
@@ -359,6 +374,7 @@ fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_head
       _ => {}
     }
   }
+  link_clicked
 }
 
 /// The text of the link that stands for an image without the `images` feature: the alt text, or the URL

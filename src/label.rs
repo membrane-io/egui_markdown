@@ -9,7 +9,7 @@ use egui::epaint::{
 };
 use egui::{
   text::LayoutJob, text_selection::LabelSelectionState, Align, Color32, Context, CursorIcon, FontId, FontSelection, Id,
-  Layout, OpenUrl, Pos2, Rect, Response, Sense, Stroke, TextWrapMode, Ui, UiBuilder, Vec2,
+  Layout, Pos2, Rect, Response, Sense, Stroke, TextWrapMode, Ui, UiBuilder, Vec2,
 };
 
 use egui::epaint::text::ByteRangeExt as _;
@@ -913,7 +913,7 @@ impl<'a> MarkdownLabel<'a> {
             continue;
           }
           let before_y = ui.available_rect_before_wrap().min.y;
-          let rect = table::show_table(
+          let (rect, link_clicked) = table::show_table(
             ui,
             self.id.with(("table", i)),
             data,
@@ -924,6 +924,7 @@ impl<'a> MarkdownLabel<'a> {
             self.link_handler,
           );
           out.add(rect);
+          out.link_clicked |= link_clicked;
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
@@ -1016,7 +1017,7 @@ impl<'a> MarkdownLabel<'a> {
           let response = ui.link(text);
           out.add(response.rect);
           if response.clicked() {
-            ui.ctx().open_url(OpenUrl::new_tab(url.to_string()));
+            ui.ctx().open_url(egui::OpenUrl::new_tab(url.to_string()));
           }
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
@@ -1442,14 +1443,8 @@ impl<'a> MarkdownLabel<'a> {
     }
     ui.output_mut(|out| out.cursor_icon = CursorIcon::PointingHand);
 
-    // The hover text of the handler comes first, then the title of the link. The href shows when
-    // url_in_tooltip is set, as egui's Hyperlink does.
-    if let Some(text) = self.link_handler.and_then(|handler| handler.hover_text(href)) {
-      response.clone().on_hover_text_at_pointer(text);
-    } else if let Some(title) = title {
-      response.clone().on_hover_text_at_pointer(title.as_ref());
-    } else if ui.style().url_in_tooltip {
-      response.clone().on_hover_text_at_pointer(href.as_ref());
+    if let Some(tooltip) = crate::layout::link_tooltip(ui, self.link_handler, href, title.as_deref()) {
+      response.clone().on_hover_text_at_pointer(tooltip);
     }
 
     Some(section_index)
@@ -1473,13 +1468,7 @@ impl<'a> MarkdownLabel<'a> {
     let token = token_index.and_then(|idx| tokens.get(idx));
 
     let Some(Token::Link { text, href, .. }) = token else { return false };
-    if href.is_empty() {
-      return true;
-    }
-    let handled = if let Some(handler) = self.link_handler { handler.click(text, href, ui) } else { false };
-    if !handled {
-      ui.ctx().open_url(OpenUrl::new_tab(href.to_string()));
-    }
+    crate::layout::open_link(ui, self.link_handler, text, href);
     true
   }
 }
