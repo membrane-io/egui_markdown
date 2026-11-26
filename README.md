@@ -17,7 +17,7 @@ egui widget with selectable text.
 ## Usage
 
 ```toml
-egui_markdown = "0.1"
+egui_markdown = { git = "https://github.com/membrane-io/egui_markdown" }
 ```
 
 ```rust
@@ -56,8 +56,7 @@ The [crate docs](https://docs.rs/egui_markdown) describe each option.
 
 ## egui version
 
-egui_markdown needs egui `main` and Rust 1.95 until the next egui release. Patch egui in your
-workspace:
+egui_markdown uses egui `main`, which needs Rust 1.95 or later. Patch egui in your workspace:
 
 ```toml
 [patch.crates-io]
@@ -85,4 +84,5 @@ cargo run --example images --features images  # Images from URLs.
 
 ## License
 
-MIT or Apache-2.0
+egui_markdown is licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT), at your option.
