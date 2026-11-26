@@ -112,8 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A click on a link opens it in a new tab only with a modifier key or the middle button, as `egui::Hyperlink`
   does. Before, every click asked for a new tab. On the web, a plain click now opens the link in the same tab.
   ([#43])
-- Without the `images` feature, an image link shows the title of the image as its tooltip, in the text and
-  in a table cell. ([#47])
+- Without the `images` feature, an image link in a table cell shows the title of the image as its tooltip.
+  ([#47])
 
 ### Fixed
 

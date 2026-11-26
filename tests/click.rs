@@ -332,6 +332,7 @@ fn an_image_link_with_a_title_shows_a_tooltip() {
   assert!(result.tooltip);
 }
 
+/// Without the `images` feature, an image link in a table cell shows the title of the image as its tooltip.
 #[cfg(not(feature = "images"))]
 #[test]
 fn an_image_link_with_a_title_in_a_table_cell_shows_a_tooltip() {
