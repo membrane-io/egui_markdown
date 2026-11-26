@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An image has its alt text. A screen reader reads it, and an image that fails to load shows it next to the
+  warning sign.
 - Without the `syntax_highlighting` feature, code blocks use the built-in highlighter of `egui_extras`
   instead of one plain color.
 - The `egui_markdown_style` crate, which holds `MarkdownStyle` and the other style types. An

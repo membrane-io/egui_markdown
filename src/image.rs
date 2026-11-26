@@ -33,6 +33,22 @@ pub(crate) fn image_size(ui: &Ui, url: &str, width: Option<u16>, height: Option<
 
 /// The image at `url` at exactly `size`, with a spinner while it loads. `size` comes from
 /// [`image_size`], so it already has the aspect ratio that the image must show at.
-pub(crate) fn sized_image(url: &str, size: Vec2) -> egui::Image<'_> {
-  egui::Image::new(url).fit_to_exact_size(size).maintain_aspect_ratio(false).show_loading_spinner(true)
+pub(crate) fn sized_image<'a>(url: &'a str, alt: &str, size: Vec2) -> egui::Image<'a> {
+  with_alt_text(egui::Image::new(url).fit_to_exact_size(size).maintain_aspect_ratio(false), alt)
+}
+
+/// The image at `url`, as wide as it is, up to `max_width`, with a spinner while it loads.
+#[cfg(feature = "images")]
+pub(crate) fn unsized_image<'a>(url: &'a str, alt: &str, max_width: f32) -> egui::Image<'a> {
+  with_alt_text(egui::Image::new(url).max_width(max_width), alt)
+}
+
+/// A screen reader reads the alt text, and an image that fails to load shows it in place of the image.
+fn with_alt_text<'a>(image: egui::Image<'a>, alt: &str) -> egui::Image<'a> {
+  let image = image.show_loading_spinner(true);
+  if alt.is_empty() {
+    image
+  } else {
+    image.alt_text(alt)
+  }
 }
