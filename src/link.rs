@@ -1,20 +1,42 @@
-//! Link handler trait and styling for customizing link behavior.
+//! The [`LinkHandler`] trait, which changes how links look and what a click on a link does.
 
 use egui::{text::LayoutJob, Color32, FontId, Rect, Response, Ui, Vec2};
 use std::ops::Range;
 
-/// Trait for customizing link behavior in rendered markdown.
+/// Changes how the links of a [`crate::MarkdownLabel`] look and what a click on a link does.
 ///
-/// Methods are checked in priority order during layout:
+/// Give a handler to the label with [`crate::MarkdownLabel::link_handler`]. Each method has a default, so a
+/// handler implements only the methods that it needs. A chat app can show a mention as a badge, and a
+/// documentation viewer can open a link in the app instead of in the browser.
 ///
-/// 1. [`Self::is_block_widget`] - standalone widget that breaks text flow ([`Self::block_widget`])
-/// 2. [`Self::inline_widget_size`] - widget painted over reserved inline space ([`Self::paint_inline_widget`])
-/// 3. [`Self::layout_link`] - custom styled text sections in the galley
-/// 4. [`Self::link_style`] - color/underline override on default text
-/// 5. default - hyperlink-colored text
+/// # Layout
+///
+/// The label asks the handler about each link in this order, and uses the first answer that applies:
+///
+/// 1. [`Self::is_block_widget`]: the link becomes a widget with rows of its own. The label ends the galley of
+///    the text before the link, calls [`Self::block_widget`], and starts a new galley for the text after it.
+/// 2. [`Self::inline_widget_size`]: the link becomes a widget inside the text. The label reserves space in the
+///    text, and calls [`Self::paint_inline_widget`] after it places the galley.
+/// 3. [`Self::layout_link`]: the handler writes the sections of the link into the layout job, for example
+///    an icon and colored text.
+/// 4. [`Self::link_style`]: the handler changes the color of the link and the hover underline.
+/// 5. Else the link has the hyperlink color of the egui visuals.
+///
+/// A link takes the size, the weight and the slant of the text around it, so a link in a heading has the
+/// size of the heading.
+///
+/// # Interaction
+///
+/// - **Hover**: the cursor is a pointing hand, and the link is underlined unless [`LinkStyle::underline`]
+///   is `false`. The tooltip is [`Self::hover_text`], else the title of the link, else the href when
+///   [`egui::Style::url_in_tooltip`] is set.
+/// - **Click**: the label calls [`Self::click`]. When it returns `false`, the label opens the href in a new
+///   browser tab. A link with an empty href, which [`crate::heal`] gives until the URL arrives, opens
+///   nothing.
+/// - **Cache**: the label caches its layout. [`Self::id`] is part of the cache key.
 pub trait LinkHandler {
-  /// Customize how a link is displayed based on its href.
-  /// Return `None` for default hyperlink styling.
+  /// The color of the link and whether it shows an underline on hover. Return `None` for the default
+  /// style.
   fn link_style(&self, _href: &str) -> Option<LinkStyle> {
     None
   }
@@ -27,17 +49,22 @@ pub trait LinkHandler {
     None
   }
 
-  /// Handle a link click. Return true if handled, false for default (open URL in browser).
+  /// React to a click on the link. Return `true` when the handler used the click, and `false` to let the label
+  /// open the href in the browser.
   fn click(&self, _text: &str, _href: &str, _ui: &mut Ui) -> bool {
     false
   }
 
-  /// Append custom styled sections to the LayoutJob for this link.
-  /// Called during layout. Return true if handled, false for default (colored text).
+  /// Append the sections of the link to the [`LayoutJob`]. Return `true` when the handler appended them, and
+  /// `false` for the default text.
   ///
-  /// The handler can append multiple sections with different fonts, colors,
-  /// backgrounds (icons, colored path segments, etc). All sections will be
-  /// mapped to this link token for hover/click.
+  /// The handler can append many sections with different fonts, colors and backgrounds, such as an icon and
+  /// colored text. The label maps each section that the handler appends to the link, so that hover and click
+  /// work on all of them. `font` is the font of the text around the link, and `color` is the link color.
+  ///
+  /// For an inline widget, the label calls this method with [`Color32::TRANSPARENT`] as `color`. The
+  /// sections that the handler appends set the width of the widget, and they must use that color so that
+  /// the widget hides them.
   fn layout_link(
     &self,
     _ui: &Ui,
@@ -50,25 +77,24 @@ pub trait LinkHandler {
     false
   }
 
-  /// Opt this link into inline widget rendering by returning `Some(size)`.
+  /// Return `Some(size)` to show the link as a widget inside the text. Return `None`, the default, for a
+  /// link.
   ///
-  /// The height becomes `line_height` on placeholder sections so the row grows
-  /// tall enough. Width is controlled by [`Self::layout_link`] (which emits the
-  /// invisible placeholder text). Returns `None` by default (not an inline widget).
+  /// The label uses only the height: it is the row height of the space that the label reserves. The text of
+  /// the space sets the width. That text is the text from [`Self::layout_link`] when it returns `true`, else
+  /// the link text in a transparent monospace font.
   fn inline_widget_size(&self, _href: &str, _font: &FontId) -> Option<Vec2> {
     None
   }
 
-  /// Paint a widget over the placeholder space reserved by [`Self::inline_widget_size`].
+  /// Paint the widget of the link over the space that [`Self::inline_widget_size`] reserved.
   ///
-  /// Called after galley positioning, once for each link, with one [`InlineWidgetRow`] for each row
-  /// that the placeholder spans, from top to bottom. `font` is the font that [`Self::layout_link`]
-  /// received for the link.
+  /// The label calls this method after it places the galley, once for each link. `rows` holds one
+  /// [`InlineWidgetRow`] for each row that the space covers, from top to bottom. `font` is the font that
+  /// [`Self::layout_link`] received for the link.
   fn paint_inline_widget(&self, _ui: &mut Ui, _text: &str, _href: &str, _font: &FontId, _rows: &[InlineWidgetRow]) {}
 
-  /// Should this link render as a standalone block-level widget?
-  /// When true, the link becomes a segment break and [`Self::block_widget`]
-  /// is called to render it outside the text galley.
+  /// Return `true` to show the link as a widget with rows of its own, which [`Self::block_widget`] renders.
   ///
   /// The widget takes rows of its own, with block spacing above and below it. A link in the middle of a
   /// paragraph splits the paragraph there, so a block widget reads best as a paragraph of its own.
@@ -76,16 +102,14 @@ pub trait LinkHandler {
     false
   }
 
-  /// Render a block-level widget for this link.
-  /// Called when [`Self::is_block_widget`] returned true. The handler has full control:
-  /// render any widget, handle drag/hover via the Response.
-  /// Returns `None` if not handled.
+  /// Render the widget of a link for which [`Self::is_block_widget`] returned `true`. The handler can add
+  /// any egui widget to `ui`. Return its response, or `None` when the handler added nothing.
   fn block_widget(&self, _ui: &mut Ui, _text: &str, _href: &str) -> Option<Response> {
     None
   }
 
-  /// Identity key for cache invalidation. Change when handler behavior
-  /// changes for the same markdown text.
+  /// A number that the label adds to the keys of its layout caches. Return a new number when the handler
+  /// lays out the same link in a different way, so that the label lays out the text again.
   fn id(&self) -> u64 {
     0
   }
@@ -102,7 +126,7 @@ pub struct InlineWidgetRow {
   pub chars: Range<usize>,
 }
 
-/// Visual style overrides for a specific link.
+/// The style of one link, from [`LinkHandler::link_style`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LinkStyle {
   /// Custom text color, or `None` for the default hyperlink color.
