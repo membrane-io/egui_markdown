@@ -21,8 +21,8 @@ fn click_split(text: &str, split: Option<usize>, at: impl Fn(Rect) -> Pos2) -> (
   (clicked, link_clicked)
 }
 
-/// As `click_split`, with `heal` on the label, and a click of `button` with `modifiers` held. Also returns the URL and `new_tab` of each
-/// `OpenUrl` command of the click.
+/// As `click_split`, with `heal` on the label, and a click of `button` with `modifiers` held. Also returns the
+/// URL and `new_tab` of each `OpenUrl` command of the click.
 fn click_label(
   text: &str,
   split: Option<usize>,
