@@ -27,8 +27,8 @@ Run the local CI script:
 
 This runs `cargo fmt --check`, `cargo clippy` for three feature sets, `cargo test` with and without the
 default features, `cargo doc`, and a wasm check. CI runs `cargo fmt --check`, `cargo clippy` on the library
-only, `cargo doc` and the wasm check on Linux. It runs `cargo test` with and without the default features on
-macOS, because the snapshot tests need a GPU.
+only, `cargo doc` and the wasm check on Linux. It runs `cargo test` with and without the default features, and
+with the `images` feature, on macOS, because the snapshot tests need a GPU.
 
 ## Snapshot tests
 

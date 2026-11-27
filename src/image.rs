@@ -1,5 +1,8 @@
 use egui::{Ui, Vec2};
 
+use crate::link::LinkHandler;
+use crate::types::ImageLink;
+
 /// The side of the square that an image takes while it loads, the same as in [`egui::Image`].
 const LOADING_SIDE: f32 = 24.0;
 
@@ -28,6 +31,56 @@ pub(crate) fn image_size(ui: &Ui, url: &str, width: Option<u16>, height: Option<
     size * (max_width / size.x)
   } else {
     size
+  }
+}
+
+/// Add `image` to `ui`. Return its response, and whether a click on it opened a link.
+///
+/// An image in a link is a link to the href of the link: it has the hover, the tooltip and the click of a
+/// link, and the accessibility role of a link with the alt text as its name, else the href when the alt text
+/// is empty. When the label is not `interactable`, an image in a link is a plain image. The tooltip text comes from
+/// [`crate::layout::link_tooltip`] with the title of the image, else the title of the link. A browser does
+/// the same for `<a title><img title></a>`: it shows the title of the element under the pointer, and the
+/// title of the link when the image has none.
+pub(crate) fn add_image(
+  ui: &mut Ui,
+  image: egui::Image<'_>,
+  alt: &str,
+  title: Option<&str>,
+  link: Option<&ImageLink<'_>>,
+  handler: Option<&dyn LinkHandler>,
+  interactable: bool,
+) -> (egui::Response, bool) {
+  let Some(link) = link.filter(|_| interactable) else { return (ui.add(image), false) };
+  let mut response = ui.add(image.sense(egui::Sense::click()));
+  let enabled = ui.is_enabled();
+  let name = if alt.is_empty() { link.href.as_ref() } else { alt };
+  response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Link, enabled, name));
+  response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+  if let Some(tooltip) = crate::layout::link_tooltip(ui, handler, &link.href, title.or(link.title.as_deref())) {
+    response = response.on_hover_text_at_pointer(tooltip);
+  }
+  let clicked = crate::link::link_clicked(&response);
+  if clicked {
+    crate::layout::open_link(ui, &response, handler, alt, &link.href);
+  }
+  (response, clicked)
+}
+
+/// The href, the title and the link handler of the link that shows an image without the `images` feature.
+///
+/// An image in a link links to the href of the link, and uses `handler`, because the link is a markdown link.
+/// The title is the title of the image, else the title of the link. An image that is not in a link links to
+/// its `url`, with its `title` and no link handler.
+pub(crate) fn image_link_target<'a>(
+  url: &'a str,
+  title: Option<&'a str>,
+  link: Option<&'a ImageLink<'_>>,
+  handler: Option<&'a dyn LinkHandler>,
+) -> (&'a str, Option<&'a str>, Option<&'a dyn LinkHandler>) {
+  match link {
+    Some(link) => (&link.href, title.or(link.title.as_deref()), handler),
+    None => (url, title, None),
   }
 }
 

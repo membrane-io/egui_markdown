@@ -55,6 +55,9 @@ pub enum Token<'s> {
     width: Option<u16>,
     /// The height in points from the `height` attribute of an `<img>` tag.
     height: Option<u16>,
+    /// The link around the image, such as `https://site` in `[![logo](logo.png)](https://site)`, or `None`
+    /// for an image that is not in a link. A click on a linked image opens the link, not the image.
+    link: Option<Box<ImageLink<'s>>>,
   },
   /// A table, with its header, its rows and the alignment of its columns.
   Table(TableData<'s>),
@@ -81,6 +84,22 @@ pub enum Token<'s> {
     /// The footnote label.
     label: CowStr<'s>,
   },
+}
+
+/// The link around a [`Token::Image`].
+#[derive(Debug, Clone)]
+pub struct ImageLink<'s> {
+  /// The link destination URL.
+  pub href: CowStr<'s>,
+  /// The title of the link, such as `"Site"` in `[![logo](logo.png)](https://site "Site")`.
+  pub title: Option<CowStr<'s>>,
+}
+
+impl<'s> Hash for ImageLink<'s> {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.href.as_ref().hash(state);
+    self.title.as_ref().map(|t| t.as_ref()).hash(state);
+  }
 }
 
 /// The inline style of a [`Token::Text`], and the style of the text around a [`Token::Link`].
@@ -160,12 +179,13 @@ impl<'s> Hash for Token<'s> {
         marker.as_ref().hash(state);
         indent_level.hash(state);
       }
-      Token::Image { alt, url, title, width, height } => {
+      Token::Image { alt, url, title, width, height, link } => {
         alt.as_ref().hash(state);
         url.as_ref().hash(state);
         title.as_ref().map(|t| t.as_ref()).hash(state);
         width.hash(state);
         height.hash(state);
+        link.hash(state);
       }
       Token::Table(data) => data.hash(state),
       Token::TaskListMarker { checked, indent_level } => {
@@ -250,12 +270,18 @@ fn token_to_owned(t: &Token<'_>) -> Token<'static> {
     Token::ListMarker { marker, indent_level } => {
       Token::ListMarker { marker: cowstr_to_owned(marker), indent_level: *indent_level }
     }
-    Token::Image { alt, url, title, width, height } => Token::Image {
+    Token::Image { alt, url, title, width, height, link } => Token::Image {
       alt: cowstr_to_owned(alt),
       url: cowstr_to_owned(url),
       title: title.as_ref().map(|t| cowstr_to_owned(t)),
       width: *width,
       height: *height,
+      link: link.as_ref().map(|link| {
+        Box::new(ImageLink {
+          href: cowstr_to_owned(&link.href),
+          title: link.title.as_ref().map(|t| cowstr_to_owned(t)),
+        })
+      }),
     },
     Token::Table(data) => Token::Table(TableData {
       alignments: data.alignments.clone(),
@@ -281,8 +307,8 @@ mod size_tests {
   fn token_enum_size() {
     let size = std::mem::size_of::<Token<'_>>();
     // The Link and Image variants set the size. Each holds 3 CowStr fields. Link also holds a TokenStyle,
-    // and Image holds the size of an <img> tag. A Box around these fields makes the size smaller, but it
-    // changes the public API.
+    // and Image holds the size of an <img> tag and its link in a public Box field, which keeps the variant
+    // small. A Box around the other fields also makes the size smaller, but it changes the public API.
     eprintln!("Token size: {size} bytes");
     assert!(size <= 88, "Token grew unexpectedly: {size} bytes");
   }

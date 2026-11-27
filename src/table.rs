@@ -10,10 +10,11 @@ use egui_extras::{Column, TableBuilder};
 use crate::layout::{append_link_to_job, render_link_in_ui};
 use crate::link::LinkHandler;
 use crate::style::{InlineCodeStyle, TableStyle};
-use crate::types::{Alignment, TableData, Token, TokenStyle};
+use crate::types::{Alignment, ImageLink, TableData, Token, TokenStyle};
 
 /// Render a markdown table using `egui_extras::TableBuilder`. Return the rect that the table allocated, and
-/// whether a link in a cell received a click.
+/// whether a link in a cell received a click. When `interactable` is `false`, an image in a link is a plain
+/// image.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show_table(
   ui: &mut Ui,
@@ -24,6 +25,7 @@ pub(crate) fn show_table(
   inline_code_style: &InlineCodeStyle,
   table_style: &TableStyle,
   link_handler: Option<&dyn LinkHandler>,
+  interactable: bool,
 ) -> (Rect, bool) {
   let num_cols = data.alignments.len();
   if num_cols == 0 {
@@ -44,6 +46,7 @@ pub(crate) fn show_table(
     has_bold,
     inline_code_style,
     link_handler,
+    interactable,
     max_image_width: (ui.available_width() - pad[0] - pad[2]).max(0.0),
   };
   let measured = measure_table(ui, data, &cell_style, pad);
@@ -219,6 +222,8 @@ struct CellStyle<'a> {
   has_bold: bool,
   inline_code_style: &'a InlineCodeStyle,
   link_handler: Option<&'a dyn LinkHandler>,
+  /// Whether the label is interactable. An image in a link is a link only when it is.
+  interactable: bool,
   max_image_width: f32,
 }
 
@@ -242,7 +247,7 @@ impl CellStyle<'_> {
 /// A part of a row of a cell: text and links that lay out as one job, or an image.
 enum CellPart<'a, 's> {
   Text(&'a [Token<'s>]),
-  Image(&'a str),
+  Image { url: &'a str, alt: &'a str, title: Option<&'a str>, link: Option<&'a ImageLink<'s>> },
 }
 
 /// A row of a cell, between two line breaks. Each part has its size.
@@ -269,7 +274,7 @@ fn layout_cell<'a, 's>(ui: &Ui, tokens: &'a [Token<'s>], style: &CellStyle, is_h
       let mut parts = Vec::new();
       let mut text_start = 0;
       for (i, token) in line.iter().enumerate() {
-        let Token::Image { url, width, height, .. } = token else { continue };
+        let Token::Image { alt, url, title, width, height, link } = token else { continue };
         if !cfg!(feature = "images") {
           continue;
         }
@@ -277,7 +282,7 @@ fn layout_cell<'a, 's>(ui: &Ui, tokens: &'a [Token<'s>], style: &CellStyle, is_h
           parts.push(text_part(&line[text_start..i]));
         }
         let size = crate::image::image_size(ui, url, *width, *height, style.max_image_width);
-        parts.push((CellPart::Image(url), size));
+        parts.push((CellPart::Image { url, alt, title: title.as_deref(), link: link.as_deref() }, size));
         text_start = i + 1;
       }
       // An empty cell keeps the height of an empty text job.
@@ -318,8 +323,10 @@ fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: 
       for (part, size) in &line.parts {
         match part {
           CellPart::Text(run) => link_clicked |= render_text_run(ui, run, style, is_header),
-          CellPart::Image(url) => {
-            ui.add(crate::image::sized_image(url, *size));
+          CellPart::Image { url, alt, title, link } => {
+            let image = crate::image::sized_image(url, *size);
+            link_clicked |=
+              crate::image::add_image(ui, image, alt, *title, *link, style.link_handler, style.interactable).1;
           }
         }
       }
@@ -349,18 +356,11 @@ fn render_text_run(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_head
         link_clicked |=
           render_link_in_ui(ui, text, href, title.as_deref(), &link_font, &base_format, link_color, style.link_handler);
       }
-      // An image link uses no link handler. Its tooltip shows the title of the image.
-      Token::Image { alt, url, title, .. } => {
-        link_clicked |= render_link_in_ui(
-          ui,
-          image_link_text(alt, url),
-          url,
-          title.as_deref(),
-          &link_font,
-          &base_format,
-          link_color,
-          None,
-        );
+      Token::Image { alt, url, title, link, .. } => {
+        let (href, title, handler) =
+          crate::image::image_link_target(url, title.as_deref(), link.as_deref(), style.link_handler);
+        link_clicked |=
+          render_link_in_ui(ui, image_link_text(alt, url), href, title, &link_font, &base_format, link_color, handler);
       }
       Token::Text { text, style: text_style } => {
         let format = token_style_to_format(
@@ -489,10 +489,20 @@ fn tokens_to_layout_job(
           link_handler,
         );
       }
-      Token::Image { alt, url, .. } => {
+      Token::Image { alt, url, title, link, .. } => {
         let (link_font, link_color) = link_font_and_color(font_id, hyperlink_color, strong_color, has_bold, is_header);
         let base_format = TextFormat::default();
-        append_link_to_job(ui, &mut job, image_link_text(alt, url), url, &link_font, &base_format, link_color, None);
+        let (href, _, handler) = crate::image::image_link_target(url, title.as_deref(), link.as_deref(), link_handler);
+        append_link_to_job(
+          ui,
+          &mut job,
+          image_link_text(alt, url),
+          href,
+          &link_font,
+          &base_format,
+          link_color,
+          handler,
+        );
       }
       _ => {}
     }

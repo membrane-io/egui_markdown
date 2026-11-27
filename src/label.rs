@@ -927,6 +927,7 @@ impl<'a> MarkdownLabel<'a> {
             &style.inline_code,
             &style.table,
             self.link_handler,
+            self.interactable,
           );
           out.add(rect);
           out.link_clicked |= link_clicked;
@@ -981,7 +982,7 @@ impl<'a> MarkdownLabel<'a> {
           after_block(&mut i, &mut text_start, end, ui);
         }
         #[cfg(feature = "images")]
-        Token::Image { url, width, height, .. } => {
+        Token::Image { alt, url, title, width, height, link } => {
           let had_content = text_start < i;
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
@@ -999,14 +1000,24 @@ impl<'a> MarkdownLabel<'a> {
           } else {
             egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true)
           };
-          out.add(ui.add(image).rect);
+          let (response, clicked) = crate::image::add_image(
+            ui,
+            image,
+            alt,
+            title.as_deref(),
+            link.as_deref(),
+            self.link_handler,
+            self.interactable,
+          );
+          out.add(response.rect);
+          out.link_clicked |= clicked;
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);
           i += 1;
           text_start = i;
           after_block(&mut i, &mut text_start, end, ui);
         }
         #[cfg(not(feature = "images"))]
-        Token::Image { alt, url, title, .. } => {
+        Token::Image { alt, url, title, link, .. } => {
           let had_content = text_start < i;
           self.flush_text_range(ui, tokens, font, color, text_start, i, style, revision, out);
           before_block(had_content, ui);
@@ -1019,15 +1030,16 @@ impl<'a> MarkdownLabel<'a> {
           }
           let before_y = ui.available_rect_before_wrap().min.y;
           let text = if alt.is_empty() { url.as_ref() } else { alt.as_ref() };
+          let (href, title, handler) =
+            crate::image::image_link_target(url, title.as_deref(), link.as_deref(), self.link_handler);
           let mut response = ui.link(egui::RichText::new(text).font(font.clone()));
           out.add(response.rect);
-          if let Some(tooltip) = crate::layout::link_tooltip(ui, None, url, title.as_deref()) {
+          if let Some(tooltip) = crate::layout::link_tooltip(ui, handler, href, title) {
             response = response.on_hover_text_at_pointer(tooltip);
           }
-          // An image link uses no link handler, as in a table cell.
           let clicked = crate::link::link_clicked(&response);
           if clicked {
-            crate::layout::open_link(ui, &response, None, text, url);
+            crate::layout::open_link(ui, &response, handler, text, href);
           }
           out.link_clicked |= clicked;
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);

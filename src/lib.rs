@@ -125,7 +125,7 @@ pub use style::{
   BlockquoteStyle, CodeBlockStyle, HeadingStyle, HorizontalRuleStyle, InlineCodeStyle, ListStyle, MarkdownStyle,
   TableStyle,
 };
-pub use types::{Alignment, Markdown, TableData, Token, TokenStyle};
+pub use types::{Alignment, ImageLink, Markdown, TableData, Token, TokenStyle};
 
 #[cfg(feature = "syntax_highlighting")]
 pub use theme::{code_theme, set_code_themes};

@@ -25,8 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `LinkHandler::layout_link` receives the `&Ui`.
 - `LinkHandler::paint_inline_widget` runs once for each link, not once for each row. It receives the
   font of the link and an `InlineWidgetRow` for each row. ([#16])
-- `Token::Link` has a `style: TokenStyle` field, and `Token::Image` has `width` and `height` fields. A
-  pattern that names every field must add them or `..`. ([#14], [#18])
+- `Token::Link` has a `style: TokenStyle` field, and `Token::Image` has `width`, `height` and `link`
+  fields. `link` holds the `ImageLink` around the image, with its `href` and `title`. A pattern that names
+  every field must add them or `..`, and a struct literal must add them. ([#14], [#18], [#50])
 - `MarkdownStyle` has the new fields `list`, `table` and `line_height_ratio`, and `HorizontalRuleStyle`
   has the new field `height`. A struct literal that names every field must add them or
   `..Default::default()`. ([#2], [#3], [#10], [#34])
@@ -152,6 +153,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Without the `images` feature, an image link in the text showed no tooltip, opened an empty URL, did not
   set `MarkdownLabelOutput::link_clicked`, and used the body font, not the font of the label. ([#47])
 - With `url_in_tooltip`, a link with an empty href showed an empty tooltip. ([#47])
+- A linked image, such as `[![logo](logo.png)](https://site)`, did not open the link. Without the `images`
+  feature, it opened the image and added an empty row. With the feature, a click on the image did nothing, and
+  in a table cell only a thin strip opened the link. Now the image is one link to the href of the link, as on
+  GitHub, and it uses the `LinkHandler`. The text of a link around an image keeps its order around the image,
+  and a link in the alt text of an image gives no link. ([#50])
 
 ### Performance
 
@@ -223,3 +229,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#43]: https://github.com/membrane-io/egui_markdown/pull/43
 [#44]: https://github.com/membrane-io/egui_markdown/pull/44
 [#47]: https://github.com/membrane-io/egui_markdown/pull/47
+[#50]: https://github.com/membrane-io/egui_markdown/pull/50

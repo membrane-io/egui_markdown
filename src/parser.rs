@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd, TextMergeStream};
 
-use crate::types::{Alignment, Markdown, TableData, Token, TokenStyle};
+use crate::types::{Alignment, ImageLink, Markdown, TableData, Token, TokenStyle};
 
 #[derive(Clone)]
 struct ListInfo {
@@ -28,6 +28,62 @@ fn append_text<'s>(slot: &mut Option<CowStr<'s>>, text: CowStr<'s>) {
     None => text,
     Some(before) => CowStr::Boxed(format!("{before}{text}").into_boxed_str()),
   });
+}
+
+/// A link that the parser is in.
+struct OpenLink<'s> {
+  href: CowStr<'s>,
+  title: Option<CowStr<'s>>,
+  /// The style around the link. Each [`Token::Link`] of the link gets it, also the text after an image in a
+  /// style that starts in the link.
+  style: TokenStyle,
+  /// The text of the link after its start, or after the last image in it.
+  text: Option<CowStr<'s>>,
+  /// Whether the link holds an image.
+  has_image: bool,
+}
+
+impl<'s> OpenLink<'s> {
+  fn new(href: CowStr<'s>, title: CowStr<'s>, style: TokenStyle) -> Self {
+    Self { href, title: if title.is_empty() { None } else { Some(title) }, style, text: None, has_image: false }
+  }
+
+  /// Push the text of the link after its start, or after the last image in it, as a [`Token::Link`]. Text
+  /// that is empty gives no token.
+  fn push_text(&mut self, tokens: &mut Vec<Token<'s>>) {
+    if let Some(text) = self.text.take().filter(|text| !text.is_empty()) {
+      tokens.push(Token::Link { text, href: self.href.clone(), title: self.title.clone(), style: self.style.clone() });
+    }
+  }
+
+  /// Push the last text of the link at its end. A link with no text and no image, such as `[](url)`, gives a
+  /// [`Token::Link`] with empty text.
+  fn end(mut self, tokens: &mut Vec<Token<'s>>) {
+    if self.text.as_ref().is_none_or(|text| text.is_empty()) && !self.has_image {
+      tokens.push(Token::Link { text: CowStr::Borrowed(""), href: self.href, title: self.title, style: self.style });
+    } else {
+      self.push_text(tokens);
+    }
+  }
+}
+
+/// Push the image at the end of an image tag. In `link`, the text of the link before the image gives a
+/// [`Token::Link`] first, and the image holds the link, as in the HTML `<a href="url"><img></a>`.
+fn push_image<'s>(
+  alt: Option<CowStr<'s>>,
+  url: Option<CowStr<'s>>,
+  title: Option<CowStr<'s>>,
+  link: Option<&mut OpenLink<'s>>,
+  tokens: &mut Vec<Token<'s>>,
+) {
+  let Some(url) = url else { return };
+  let link = link.map(|link| {
+    link.push_text(tokens);
+    link.has_image = true;
+    Box::new(ImageLink { href: link.href.clone(), title: link.title.clone() })
+  });
+  let alt = alt.unwrap_or_else(|| CowStr::Boxed("".into()));
+  tokens.push(Token::Image { alt, url, title, width: None, height: None, link });
 }
 
 /// The bytes `range` of `s`, borrowed from the source text when `s` is.
@@ -107,6 +163,7 @@ fn html_tag<'s>(html: &CowStr<'s>, start: usize) -> Option<(Token<'s>, usize)> {
     title: attribute("title").filter(|title| !title.is_empty()),
     width: size("width"),
     height: size("height"),
+    link: None,
   };
   Some((token, end))
 }
@@ -633,13 +690,10 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
   let parser = TextMergeStream::new(Parser::new_ext(s, options));
 
   let mut current_style = TokenStyle::default();
-  let mut in_link = false;
+  let mut link: Option<OpenLink> = None;
   let mut in_code_block = false;
   let mut in_image = false;
   let mut current_code_language: Option<CowStr> = None;
-  let mut link_text = None;
-  let mut link_href = None;
-  let mut link_title: Option<CowStr> = None;
   let mut image_alt = None;
   let mut image_url = None;
   let mut image_title: Option<CowStr> = None;
@@ -727,15 +781,15 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
         Event::Text(text) => {
           if in_image {
             append_text(&mut image_alt, text.clone());
-          } else if in_link {
-            append_text(&mut link_text, text.clone());
+          } else if let Some(link) = &mut link {
+            append_text(&mut link.text, text.clone());
           } else {
             current_cell.push(Token::Text { text: text.clone(), style: current_style.clone() });
           }
           continue;
         }
         Event::InlineHtml(html) => {
-          if let Some((token, _)) = html_tag(html, 0).filter(|_| !in_link && !in_image) {
+          if let Some((token, _)) = html_tag(html, 0).filter(|_| link.is_none() && !in_image) {
             current_cell.push(token);
           }
           continue;
@@ -748,17 +802,14 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
         }
         Event::End(TagEnd::Image) => {
           in_image = false;
-          let alt = image_alt.take().unwrap_or_else(|| CowStr::Boxed("".into()));
-          if let Some(url) = image_url.take() {
-            current_cell.push(Token::Image { alt, url, title: image_title.take(), width: None, height: None });
-          }
+          push_image(image_alt.take(), image_url.take(), image_title.take(), link.as_mut(), &mut current_cell);
           continue;
         }
         Event::Code(text) => {
           if in_image {
             append_text(&mut image_alt, text.clone());
-          } else if in_link {
-            append_text(&mut link_text, text.clone());
+          } else if let Some(link) = &mut link {
+            append_text(&mut link.text, text.clone());
           } else {
             current_cell.push(Token::Text {
               text: text.clone(),
@@ -792,8 +843,8 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           continue;
         }
         Event::SoftBreak => {
-          if in_link {
-            append_text(&mut link_text, CowStr::Borrowed(" "));
+          if let Some(link) = &mut link {
+            append_text(&mut link.text, CowStr::Borrowed(" "));
           } else {
             current_cell.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
           }
@@ -803,17 +854,18 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           current_cell.push(Token::Newline);
           continue;
         }
+        // CommonMark makes a link in the description of an image part of the alt text.
         Event::Start(Tag::Link { dest_url, title, .. }) => {
-          in_link = true;
-          link_href = Some(dest_url.clone());
-          link_title = if title.is_empty() { None } else { Some(title.clone()) };
+          if !in_image {
+            link = Some(OpenLink::new(dest_url.clone(), title.clone(), current_style.clone()));
+          }
           continue;
         }
         Event::End(TagEnd::Link) => {
-          in_link = false;
-          let text = link_text.take().unwrap_or_else(|| CowStr::Boxed("".into()));
-          if let Some(url) = link_href.take() {
-            current_cell.push(Token::Link { text, href: url, title: link_title.take(), style: current_style.clone() });
+          if !in_image {
+            if let Some(link) = link.take() {
+              link.end(&mut current_cell);
+            }
           }
           continue;
         }
@@ -827,8 +879,8 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
       Event::Text(text) => {
         if in_image {
           append_text(&mut image_alt, text);
-        } else if in_link {
-          append_text(&mut link_text, text);
+        } else if let Some(link) = &mut link {
+          append_text(&mut link.text, text);
         } else if in_code_block {
           tokens.push(Token::CodeBlock { text: trim_end_newlines(text), language: current_code_language.clone() });
         } else {
@@ -847,8 +899,8 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
       Event::Code(text) => {
         if in_image {
           append_text(&mut image_alt, text);
-        } else if in_link {
-          append_text(&mut link_text, text);
+        } else if let Some(link) = &mut link {
+          append_text(&mut link.text, text);
         } else {
           // Inline code keeps the style around it, so code inside a heading has the size of the heading.
           let code_style = TokenStyle { inline_code: true, ..current_style.clone() };
@@ -859,8 +911,8 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
       Event::SoftBreak => {
         if in_image {
           append_text(&mut image_alt, CowStr::Borrowed(" "));
-        } else if in_link {
-          append_text(&mut link_text, CowStr::Borrowed(" "));
+        } else if let Some(link) = &mut link {
+          append_text(&mut link.text, CowStr::Borrowed(" "));
         } else {
           tokens.push(Token::Text { text: CowStr::Borrowed(" "), style: current_style.clone() });
         }
@@ -976,10 +1028,11 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
         Tag::Strikethrough => {
           current_style.strikethrough = true;
         }
+        // CommonMark makes a link in the description of an image part of the alt text.
         Tag::Link { dest_url, title, .. } => {
-          in_link = true;
-          link_href = Some(dest_url);
-          link_title = if title.is_empty() { None } else { Some(title) };
+          if !in_image {
+            link = Some(OpenLink::new(dest_url, title, current_style.clone()));
+          }
         }
         Tag::Image { dest_url, title, .. } => {
           in_image = true;
@@ -1036,18 +1089,15 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
           current_style.strikethrough = false;
         }
         TagEnd::Link => {
-          in_link = false;
-          let text = link_text.take().unwrap_or_else(|| CowStr::Boxed("".into()));
-          if let Some(url) = link_href.take() {
-            tokens.push(Token::Link { text, href: url, title: link_title.take(), style: current_style.clone() });
+          if !in_image {
+            if let Some(link) = link.take() {
+              link.end(tokens);
+            }
           }
         }
         TagEnd::Image => {
           in_image = false;
-          let alt = image_alt.take().unwrap_or_else(|| CowStr::Boxed("".into()));
-          if let Some(url) = image_url.take() {
-            tokens.push(Token::Image { alt, url, title: image_title.take(), width: None, height: None });
-          }
+          push_image(image_alt.take(), image_url.take(), image_title.take(), link.as_mut(), tokens);
         }
         TagEnd::HtmlBlock => {
           if let Some(html) = html_block.take() {
@@ -1284,7 +1334,9 @@ mod tests {
 
     let image = md.tokens.iter().find(|token| matches!(token, Token::Image { .. }));
 
-    let Some(Token::Image { alt, url, title, width, height }) = image else { panic!("no image in {:?}", md.tokens) };
+    let Some(Token::Image { alt, url, title, width, height, .. }) = image else {
+      panic!("no image in {:?}", md.tokens)
+    };
     assert_eq!(
       (alt.as_ref(), url.as_ref(), title.as_deref(), *width, *height),
       ("The logo", "logo.png", Some("Membrane"), Some(120), Some(40))
@@ -2059,6 +2111,80 @@ mod tests {
   fn image_alt_keeps_every_styled_run() {
     let md = parse("![an *emph* alt](u)");
     assert!(matches!(md.tokens.first(), Some(Token::Image { alt, .. }) if alt.as_ref() == "an emph alt"));
+  }
+
+  /// A short form of each token, to compare the tokens of a linked image.
+  fn describe(tokens: &[Token]) -> Vec<String> {
+    tokens
+      .iter()
+      .map(|token| match token {
+        Token::Link { text, href, .. } => format!("link {:?} {href}", text.as_ref()),
+        Token::Image { alt, url, link: Some(link), .. } => format!("image {:?} {url} in {}", alt.as_ref(), link.href),
+        Token::Image { alt, url, link: None, .. } => format!("image {:?} {url}", alt.as_ref()),
+        token => format!("{token:?}"),
+      })
+      .collect()
+  }
+
+  /// A linked image is one image that holds the link. The link gives no token of its own, as in the HTML
+  /// `<a href="https://site"><img src="img.png" alt="logo"></a>` that CommonMark gives.
+  #[test]
+  fn a_linked_image_gives_one_image_with_the_link() {
+    let md = parse(r#"[![logo](img.png "T")](https://site "LT")"#);
+
+    let [Token::Image { alt, url, title, link: Some(link), .. }] = md.tokens.as_slice() else {
+      panic!("not one linked image in {:?}", md.tokens)
+    };
+    assert_eq!(
+      (alt.as_ref(), url.as_ref(), title.as_deref(), link.href.as_ref(), link.title.as_deref()),
+      ("logo", "img.png", Some("T"), "https://site", Some("LT"))
+    );
+  }
+
+  /// The text of a link before and after an image gives a link token on each side of the image, in the
+  /// order of the source.
+  #[test]
+  fn the_text_around_an_image_in_a_link_gives_links_in_order() {
+    let md = parse("[see ![logo](img.png) here](https://site)");
+
+    assert_eq!(
+      describe(&md.tokens),
+      [r#"link "see " https://site"#, r#"image "logo" img.png in https://site"#, r#"link " here" https://site"#]
+    );
+  }
+
+  /// Each link token around an image keeps the style around the link, as a link without an image does. A
+  /// style inside the link does not change the style of a part.
+  #[test]
+  fn the_text_around_an_image_in_a_link_keeps_the_style_around_the_link() {
+    for (text, bold) in [("[**bold ![a](u) x**](t)", false), ("**[bold ![a](u) x](t)**", true)] {
+      let md = parse(text);
+      let styles: Vec<_> = md
+        .tokens
+        .iter()
+        .filter_map(|t| match t {
+          Token::Link { text, style, .. } => Some((text.to_string(), style.bold)),
+          _ => None,
+        })
+        .collect();
+      assert_eq!(styles, [("bold ".to_owned(), bold), (" x".to_owned(), bold)], "{text:?}");
+    }
+  }
+
+  /// CommonMark makes the text of a link in an image description part of the alt text.
+  #[test]
+  fn a_link_in_the_alt_text_of_an_image_gives_no_link() {
+    let md = parse("![foo [bar](/url)](/url2)");
+
+    assert_eq!(describe(&md.tokens), [r#"image "foo bar" /url2"#]);
+  }
+
+  #[test]
+  fn a_linked_image_in_a_table_cell_gives_one_image_with_the_link() {
+    let md = parse("| a |\n|---|\n| [![logo](img.png)](https://site) |");
+
+    let Some(Token::Table(table)) = md.tokens.first() else { panic!("no table in {:?}", md.tokens) };
+    assert_eq!(describe(&table.rows[0][0]), [r#"image "logo" img.png in https://site"#]);
   }
 
   #[test]
