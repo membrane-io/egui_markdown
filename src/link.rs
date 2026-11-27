@@ -41,7 +41,10 @@ use std::ops::Range;
 /// - **Linked image**: an image in a link, such as `[![logo](logo.png)](https://site)`, is a link to the
 ///   href of the link, and the label calls the `LinkHandler` with that href. The tooltip uses the title of
 ///   the image, else the title of the link. With the `images` feature, the image has the hover, the tooltip
-///   and the click of a link, but no underline, and the handler does not change how it looks.
+///   and the click of a link, but no underline, and the handler does not change how it looks. Without the
+///   `images` feature, a linked image in a table cell uses the handler as any link in a cell does: with
+///   [`Self::link_style`], [`Self::layout_link`] and the widgets. In the text, the label shows a plain
+///   [`egui::Ui::link`] that uses only [`Self::hover_text`] and [`Self::click`] of the handler.
 /// - **Cache**: the label caches its layout. [`Self::id`] is part of the cache key.
 pub trait LinkHandler {
   /// The color of the link and whether it shows an underline on hover. Return `None` for the default

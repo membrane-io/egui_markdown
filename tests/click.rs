@@ -144,6 +144,8 @@ fn a_click_on_a_link_with_a_partial_url_opens_nothing() {
 struct Interaction {
   cursor: CursorIcon,
   tooltip: bool,
+  /// The text of each text shape that paints while the tooltip shows, in the label and in the tooltip.
+  painted_text: Vec<String>,
   link_clicked: bool,
   urls: Vec<String>,
   /// The `new_tab` of each `OpenUrl` command of the click.
@@ -158,15 +160,16 @@ fn hover_and_click(
   url_in_tooltip: bool,
   at: impl Fn(Rect) -> Pos2,
 ) -> Interaction {
-  hover_and_click_in(&Context::default(), text, handler, url_in_tooltip, PointerButton::Primary, at)
+  hover_and_click_in(&Context::default(), text, handler, url_in_tooltip, true, PointerButton::Primary, at)
 }
 
-/// As `hover_and_click`, in `ctx`, with a click of `button`.
+/// As `hover_and_click`, in `ctx`, with `interactable` on the label and a click of `button`.
 fn hover_and_click_in(
   ctx: &Context,
   text: &str,
   handler: Option<&dyn LinkHandler>,
   url_in_tooltip: bool,
+  interactable: bool,
   button: PointerButton,
   at: impl Fn(Rect) -> Pos2,
 ) -> Interaction {
@@ -180,7 +183,10 @@ fn hover_and_click_in(
     let mut result = None;
     let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), events, ..Default::default() }, |ui| {
       let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
-      let mut label = MarkdownLabel::new(Id::NULL.with("hover_and_click"), text).hug_content(true).selectable(false);
+      let mut label = MarkdownLabel::new(Id::NULL.with("hover_and_click"), text)
+        .hug_content(true)
+        .selectable(false)
+        .interactable(interactable);
       if let Some(handler) = handler {
         label = label.link_handler(handler);
       }
@@ -197,22 +203,30 @@ fn hover_and_click_in(
         _ => None,
       })
       .collect::<Vec<_>>();
+    let painted_text = output
+      .shapes
+      .iter()
+      .filter_map(|clipped| match &clipped.shape {
+        egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+        _ => None,
+      })
+      .collect::<Vec<_>>();
     let (rect, link_clicked) = result.unwrap();
-    (rect, link_clicked, opened, output.platform_output.cursor_icon)
+    (rect, link_clicked, opened, output.platform_output.cursor_icon, painted_text)
   };
 
   let (rect, ..) = frame(Vec::new());
   let pos = at(rect);
   // A new tooltip area is invisible in its first frame, so the pointer stays on the link for a few frames.
-  let (_, _, _, cursor) = frame(vec![Event::PointerMoved(pos)]);
+  let (_, _, _, cursor, _) = frame(vec![Event::PointerMoved(pos)]);
   frame(Vec::new());
-  frame(Vec::new());
+  let (.., painted_text) = frame(Vec::new());
   let tooltip = ctx.memory(|mem| mem.areas().visible_layer_ids().iter().any(|layer| layer.order == Order::Tooltip));
   let button = |pressed| Event::PointerButton { pos, button, pressed, modifiers: Modifiers::NONE };
   frame(vec![button(true)]);
-  let (_, link_clicked, opened, _) = frame(vec![button(false)]);
+  let (_, link_clicked, opened, ..) = frame(vec![button(false)]);
   let (urls, new_tabs) = opened.into_iter().unzip();
-  Interaction { cursor, tooltip, link_clicked, urls, new_tabs }
+  Interaction { cursor, tooltip, painted_text, link_clicked, urls, new_tabs }
 }
 
 /// A table with one header cell and one body cell that holds `link`.
@@ -252,6 +266,7 @@ fn a_link_with_a_title_in_a_paragraph_shows_a_tooltip() {
   let result = hover_and_click(text, None, false, |rect| pos2(rect.left() + 12.0, rect.center().y));
   assert_eq!(result.cursor, CursorIcon::PointingHand);
   assert!(result.tooltip);
+  assert!(result.painted_text.iter().any(|text| text == "Para title"), "{:?}", result.painted_text);
 }
 
 #[test]
@@ -497,7 +512,7 @@ fn a_click_on_a_linked_image_opens_the_link() {
     [(LINKED_LOGO.to_owned(), on_image as fn(Rect) -> Pos2), (table_with_link(LINKED_LOGO), on_cell_image)]
   {
     let handler = ClickRecorder::default();
-    let result = hover_and_click_in(&image_context(), &text, Some(&handler), false, PointerButton::Primary, at);
+    let result = hover_and_click_in(&image_context(), &text, Some(&handler), false, true, PointerButton::Primary, at);
     assert_eq!(result.cursor, CursorIcon::PointingHand, "{text:?}");
     assert_eq!(result.urls, ["https://site.example"], "{text:?}");
     assert_eq!(result.new_tabs, [false], "{text:?}");
@@ -513,22 +528,41 @@ fn a_middle_click_on_a_linked_image_opens_a_new_tab() {
   for (text, at) in
     [(LINKED_LOGO.to_owned(), on_image as fn(Rect) -> Pos2), (table_with_link(LINKED_LOGO), on_cell_image)]
   {
-    let result = hover_and_click_in(&image_context(), &text, None, false, PointerButton::Middle, at);
+    let result = hover_and_click_in(&image_context(), &text, None, false, true, PointerButton::Middle, at);
     assert_eq!(result.urls, ["https://site.example"], "{text:?}");
     assert_eq!(result.new_tabs, [true], "{text:?}");
   }
 }
 
-/// The tooltip of a linked image shows the title of the image, else the title of the link.
+/// The tooltip of a linked image shows the title of the image, else the title of the link. The label of a
+/// linked image paints no text, so the only text that paints is the text of the tooltip.
 #[cfg(feature = "images")]
 #[test]
 fn a_linked_image_with_a_title_shows_a_tooltip() {
-  for text in [
-    "[![logo](bytes://logo.png \"Logo\")](https://site.example)",
-    "[![logo](bytes://logo.png)](https://site.example \"Site\")",
+  for (text, tooltip) in [
+    ("[![logo](bytes://logo.png \"Logo\")](https://site.example)", "Logo"),
+    ("[![logo](bytes://logo.png)](https://site.example \"Site\")", "Site"),
+    ("[![logo](bytes://logo.png \"Logo\")](https://site.example \"Site\")", "Logo"),
   ] {
-    let result = hover_and_click_in(&image_context(), text, None, false, PointerButton::Primary, on_image);
+    let result = hover_and_click_in(&image_context(), text, None, false, true, PointerButton::Primary, on_image);
     assert!(result.tooltip, "{text:?}");
+    assert_eq!(result.painted_text, [tooltip], "{text:?}");
+  }
+}
+
+/// A label that is not interactable does not open a linked image, as for a link in the text.
+#[cfg(feature = "images")]
+#[test]
+fn a_click_on_a_linked_image_in_a_label_that_is_not_interactable_opens_nothing() {
+  for (text, at) in
+    [(LINKED_LOGO.to_owned(), on_image as fn(Rect) -> Pos2), (table_with_link(LINKED_LOGO), on_cell_image)]
+  {
+    let handler = ClickRecorder::default();
+    let result = hover_and_click_in(&image_context(), &text, Some(&handler), false, false, PointerButton::Primary, at);
+    assert_ne!(result.cursor, CursorIcon::PointingHand, "{text:?}");
+    assert!(result.urls.is_empty(), "{text:?}: {:?}", result.urls);
+    assert!(!result.link_clicked, "{text:?}");
+    assert!(handler.hrefs.borrow().is_empty(), "{text:?}");
   }
 }
 
@@ -540,18 +574,25 @@ fn an_image_without_a_link_is_not_a_link() {
     ("![logo](bytes://logo.png)".to_owned(), on_image as fn(Rect) -> Pos2),
     (table_with_link("![logo](bytes://logo.png)"), on_cell_image),
   ] {
-    let result = hover_and_click_in(&image_context(), &text, None, true, PointerButton::Primary, at);
+    let result = hover_and_click_in(&image_context(), &text, None, true, true, PointerButton::Primary, at);
     assert_ne!(result.cursor, CursorIcon::PointingHand, "{text:?}");
     assert!(result.urls.is_empty(), "{text:?}: {:?}", result.urls);
     assert!(!result.link_clicked, "{text:?}");
   }
 }
 
-/// A screen reader reads a linked image as a link with the alt text as its name.
+/// A screen reader reads a linked image as a link with the alt text as its name, or with the href as its name
+/// when the alt text is empty.
 #[cfg(feature = "images")]
 #[test]
 fn a_linked_image_is_an_accessible_link() {
-  for text in [LINKED_LOGO.to_owned(), table_with_link(LINKED_LOGO)] {
+  const NO_ALT: &str = "[![](bytes://logo.png)](https://site.example)";
+  for (text, name) in [
+    (LINKED_LOGO.to_owned(), "logo"),
+    (table_with_link(LINKED_LOGO), "logo"),
+    (NO_ALT.to_owned(), "https://site.example"),
+    (table_with_link(NO_ALT), "https://site.example"),
+  ] {
     let ctx = image_context();
     ctx.enable_accesskit();
     let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
@@ -562,7 +603,7 @@ fn a_linked_image_is_an_accessible_link() {
     let update = output.platform_output.accesskit_update.expect("no accessibility update");
     let links: Vec<_> =
       update.nodes.iter().filter(|(_, node)| node.role() == egui::Role::Link).map(|(_, node)| node.label()).collect();
-    assert_eq!(links, [Some("logo")], "{text:?}");
+    assert_eq!(links, [Some(name)], "{text:?}");
   }
 }
 

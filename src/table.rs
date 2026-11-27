@@ -13,7 +13,8 @@ use crate::style::{InlineCodeStyle, TableStyle};
 use crate::types::{Alignment, ImageLink, TableData, Token, TokenStyle};
 
 /// Render a markdown table using `egui_extras::TableBuilder`. Return the rect that the table allocated, and
-/// whether a link in a cell received a click.
+/// whether a link in a cell received a click. When `interactable` is `false`, an image in a link is a plain
+/// image.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn show_table(
   ui: &mut Ui,
@@ -24,6 +25,7 @@ pub(crate) fn show_table(
   inline_code_style: &InlineCodeStyle,
   table_style: &TableStyle,
   link_handler: Option<&dyn LinkHandler>,
+  interactable: bool,
 ) -> (Rect, bool) {
   let num_cols = data.alignments.len();
   if num_cols == 0 {
@@ -44,6 +46,7 @@ pub(crate) fn show_table(
     has_bold,
     inline_code_style,
     link_handler,
+    interactable,
     max_image_width: (ui.available_width() - pad[0] - pad[2]).max(0.0),
   };
   let measured = measure_table(ui, data, &cell_style, pad);
@@ -219,6 +222,8 @@ struct CellStyle<'a> {
   has_bold: bool,
   inline_code_style: &'a InlineCodeStyle,
   link_handler: Option<&'a dyn LinkHandler>,
+  /// Whether the label is interactable. An image in a link is a link only when it is.
+  interactable: bool,
   max_image_width: f32,
 }
 
@@ -320,7 +325,8 @@ fn render_cell(ui: &mut Ui, tokens: &[Token<'_>], style: &CellStyle, is_header: 
           CellPart::Text(run) => link_clicked |= render_text_run(ui, run, style, is_header),
           CellPart::Image { url, alt, title, link } => {
             let image = crate::image::sized_image(url, *size);
-            link_clicked |= crate::image::add_image(ui, image, alt, *title, *link, style.link_handler).1;
+            link_clicked |=
+              crate::image::add_image(ui, image, alt, *title, *link, style.link_handler, style.interactable).1;
           }
         }
       }

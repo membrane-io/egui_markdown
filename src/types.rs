@@ -307,8 +307,8 @@ mod size_tests {
   fn token_enum_size() {
     let size = std::mem::size_of::<Token<'_>>();
     // The Link and Image variants set the size. Each holds 3 CowStr fields. Link also holds a TokenStyle,
-    // and Image holds the size of an <img> tag and a Box of its link. A Box around these fields makes the
-    // size smaller, but it changes the public API.
+    // and Image holds the size of an <img> tag and its link in a public Box field, which keeps the variant
+    // small. A Box around the other fields also makes the size smaller, but it changes the public API.
     eprintln!("Token size: {size} bytes");
     assert!(size <= 88, "Token grew unexpectedly: {size} bytes");
   }

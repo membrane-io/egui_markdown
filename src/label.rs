@@ -927,6 +927,7 @@ impl<'a> MarkdownLabel<'a> {
             &style.inline_code,
             &style.table,
             self.link_handler,
+            self.interactable,
           );
           out.add(rect);
           out.link_clicked |= link_clicked;
@@ -999,8 +1000,15 @@ impl<'a> MarkdownLabel<'a> {
           } else {
             egui::Image::new(url.as_ref()).max_width(ui.available_width()).show_loading_spinner(true)
           };
-          let (response, clicked) =
-            crate::image::add_image(ui, image, alt, title.as_deref(), link.as_deref(), self.link_handler);
+          let (response, clicked) = crate::image::add_image(
+            ui,
+            image,
+            alt,
+            title.as_deref(),
+            link.as_deref(),
+            self.link_handler,
+            self.interactable,
+          );
           out.add(response.rect);
           out.link_clicked |= clicked;
           cache_block_height(ui, block_sz_id, revision, i, || hash_block(&tokens[i], style, font), before_y);

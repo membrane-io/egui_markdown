@@ -34,6 +34,9 @@ fn append_text<'s>(slot: &mut Option<CowStr<'s>>, text: CowStr<'s>) {
 struct OpenLink<'s> {
   href: CowStr<'s>,
   title: Option<CowStr<'s>>,
+  /// The style around the link. Each [`Token::Link`] of the link gets it, also the text after an image in a
+  /// style that starts in the link.
+  style: TokenStyle,
   /// The text of the link after its start, or after the last image in it.
   text: Option<CowStr<'s>>,
   /// Whether the link holds an image.
@@ -41,25 +44,25 @@ struct OpenLink<'s> {
 }
 
 impl<'s> OpenLink<'s> {
-  fn new(href: CowStr<'s>, title: CowStr<'s>) -> Self {
-    Self { href, title: if title.is_empty() { None } else { Some(title) }, text: None, has_image: false }
+  fn new(href: CowStr<'s>, title: CowStr<'s>, style: TokenStyle) -> Self {
+    Self { href, title: if title.is_empty() { None } else { Some(title) }, style, text: None, has_image: false }
   }
 
   /// Push the text of the link after its start, or after the last image in it, as a [`Token::Link`]. Text
   /// that is empty gives no token.
-  fn push_text(&mut self, style: &TokenStyle, tokens: &mut Vec<Token<'s>>) {
+  fn push_text(&mut self, tokens: &mut Vec<Token<'s>>) {
     if let Some(text) = self.text.take().filter(|text| !text.is_empty()) {
-      tokens.push(Token::Link { text, href: self.href.clone(), title: self.title.clone(), style: style.clone() });
+      tokens.push(Token::Link { text, href: self.href.clone(), title: self.title.clone(), style: self.style.clone() });
     }
   }
 
   /// Push the last text of the link at its end. A link with no text and no image, such as `[](url)`, gives a
   /// [`Token::Link`] with empty text.
-  fn end(mut self, style: &TokenStyle, tokens: &mut Vec<Token<'s>>) {
+  fn end(mut self, tokens: &mut Vec<Token<'s>>) {
     if self.text.as_ref().is_none_or(|text| text.is_empty()) && !self.has_image {
-      tokens.push(Token::Link { text: CowStr::Borrowed(""), href: self.href, title: self.title, style: style.clone() });
+      tokens.push(Token::Link { text: CowStr::Borrowed(""), href: self.href, title: self.title, style: self.style });
     } else {
-      self.push_text(style, tokens);
+      self.push_text(tokens);
     }
   }
 }
@@ -71,12 +74,11 @@ fn push_image<'s>(
   url: Option<CowStr<'s>>,
   title: Option<CowStr<'s>>,
   link: Option<&mut OpenLink<'s>>,
-  style: &TokenStyle,
   tokens: &mut Vec<Token<'s>>,
 ) {
   let Some(url) = url else { return };
   let link = link.map(|link| {
-    link.push_text(style, tokens);
+    link.push_text(tokens);
     link.has_image = true;
     Box::new(ImageLink { href: link.href.clone(), title: link.title.clone() })
   });
@@ -800,14 +802,7 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
         }
         Event::End(TagEnd::Image) => {
           in_image = false;
-          push_image(
-            image_alt.take(),
-            image_url.take(),
-            image_title.take(),
-            link.as_mut(),
-            &current_style,
-            &mut current_cell,
-          );
+          push_image(image_alt.take(), image_url.take(), image_title.take(), link.as_mut(), &mut current_cell);
           continue;
         }
         Event::Code(text) => {
@@ -862,14 +857,14 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
         // CommonMark makes a link in the description of an image part of the alt text.
         Event::Start(Tag::Link { dest_url, title, .. }) => {
           if !in_image {
-            link = Some(OpenLink::new(dest_url.clone(), title.clone()));
+            link = Some(OpenLink::new(dest_url.clone(), title.clone(), current_style.clone()));
           }
           continue;
         }
         Event::End(TagEnd::Link) => {
           if !in_image {
             if let Some(link) = link.take() {
-              link.end(&current_style, &mut current_cell);
+              link.end(&mut current_cell);
             }
           }
           continue;
@@ -1036,7 +1031,7 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
         // CommonMark makes a link in the description of an image part of the alt text.
         Tag::Link { dest_url, title, .. } => {
           if !in_image {
-            link = Some(OpenLink::new(dest_url, title));
+            link = Some(OpenLink::new(dest_url, title, current_style.clone()));
           }
         }
         Tag::Image { dest_url, title, .. } => {
@@ -1096,13 +1091,13 @@ fn parse_into<'s>(s: &'s str, tokens: &mut Vec<Token<'s>>) {
         TagEnd::Link => {
           if !in_image {
             if let Some(link) = link.take() {
-              link.end(&current_style, tokens);
+              link.end(tokens);
             }
           }
         }
         TagEnd::Image => {
           in_image = false;
-          push_image(image_alt.take(), image_url.take(), image_title.take(), link.as_mut(), &current_style, tokens);
+          push_image(image_alt.take(), image_url.take(), image_title.take(), link.as_mut(), tokens);
         }
         TagEnd::HtmlBlock => {
           if let Some(html) = html_block.take() {
@@ -2156,6 +2151,24 @@ mod tests {
       describe(&md.tokens),
       [r#"link "see " https://site"#, r#"image "logo" img.png in https://site"#, r#"link " here" https://site"#]
     );
+  }
+
+  /// Each link token around an image keeps the style around the link, as a link without an image does. A
+  /// style inside the link does not change the style of a part.
+  #[test]
+  fn the_text_around_an_image_in_a_link_keeps_the_style_around_the_link() {
+    for (text, bold) in [("[**bold ![a](u) x**](t)", false), ("**[bold ![a](u) x](t)**", true)] {
+      let md = parse(text);
+      let styles: Vec<_> = md
+        .tokens
+        .iter()
+        .filter_map(|t| match t {
+          Token::Link { text, style, .. } => Some((text.to_string(), style.bold)),
+          _ => None,
+        })
+        .collect();
+      assert_eq!(styles, [("bold ".to_owned(), bold), (" x".to_owned(), bold)], "{text:?}");
+    }
   }
 
   /// CommonMark makes the text of a link in an image description part of the alt text.

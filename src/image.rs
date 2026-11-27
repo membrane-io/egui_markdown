@@ -37,7 +37,8 @@ pub(crate) fn image_size(ui: &Ui, url: &str, width: Option<u16>, height: Option<
 /// Add `image` to `ui`. Return its response, and whether a click on it opened a link.
 ///
 /// An image in a link is a link to the href of the link: it has the hover, the tooltip and the click of a
-/// link, and the accessibility role of a link with the alt text as its name. The tooltip text comes from
+/// link, and the accessibility role of a link with the alt text as its name, else the href when the alt text
+/// is empty. When the label is not `interactable`, an image in a link is a plain image. The tooltip text comes from
 /// [`crate::layout::link_tooltip`] with the title of the image, else the title of the link. A browser does
 /// the same for `<a title><img title></a>`: it shows the title of the element under the pointer, and the
 /// title of the link when the image has none.
@@ -48,11 +49,13 @@ pub(crate) fn add_image(
   title: Option<&str>,
   link: Option<&ImageLink<'_>>,
   handler: Option<&dyn LinkHandler>,
+  interactable: bool,
 ) -> (egui::Response, bool) {
-  let Some(link) = link else { return (ui.add(image), false) };
+  let Some(link) = link.filter(|_| interactable) else { return (ui.add(image), false) };
   let mut response = ui.add(image.sense(egui::Sense::click()));
   let enabled = ui.is_enabled();
-  response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Link, enabled, alt));
+  let name = if alt.is_empty() { link.href.as_ref() } else { alt };
+  response.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Link, enabled, name));
   response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
   if let Some(tooltip) = crate::layout::link_tooltip(ui, handler, &link.href, title.or(link.title.as_deref())) {
     response = response.on_hover_text_at_pointer(tooltip);
