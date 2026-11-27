@@ -146,6 +146,8 @@ struct Interaction {
   tooltip: bool,
   link_clicked: bool,
   urls: Vec<String>,
+  /// The `new_tab` of each `OpenUrl` command of the click.
+  new_tabs: Vec<bool>,
 }
 
 /// Render `text` with `handler`, move the pointer to the point that `at` picks from the label rect, and
@@ -156,7 +158,18 @@ fn hover_and_click(
   url_in_tooltip: bool,
   at: impl Fn(Rect) -> Pos2,
 ) -> Interaction {
-  let ctx = Context::default();
+  hover_and_click_in(&Context::default(), text, handler, url_in_tooltip, PointerButton::Primary, at)
+}
+
+/// As `hover_and_click`, in `ctx`, with a click of `button`.
+fn hover_and_click_in(
+  ctx: &Context,
+  text: &str,
+  handler: Option<&dyn LinkHandler>,
+  url_in_tooltip: bool,
+  button: PointerButton,
+  at: impl Fn(Rect) -> Pos2,
+) -> Interaction {
   ctx.global_style_mut(|style| {
     style.url_in_tooltip = url_in_tooltip;
     style.interaction.tooltip_delay = 0.0;
@@ -175,17 +188,17 @@ fn hover_and_click(
       result = Some((out.response.rect, out.link_clicked));
     });
     output.textures_delta.clear();
-    let urls = output
+    let opened = output
       .platform_output
       .commands
       .iter()
       .filter_map(|command| match command {
-        OutputCommand::OpenUrl(open) => Some(open.url.clone()),
+        OutputCommand::OpenUrl(open) => Some((open.url.clone(), open.new_tab)),
         _ => None,
       })
       .collect::<Vec<_>>();
     let (rect, link_clicked) = result.unwrap();
-    (rect, link_clicked, urls, output.platform_output.cursor_icon)
+    (rect, link_clicked, opened, output.platform_output.cursor_icon)
   };
 
   let (rect, ..) = frame(Vec::new());
@@ -195,11 +208,11 @@ fn hover_and_click(
   frame(Vec::new());
   frame(Vec::new());
   let tooltip = ctx.memory(|mem| mem.areas().visible_layer_ids().iter().any(|layer| layer.order == Order::Tooltip));
-  let button =
-    |pressed| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+  let button = |pressed| Event::PointerButton { pos, button, pressed, modifiers: Modifiers::NONE };
   frame(vec![button(true)]);
-  let (_, link_clicked, urls, _) = frame(vec![button(false)]);
-  Interaction { cursor, tooltip, link_clicked, urls }
+  let (_, link_clicked, opened, _) = frame(vec![button(false)]);
+  let (urls, new_tabs) = opened.into_iter().unzip();
+  Interaction { cursor, tooltip, link_clicked, urls, new_tabs }
 }
 
 /// A table with one header cell and one body cell that holds `link`.
@@ -391,4 +404,197 @@ fn an_image_link_uses_the_font_of_the_label() {
     output.textures_delta.clear();
   }
   assert!(height >= 40.0, "{height}");
+}
+
+/// A link around an image. Without the `images` feature, the image shows as a link with its alt text.
+#[cfg(not(feature = "images"))]
+const LINKED_IMAGE: &str = "[![logo](https://img.example/a.png)](https://site.example)";
+
+/// Without the `images` feature, a linked image shows as a link to the link around it, not to the image.
+#[cfg(not(feature = "images"))]
+#[test]
+fn a_click_on_a_linked_image_link_opens_the_link() {
+  for (text, at) in
+    [(LINKED_IMAGE.to_owned(), on_first_row as fn(Rect) -> Pos2), (table_with_link(LINKED_IMAGE), on_cell_link)]
+  {
+    let result = hover_and_click(&text, None, false, at);
+    assert_eq!(result.cursor, CursorIcon::PointingHand, "{text:?}");
+    assert_eq!(result.urls, ["https://site.example"], "{text:?}");
+    assert_eq!(result.new_tabs, [false], "{text:?}");
+    assert!(result.link_clicked, "{text:?}");
+  }
+}
+
+/// Without the `images` feature, a linked image link is a markdown link, so it uses the link handler.
+#[cfg(not(feature = "images"))]
+#[test]
+fn a_linked_image_link_uses_the_link_handler() {
+  for (text, at) in
+    [(LINKED_IMAGE.to_owned(), on_first_row as fn(Rect) -> Pos2), (table_with_link(LINKED_IMAGE), on_cell_link)]
+  {
+    let hover = HoverTextRecorder::default();
+    assert!(hover_and_click(&text, Some(&hover), false, at).tooltip, "{text:?}");
+    assert!(
+      hover.hrefs.borrow().iter().any(|href| href == "https://site.example"),
+      "{text:?}: {:?}",
+      hover.hrefs.borrow()
+    );
+    let click = ClickRecorder::default();
+    let result = hover_and_click(&text, Some(&click), false, at);
+    assert_eq!(*click.hrefs.borrow(), ["https://site.example"], "{text:?}");
+    assert_eq!(result.urls, ["https://site.example"], "{text:?}");
+  }
+}
+
+/// A PNG image of `width` by `height` pixels.
+#[cfg(feature = "images")]
+fn png(width: u32, height: u32) -> Vec<u8> {
+  let image = image::RgbaImage::from_pixel(width, height, image::Rgba([200, 30, 30, 255]));
+  let mut bytes = std::io::Cursor::new(Vec::new());
+  image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+  bytes.into_inner()
+}
+
+/// A context with the image loaders and a 60 by 60 image at `bytes://logo.png`. The loader decodes the image
+/// on a thread, so the function waits until the image is ready.
+#[cfg(feature = "images")]
+fn image_context() -> Context {
+  let ctx = Context::default();
+  egui_extras::install_image_loaders(&ctx);
+  ctx.include_bytes("bytes://logo.png", png(60, 60));
+  for _ in 0..1000 {
+    if matches!(ctx.try_load_image("bytes://logo.png", Default::default()), Ok(egui::load::ImagePoll::Ready { .. })) {
+      return ctx;
+    }
+    std::thread::sleep(std::time::Duration::from_millis(5));
+  }
+  panic!("the image did not load");
+}
+
+/// A link around the image of [`image_context`].
+#[cfg(feature = "images")]
+const LINKED_LOGO: &str = "[![logo](bytes://logo.png)](https://site.example)";
+
+/// A point on a label that holds only the image of [`image_context`].
+#[cfg(feature = "images")]
+fn on_image(rect: Rect) -> Pos2 {
+  rect.center()
+}
+
+/// A point on the image in the body cell of [`table_with_link`]. The image is 60 points tall, at the vertical
+/// center of its row, and the table has 4 points of space under it.
+#[cfg(feature = "images")]
+fn on_cell_image(rect: Rect) -> Pos2 {
+  pos2(rect.left() + 30.0, rect.bottom() - 4.0 - 30.0)
+}
+
+/// With the `images` feature, a linked image is a link: the pointer is a hand, and a click opens the link
+/// and calls the link handler.
+#[cfg(feature = "images")]
+#[test]
+fn a_click_on_a_linked_image_opens_the_link() {
+  for (text, at) in
+    [(LINKED_LOGO.to_owned(), on_image as fn(Rect) -> Pos2), (table_with_link(LINKED_LOGO), on_cell_image)]
+  {
+    let handler = ClickRecorder::default();
+    let result = hover_and_click_in(&image_context(), &text, Some(&handler), false, PointerButton::Primary, at);
+    assert_eq!(result.cursor, CursorIcon::PointingHand, "{text:?}");
+    assert_eq!(result.urls, ["https://site.example"], "{text:?}");
+    assert_eq!(result.new_tabs, [false], "{text:?}");
+    assert!(result.link_clicked, "{text:?}");
+    assert_eq!(*handler.hrefs.borrow(), ["https://site.example"], "{text:?}");
+  }
+}
+
+/// As with `egui::Hyperlink`, the middle button opens a linked image in a new tab.
+#[cfg(feature = "images")]
+#[test]
+fn a_middle_click_on_a_linked_image_opens_a_new_tab() {
+  for (text, at) in
+    [(LINKED_LOGO.to_owned(), on_image as fn(Rect) -> Pos2), (table_with_link(LINKED_LOGO), on_cell_image)]
+  {
+    let result = hover_and_click_in(&image_context(), &text, None, false, PointerButton::Middle, at);
+    assert_eq!(result.urls, ["https://site.example"], "{text:?}");
+    assert_eq!(result.new_tabs, [true], "{text:?}");
+  }
+}
+
+/// The tooltip of a linked image shows the title of the image, else the title of the link.
+#[cfg(feature = "images")]
+#[test]
+fn a_linked_image_with_a_title_shows_a_tooltip() {
+  for text in [
+    "[![logo](bytes://logo.png \"Logo\")](https://site.example)",
+    "[![logo](bytes://logo.png)](https://site.example \"Site\")",
+  ] {
+    let result = hover_and_click_in(&image_context(), text, None, false, PointerButton::Primary, on_image);
+    assert!(result.tooltip, "{text:?}");
+  }
+}
+
+/// With the `images` feature, an image that is not in a link is not a link.
+#[cfg(feature = "images")]
+#[test]
+fn an_image_without_a_link_is_not_a_link() {
+  for (text, at) in [
+    ("![logo](bytes://logo.png)".to_owned(), on_image as fn(Rect) -> Pos2),
+    (table_with_link("![logo](bytes://logo.png)"), on_cell_image),
+  ] {
+    let result = hover_and_click_in(&image_context(), &text, None, true, PointerButton::Primary, at);
+    assert_ne!(result.cursor, CursorIcon::PointingHand, "{text:?}");
+    assert!(result.urls.is_empty(), "{text:?}: {:?}", result.urls);
+    assert!(!result.link_clicked, "{text:?}");
+  }
+}
+
+/// A screen reader reads a linked image as a link with the alt text as its name.
+#[cfg(feature = "images")]
+#[test]
+fn a_linked_image_is_an_accessible_link() {
+  for text in [LINKED_LOGO.to_owned(), table_with_link(LINKED_LOGO)] {
+    let ctx = image_context();
+    ctx.enable_accesskit();
+    let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+    let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      MarkdownLabel::new(Id::NULL.with("a11y"), &text).show(ui);
+    });
+    output.textures_delta.clear();
+    let update = output.platform_output.accesskit_update.expect("no accessibility update");
+    let links: Vec<_> =
+      update.nodes.iter().filter(|(_, node)| node.role() == egui::Role::Link).map(|(_, node)| node.label()).collect();
+    assert_eq!(links, [Some("logo")], "{text:?}");
+  }
+}
+
+/// The height of the label of `text` in `ctx`.
+fn label_height(ctx: &Context, text: &str) -> f32 {
+  let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 400.0));
+  let mut height = 0.0;
+  for _ in 0..2 {
+    let mut output = ctx.run_ui(RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+      let mut child = ui.new_child(UiBuilder::new().max_rect(screen));
+      height =
+        MarkdownLabel::new(Id::NULL.with("height"), text).hug_content(true).show(&mut child).response.rect.height();
+    });
+    output.textures_delta.clear();
+  }
+  height
+}
+
+/// A link around an image adds no row to the image.
+#[test]
+fn a_linked_image_is_as_tall_as_the_image() {
+  #[cfg(feature = "images")]
+  let (ctx, url) = (image_context(), "bytes://logo.png");
+  #[cfg(not(feature = "images"))]
+  let (ctx, url) = (Context::default(), "https://img.example/a.png");
+  for (image, linked) in [
+    (format!("![logo]({url})"), format!("[![logo]({url})](https://site.example)")),
+    (
+      format!("Before.\n\n![logo]({url})\n\nAfter."),
+      format!("Before.\n\n[![logo]({url})](https://site.example)\n\nAfter."),
+    ),
+  ] {
+    assert_eq!(label_height(&ctx, &linked), label_height(&ctx, &image), "{linked:?}");
+  }
 }

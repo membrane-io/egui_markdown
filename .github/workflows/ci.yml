@@ -64,6 +64,10 @@ jobs:
         if: always()
         run: cargo test --no-default-features --no-fail-fast
 
+      - name: Test (images)
+        if: always()
+        run: cargo test --features images --no-fail-fast
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         if: always()
